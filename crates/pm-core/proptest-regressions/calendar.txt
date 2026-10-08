@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c7a35dd661fa7895eb0524e1f7fb2a033a10a06157e4d2f36777c829d9db275e # shrinks to c = Calendar { week: [DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([WorkRange { start: 0, end: 1 }])], exceptions: {} }, t = Moment(29852640)
+cc 5544669b2e8bcaa578050a9befb3a9279ea7d2462854d81f734d1bf215da8ae4 # shrinks to c = Calendar { week: [DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([WorkRange { start: 0, end: 1 }])], exceptions: {} }, t = Moment(29852640), d = 0
+cc 08bdda48d1981dac6b9cae76270e6c4e338ccdf6094504c02f449be04a61195b # shrinks to c = Calendar { week: [DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([WorkRange { start: 0, end: 1 }])], exceptions: {} }, t = Moment(29852640), a = 0, b = 0
+cc 0f0965cd573aadacc3a3b859181ce723831b56b63594c76e17feb4279ed081d3 # shrinks to c = Calendar { week: [DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([]), DayPattern([WorkRange { start: 0, end: 1 }]), DayPattern([])], exceptions: {} }, t = Moment(29852640), a = 1, b = 1

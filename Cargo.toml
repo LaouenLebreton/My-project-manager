@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["crates/pm-core", "crates/pm-store", "crates/pm-interop", "apps/desktop/src-tauri"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+pm-core = { path = "crates/pm-core" }
+pm-store = { path = "crates/pm-store" }
+pm-interop = { path = "crates/pm-interop" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+proptest = "1.11"
