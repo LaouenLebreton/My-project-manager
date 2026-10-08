@@ -3,6 +3,7 @@ import { errorMessage, type Edit, type Snapshot } from "./api";
 import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
 import { formatDate, formatDateTime, formatDays } from "./format";
+import { GLOSSARY, type Term } from "./help";
 
 import { HEADER_HEIGHT, ROW_HEIGHT } from "./Gantt";
 
@@ -17,6 +18,10 @@ interface Column {
   /** Text placed in the editor, and the edit to send. Absent for read-only columns. */
   edit?: { initial: (r: Row) => string; make: (r: Row, text: string) => Edit };
   title?: (r: Row) => string;
+  /** "What does this mean?" for the header. */
+  help?: Term;
+  /** Anchor for the first-run tour. */
+  tour?: string;
 }
 
 const COLUMNS: Column[] = [
@@ -25,6 +30,7 @@ const COLUMNS: Column[] = [
   {
     label: "Task Name",
     width: "minmax(160px, 1fr)",
+    tour: "name",
     text: (r) => r.name,
     edit: { initial: (r) => r.name, make: (r, text) => ({ kind: "RenameTask", id: r.id, name: text }) },
   },
@@ -32,6 +38,7 @@ const COLUMNS: Column[] = [
     label: "Duration",
     width: "84px",
     align: "right",
+    help: "duration",
     text: (r, perDay) => (r.isMilestone ? "0 days" : formatDays(r.durationMinutes, perDay)),
     edit: { initial: (r) => r.durationText, make: (r, text) => ({ kind: "SetDuration", id: r.id, text }) },
   },
@@ -40,10 +47,12 @@ const COLUMNS: Column[] = [
   {
     label: "Predecessors",
     width: "116px",
+    help: "predecessors",
+    tour: "predecessors",
     text: (r) => r.predecessors,
     edit: { initial: (r) => r.predecessors, make: (r, text) => ({ kind: "SetPredecessors", id: r.id, text }) },
   },
-  { label: "Slack", width: "76px", align: "right", text: (r, perDay) => formatDays(r.totalSlackMinutes, perDay) },
+  { label: "Slack", width: "76px", align: "right", help: "slack", text: (r, perDay) => formatDays(r.totalSlackMinutes, perDay) },
 ];
 const NAME_COL = 2;
 const TEMPLATE = COLUMNS.map((c) => c.width).join(" ");
@@ -62,6 +71,10 @@ export interface GridProps {
 export interface GridHandle {
   selectRow: (row: number) => void;
   scrollBy: (dy: number) => void;
+  /** For the command bar: act on the selection. */
+  indent: (outdent: boolean) => void;
+  addTaskBelow: () => void;
+  deleteSelection: () => void;
 }
 
 interface Editing {
@@ -146,6 +159,11 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     },
     scrollBy: (dy: number) => {
       if (bodyRef.current) bodyRef.current.scrollTop += dy;
+    },
+    indent: (outdent: boolean) => indent(outdent),
+    addTaskBelow: () => void send({ kind: "AddTask", afterId: current?.id ?? rows.at(-1)?.id ?? null, name: "New task" }),
+    deleteSelection: () => {
+      if (selection.length) void send({ kind: "DeleteTasks", ids: selection.map((r) => r.id) });
     },
   }));
 
@@ -325,8 +343,9 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     >
       <div className="grid-header" role="row" aria-rowindex={1} style={{ gridTemplateColumns: TEMPLATE, height: HEADER_HEIGHT }}>
         {COLUMNS.map((c, i) => (
-          <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined}>
+          <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined} data-tour={c.tour}>
             {c.label}
+            {c.help && <HeaderHelp term={c.help} />}
           </div>
         ))}
       </div>
@@ -425,4 +444,31 @@ function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDa
     );
   }
   return c.text(r, perDay);
+}
+
+/** A small "?" next to a column name that explains the term in plain words. */
+function HeaderHelp({ term }: { term: Term }) {
+  const [open, setOpen] = useState(false);
+  const g = GLOSSARY[term];
+  return (
+    <span className="header-help">
+      <button
+        className="help-button"
+        aria-label={`What does ${g.term} mean?`}
+        aria-expanded={open}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={() => setOpen(!open)}
+        onBlur={() => setOpen(false)}
+      >
+        ?
+      </button>
+      {open && (
+        <span role="tooltip" className="help-popover">
+          <strong>{g.term}</strong>
+          <br />
+          {g.text}
+        </span>
+      )}
+    </span>
+  );
 }

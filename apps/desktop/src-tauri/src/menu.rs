@@ -25,6 +25,7 @@ pub mod id {
     pub const FIND: &str = "edit.find";
     pub const COMMAND_BAR: &str = "view.command_bar";
     pub const HELP: &str = "help.contents";
+    pub const TOUR: &str = "help.tour";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
 }
@@ -138,7 +139,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .build()?;
 
     let view = SubmenuBuilder::new(app, "View")
-        .item(&item(app, id::COMMAND_BAR, "Show Command Bar", Some("CmdOrCtrl+K"))?)
+        .item(&enabled(id::COMMAND_BAR, "Show Command Bar", Some("CmdOrCtrl+K"))?)
         .separator()
         .fullscreen()
         .build()?;
@@ -150,7 +151,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .close_window()
         .build()?;
 
-    let mut help = SubmenuBuilder::new(app, "Help").item(&item(app, id::HELP, "Super PM Help", None)?);
+    let mut help = SubmenuBuilder::new(app, "Help")
+        .item(&enabled(id::HELP, "Super PM Help", Some("CmdOrCtrl+Shift+Slash"))?)
+        .item(&enabled(id::TOUR, "Show Tour", None)?);
     if cfg!(debug_assertions) {
         // Performance checks (spec section 3); not in release builds.
         let dev = |id, text| MenuItemBuilder::with_id(id, text).build(app);

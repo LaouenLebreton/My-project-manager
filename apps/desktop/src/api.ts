@@ -19,6 +19,8 @@ export const api = {
   /** Resolve with null when the user cancels the dialog. */
   newProject: () => invoke<Snapshot | null>("new_project"),
   openProject: () => invoke<Snapshot | null>("open_project"),
+  importProject: () => invoke<Snapshot | null>("import_project"),
+  exportProject: () => invoke<void>("export_project"),
   openRecent: (path: string) => invoke<Snapshot>("open_recent", { path }),
   recentFiles: () => invoke<RecentFile[]>("recent_files"),
   setTextEditing: (editing: boolean) => invoke<void>("set_text_editing", { editing }),

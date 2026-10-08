@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Edit, Snapshot } from "./api";
 import type { Row } from "./bindings/Row";
 import { formatDate } from "./format";
@@ -76,7 +76,14 @@ export interface GanttProps {
  * a task (start no earlier than), stretched at the right end to change the duration, or
  * dragged onto another row to link the two tasks. All dates come from the snapshot.
  */
-export function Gantt({ snapshot, scrollTop, selectedIds, onEdit, onSelectRow, onScrollBy, onMessage }: GanttProps) {
+export interface GanttHandle {
+  zoom: (factor: number) => void;
+}
+
+export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
+  { snapshot, scrollTop, selectedIds, onEdit, onSelectRow, onScrollBy, onMessage },
+  handle,
+) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 600, height: 400 });
@@ -92,6 +99,7 @@ export function Gantt({ snapshot, scrollTop, selectedIds, onEdit, onSelectRow, o
   };
   const [hover, setHover] = useState<{ row: number; zone: "bar" | "edge" } | null>(null);
   const rows = snapshot.rows;
+  useImperativeHandle(handle, () => ({ zoom: (f: number) => setPxPerDay((p) => Math.max(2, Math.min(120, p * f))) }));
 
   const origin = useMemo(() => Math.floor(dayValue(snapshot.project.start)) - 3, [snapshot.project.start]);
   const end = useMemo(
@@ -516,7 +524,7 @@ export function Gantt({ snapshot, scrollTop, selectedIds, onEdit, onSelectRow, o
         : "default";
 
   return (
-    <div ref={wrapRef} className="gantt" onWheel={onWheel}>
+    <div ref={wrapRef} className="gantt" onWheel={onWheel} data-tour="chart">
       <canvas
         ref={canvasRef}
         style={{ width: size.width, height: size.height, cursor }}
@@ -537,7 +545,7 @@ export function Gantt({ snapshot, scrollTop, selectedIds, onEdit, onSelectRow, o
       </div>
     </div>
   );
-}
+});
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();

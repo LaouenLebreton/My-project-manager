@@ -78,3 +78,10 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **Export** writes the supported subset plus computed start and finish dates, UIDs in outline order, and one base calendar with exceptions in the 2007+ format. Microsoft Project recalculates on open.
 - **Tests:** a round-trip property test (random projects with outlines, all link types, lags, constraints, notes with markup-like text and emoji, and calendar exceptions) checks that export then import keeps everything and reports nothing; a second export is byte-identical. A hand-written fixture in Microsoft Project 2016's style checks the report. **Real files from the owner are still needed** (spec section 8); the fixture is not real Microsoft Project output.
 - **Imported projects are saved as a new `.pmproj`** next to the XML by default; the XML file is never changed.
+
+## 2026-10-09, step 10 (first run, help, accessibility)
+
+- **First run** (once per machine): opens the sample project and starts a five-step tour that points at the real controls. Escape or Skip ends it; Help > Show Tour repeats it. The "seen" flag is in the web view's local storage: if that is cleared, the tour shows again, which is harmless.
+- **"What does this mean?"** (spec 5.1.7): a "?" next to Duration, Predecessors and Slack, and Help > Super PM Help (⌘?) with every term and keyboard shortcut. One source of wording (`src/help.ts`) for headers, Help and tour.
+- **⌘K command bar** (spec 5.1.2) with every command by name, including Undo and Redo with the action name. The View menu listed it, so it is built rather than left as a greyed-out item.
+- **Accessibility checklist** in `docs/accessibility-checklist.md`, run per release. Not yet run on the real app with VoiceOver; contrast has not been measured.

@@ -98,6 +98,8 @@ pub fn run() {
             ipc::open_project,
             ipc::open_recent,
             ipc::recent_files,
+            ipc::import_project,
+            ipc::export_project,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Super PM");

@@ -341,6 +341,18 @@ pub async fn open_project(app: AppHandle) -> Result<Option<Snapshot>, IpcError> 
     crate::actions::open_with_dialog(&app, None, "Open Project")
 }
 
+/// File > Import Microsoft Project XML. `None` if cancelled.
+#[tauri::command]
+pub async fn import_project(app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    crate::actions::import_with_dialog(&app)
+}
+
+/// File > Export as Microsoft Project XML.
+#[tauri::command]
+pub async fn export_project(app: AppHandle) -> Result<(), IpcError> {
+    crate::actions::export_with_dialog(&app).map(|_| ())
+}
+
 #[tauri::command]
 pub fn open_recent(path: String, app: AppHandle) -> Result<Snapshot, IpcError> {
     crate::actions::open_path(&app, std::path::Path::new(&path))

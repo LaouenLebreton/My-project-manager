@@ -414,3 +414,151 @@ dialog.report li {
   justify-content: flex-end;
   margin-top: 16px;
 }
+
+.header-help {
+  position: relative;
+  margin-left: 4px;
+}
+
+.help-button {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 13px;
+  vertical-align: 1px;
+  color: var(--text-secondary);
+}
+
+.help-popover {
+  position: absolute;
+  z-index: 5;
+  top: 20px;
+  right: -8px;
+  width: 260px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: Canvas;
+  color: var(--text);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.35;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+  border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+}
+
+.glossary div {
+  margin: 6px 0;
+}
+
+.glossary dt {
+  font-weight: 600;
+}
+
+.glossary dd {
+  margin: 0;
+}
+
+.shortcuts th {
+  text-align: left;
+  font-weight: 500;
+  padding: 2px 16px 2px 0;
+  white-space: nowrap;
+}
+
+.tour-highlight {
+  position: fixed;
+  z-index: 20;
+  border: 2px solid AccentColor;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.tour {
+  position: fixed;
+  z-index: 21;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: Canvas;
+  color: var(--text);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.35);
+  border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+  outline: none;
+}
+
+.tour h2 {
+  font-size: 1em;
+  margin: 2px 0 4px;
+}
+
+.tour p {
+  margin: 0 0 4px;
+}
+
+.tour-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.command-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.command-bar {
+  width: min(520px, 90vw);
+  border-radius: 12px;
+  background: Canvas;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+  overflow: hidden;
+}
+
+.command-input {
+  width: 100%;
+  font: inherit;
+  font-size: 1.15em;
+  padding: 12px 14px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.command-bar ul {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.command-bar li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.command-bar li.selected {
+  background: AccentColor;
+  color: AccentColorText;
+}
+
+.command-bar kbd {
+  font: inherit;
+  opacity: 0.7;
+}

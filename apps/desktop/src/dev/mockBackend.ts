@@ -12,6 +12,8 @@ declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
     __mock?: { edits: Edit[]; textEditing: boolean[]; rows: Row[]; links: Link[] };
+    /** Test hook: send an event as the Rust side would, e.g. a menu item id. */
+    __mockEmit?: (event: string, payload: unknown) => void;
   }
 }
 
@@ -124,12 +126,14 @@ export function install() {
 
   // Events: enough of Tauri's event plumbing for `listen()` to work.
   const callbacks = new Map<number, (e: unknown) => void>();
-  const listeners: { event: string; handler: number }[] = [];
+  const listeners = new Map<number, { event: string; handler: number }>();
+  let nextListener = 1;
   let nextCallback = 1;
   const emit = (event: string, payload: unknown) => {
-    for (const l of listeners) if (l.event === event) callbacks.get(l.handler)?.({ event, id: 0, payload });
+    for (const l of listeners.values()) if (l.event === event) callbacks.get(l.handler)?.({ event, id: 0, payload });
   };
-  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+  window.__mockEmit = emit;
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_event: string, id: number) => void listeners.delete(id) };
   window.__TAURI_INTERNALS__ = {
     transformCallback: (cb: (e: unknown) => void) => {
       const id = nextCallback++;
@@ -138,8 +142,9 @@ export function install() {
     },
     invoke: async (cmd: string, args: Record<string, unknown>) => {
       if (cmd === "plugin:event|listen") {
-        listeners.push({ event: args.event as string, handler: args.handler as number });
-        return listeners.length;
+        const id = nextListener++;
+        listeners.set(id, { event: args.event as string, handler: args.handler as number });
+        return id;
       }
       if (cmd.startsWith("plugin:event")) return 1;
       switch (cmd) {
@@ -149,6 +154,8 @@ export function install() {
           return [{ name: "Office Move", path: "/Users/me/Documents/Office Move.pmproj" }];
         case "new_project":
         case "open_project":
+        case "import_project":
+        case "export_project":
           return null; // as if the user cancelled the dialog
         case "open_recent":
         case "open_sample":
