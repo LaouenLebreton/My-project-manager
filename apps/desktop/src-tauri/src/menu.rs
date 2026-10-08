@@ -1,7 +1,9 @@
 //! Native menu bar. Custom items are disabled until the feature behind them exists,
 //! so the menu never offers an action that does nothing.
 
-use tauri::menu::{Menu, MenuItem, MenuItemBuilder, SubmenuBuilder};
+use std::path::PathBuf;
+
+use tauri::menu::{Menu, MenuItem, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder};
 use tauri::{AppHandle, Runtime, Wry};
 
 use crate::platform;
@@ -10,6 +12,9 @@ use crate::platform;
 pub mod id {
     pub const NEW: &str = "file.new";
     pub const OPEN: &str = "file.open";
+    pub const OPEN_BACKUP: &str = "file.open_backup";
+    /// Open Recent items are this prefix followed by the file path.
+    pub const RECENT_PREFIX: &str = "recent:";
     pub const CLEAR_RECENT: &str = "file.recent.clear";
     pub const SAVE_COPY: &str = "file.save_copy";
     pub const IMPORT: &str = "file.import";
@@ -41,6 +46,8 @@ fn item<R: Runtime>(
 pub struct MenuHandles {
     undo: MenuItem<Wry>,
     redo: MenuItem<Wry>,
+    save_copy: MenuItem<Wry>,
+    recent: Submenu<Wry>,
 }
 
 impl MenuHandles {
@@ -51,6 +58,35 @@ impl MenuHandles {
             let _ = item.set_enabled(label.is_some());
         }
     }
+
+    /// Items that need an open project.
+    pub fn set_document_open(&self, open: bool) {
+        let _ = self.save_copy.set_enabled(open);
+    }
+
+    /// Rebuilds File > Open Recent: file names, then Clear Menu.
+    pub fn set_recent(&self, app: &AppHandle, paths: &[PathBuf]) {
+        if let Ok(items) = self.recent.items() {
+            for item in items {
+                let _ = self.recent.remove(&item);
+            }
+        }
+        for path in paths {
+            let label = crate::files::display_name(path);
+            let id = format!("{}{}", id::RECENT_PREFIX, path.display());
+            if let Ok(item) = MenuItemBuilder::with_id(id, label).build(app) {
+                let _ = self.recent.append(&item);
+            }
+        }
+        if !paths.is_empty()
+            && let Ok(sep) = PredefinedMenuItem::separator(app)
+        {
+            let _ = self.recent.append(&sep);
+        }
+        if let Ok(clear) = MenuItemBuilder::with_id(id::CLEAR_RECENT, "Clear Menu").enabled(!paths.is_empty()).build(app) {
+            let _ = self.recent.append(&clear);
+        }
+    }
 }
 
 pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
@@ -58,13 +94,22 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&item(app, id::CLEAR_RECENT, "Clear Menu", None)?)
         .build()?;
 
+    let enabled = |id: &str, text: &str, accelerator: Option<&str>| -> tauri::Result<MenuItem<Wry>> {
+        let mut b = MenuItemBuilder::with_id(id, text);
+        if let Some(a) = accelerator {
+            b = b.accelerator(a);
+        }
+        b.build(app)
+    };
+    let save_copy = item(app, id::SAVE_COPY, "Save a Copy…", Some("CmdOrCtrl+Shift+S"))?;
     let file = SubmenuBuilder::new(app, "File")
-        .item(&item(app, id::NEW, "New", Some("CmdOrCtrl+N"))?)
-        .item(&item(app, id::OPEN, "Open…", Some("CmdOrCtrl+O"))?)
+        .item(&enabled(id::NEW, "New Project…", Some("CmdOrCtrl+N"))?)
+        .item(&enabled(id::OPEN, "Open…", Some("CmdOrCtrl+O"))?)
         .item(&recent)
         .separator()
         .close_window()
-        .item(&item(app, id::SAVE_COPY, "Save a Copy…", Some("CmdOrCtrl+Shift+S"))?)
+        .item(&save_copy)
+        .item(&enabled(id::OPEN_BACKUP, "Open Backup…", None)?)
         .separator()
         .item(&item(app, id::IMPORT, "Import Microsoft Project XML…", None)?)
         .item(&item(app, id::EXPORT, "Export as Microsoft Project XML…", None)?)
@@ -121,5 +166,5 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    Ok((menu, MenuHandles { undo, redo }))
+    Ok((menu, MenuHandles { undo, redo, save_copy, recent }))
 }

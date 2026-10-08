@@ -29,6 +29,8 @@ pub struct Document {
     store: Store,
     pub project: Project,
     pub schedule: Result<Schedule, ScheduleError>,
+    /// Change-log position of the last backup, so unchanged projects are not copied again.
+    pub backed_up_seq: Option<i64>,
 }
 
 impl Document {
@@ -44,7 +46,7 @@ impl Document {
 
     fn new(path: &Path, store: Store, project: Project) -> Document {
         let schedule = schedule(&project);
-        Document { path: path.to_owned(), store, project, schedule }
+        Document { path: path.to_owned(), store, project, schedule, backed_up_seq: None }
     }
 
     pub fn apply(&mut self, cmd: &Command) -> Result<Applied, StoreError> {
@@ -71,6 +73,14 @@ impl Document {
 
     pub fn redo_label(&self) -> Option<String> {
         self.store.redo_label().ok().flatten()
+    }
+
+    pub fn last_seq(&self) -> i64 {
+        self.store.last_seq().unwrap_or(0)
+    }
+
+    pub fn save_copy(&self, path: &Path) -> Result<(), StoreError> {
+        self.store.save_copy(path)
     }
 
     fn reschedule(&mut self) {

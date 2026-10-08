@@ -110,6 +110,12 @@ export function install() {
       switch (cmd) {
         case "get_snapshot":
           return null;
+        case "recent_files":
+          return [{ name: "Office Move", path: "/Users/me/Documents/Office Move.pmproj" }];
+        case "new_project":
+        case "open_project":
+          return null; // as if the user cancelled the dialog
+        case "open_recent":
         case "open_sample":
         case "undo":
         case "redo":

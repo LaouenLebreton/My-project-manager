@@ -301,7 +301,7 @@ pub fn get_snapshot(state: State<AppState>) -> Option<Snapshot> {
 
 /// Opens the sample project, creating it in the app's data folder the first time.
 #[tauri::command]
-pub fn open_sample(app: AppHandle, state: State<AppState>) -> Result<Snapshot, IpcError> {
+pub fn open_sample(app: AppHandle) -> Result<Snapshot, IpcError> {
     let dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("Office Move (Sample).pmproj");
@@ -310,14 +310,12 @@ pub fn open_sample(app: AppHandle, state: State<AppState>) -> Result<Snapshot, I
     } else {
         Document::create(&path, crate::sample::office_move(this_monday_morning()))?
     };
-    let snap = changed(&app, &doc);
-    *state.doc.lock().expect("state lock") = Some(doc);
-    Ok(snap)
+    Ok(crate::actions::install(&app, doc))
 }
 
 /// Development builds only: opens a freshly generated project of `count` tasks.
 #[tauri::command]
-pub fn open_generated(count: u32, app: AppHandle, state: State<AppState>) -> Result<Snapshot, IpcError> {
+pub fn open_generated(count: u32, app: AppHandle) -> Result<Snapshot, IpcError> {
     if !cfg!(debug_assertions) {
         return Err(err("test projects are only available in development builds"));
     }
@@ -328,9 +326,39 @@ pub fn open_generated(count: u32, app: AppHandle, state: State<AppState>) -> Res
         let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
     }
     let doc = Document::create(&path, crate::sample::generated(count as usize, this_monday_morning()))?;
-    let snap = changed(&app, &doc);
-    *state.doc.lock().expect("state lock") = Some(doc);
-    Ok(snap)
+    Ok(crate::actions::install(&app, doc))
+}
+
+/// File > New Project: asks where to save, then creates and opens it. `None` if cancelled.
+#[tauri::command]
+pub async fn new_project(app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    crate::actions::new_with_dialog(&app)
+}
+
+/// File > Open. `None` if cancelled.
+#[tauri::command]
+pub async fn open_project(app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    crate::actions::open_with_dialog(&app, None, "Open Project")
+}
+
+#[tauri::command]
+pub fn open_recent(path: String, app: AppHandle) -> Result<Snapshot, IpcError> {
+    crate::actions::open_path(&app, std::path::Path::new(&path))
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct RecentFile {
+    pub name: String,
+    pub path: String,
+}
+
+#[tauri::command]
+pub fn recent_files(app: AppHandle) -> Vec<RecentFile> {
+    crate::files::recent(&app)
+        .into_iter()
+        .map(|p| RecentFile { name: crate::files::display_name(&p), path: p.display().to_string() })
+        .collect()
 }
 
 #[tauri::command]

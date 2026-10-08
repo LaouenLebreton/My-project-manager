@@ -57,3 +57,14 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **The chart is mouse-only for now.** Everything it does can also be done from the keyboard in the grid, except moving a task by date, which arrives with the constraint control. The canvas has a text description for VoiceOver.
 - **Debug builds only:** Help > Open Test Project (5,000 or 20,000 tasks) and an edit timing readout in the status bar, for the performance check.
 - **A dev-only mock backend** (`apps/desktop/src/dev/mockBackend.ts`) lets the UI run in a plain browser at `localhost:1420` (`?n=5000` generates a large project). It never loads inside Tauri or in release builds.
+
+## 2026-10-09, step 8 (projects as Mac documents)
+
+- **New Project asks where to save first,** then creates and opens the file. Every edit is saved immediately, so a project needs a home from the start; Final Cut Pro and Logic work this way. An "Untitled" project in a hidden folder that must be moved later was the alternative; it tends to lose track of files.
+- **One open project at a time.** Opening another project closes the current one, with a backup first; nothing is lost. A Mac document app normally opens one window per document; that needs per-window state, and is proposed for iteration 2.
+- **Closing the window closes the project and hides the window;** the app stays in the Dock. Clicking the Dock icon, File > New Project or File > Open brings the window back.
+- **Finder:** `.pmproj` is declared as an exported type (`app.superpm.desktop.project`, conforming to `public.database`), with Super PM as the owner. Double-clicking opens the file, but only in a built app (`tauri build`), not in `tauri dev`. Verified in the built `Info.plist`.
+- **Open Recent:** the last 10 projects that still exist, kept in `recent.json` in the app's config folder, with Clear Menu. The start screen lists them too.
+- **Local backups:** a timestamped copy in `~/Library/Application Support/app.superpm.desktop/Backups/<project name> (<id>)/` every 15 minutes if the project changed, and when it is closed, replaced or the app quits. The newest 20 per project are kept. File > Open Backup… opens one (it opens as its own file; to restore, use Save a Copy over the original, or keep working in the backup).
+- **Save a Copy** uses SQLite's backup API, so the copy is one complete file even while the project is open.
+- **tauri-plugin-dialog 2.7.3** rather than 2.8.1, which was released eight days ago. The dialogs run from Rust, so the web view needed no new permissions.

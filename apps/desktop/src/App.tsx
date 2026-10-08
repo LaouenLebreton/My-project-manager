@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { api, errorMessage, type Edit, type IpcError, type Snapshot } from "./api";
+import { api, errorMessage, type Edit, type IpcError, type RecentFile, type Snapshot } from "./api";
 import { formatDate } from "./format";
 import { Gantt } from "./Gantt";
 import { Grid, type GridHandle } from "./Grid";
@@ -15,9 +15,12 @@ export function App() {
   const [timing, setTiming] = useState<string | null>(null);
   const gridRef = useRef<GridHandle>(null);
 
-  const run = useCallback(async (action: () => Promise<Snapshot>) => {
+  const [recent, setRecent] = useState<RecentFile[]>([]);
+
+  const run = useCallback(async (action: () => Promise<Snapshot | null>) => {
     try {
-      setSnapshot(await action());
+      const result = await action();
+      if (result) setSnapshot(result); // null: the user cancelled a dialog
       setError(null);
     } catch (e) {
       setError(errorMessage(e));
@@ -61,6 +64,7 @@ export function App() {
 
   useEffect(() => {
     api.getSnapshot().then(setSnapshot, (e) => setError(errorMessage(e)));
+    api.recentFiles().then(setRecent, () => {});
     const subscriptions = [
       // Undo and Redo from the Edit menu run in Rust; the result arrives here.
       listen<Snapshot>("document-changed", (e) => {
@@ -68,6 +72,10 @@ export function App() {
         setError(null);
       }),
       listen<IpcError>("error", (e) => setError(e.payload.message)),
+      listen("document-closed", () => {
+        setSnapshot(null);
+        api.recentFiles().then(setRecent, () => {});
+      }),
       // While a cell is being edited, the menu's Undo and Redo apply to the typing.
       listen<string>("menu", (e) => {
         if (e.payload === "edit.undo") document.execCommand("undo");
@@ -80,14 +88,37 @@ export function App() {
   }, []);
 
   if (!snapshot) {
+    // The start screen always offers the next step (spec 5.1.5).
     return (
       <main className="empty">
-        <h1>No project open</h1>
-        <p>Open the sample project to see how scheduling works.</p>
-        <button className="primary" onClick={() => run(api.openSample)}>
-          Open Sample Project
-        </button>
-        {error && <p role="alert" className="error">{error}</p>}
+        <h1>Super PM</h1>
+        <p>Plan a project with tasks, links and a calendar. Every change is saved as you go.</p>
+        <div className="start-actions">
+          <button className="primary" onClick={() => run(api.newProject)}>
+            New Project…
+          </button>
+          <button onClick={() => run(api.openProject)}>Open…</button>
+          <button onClick={() => run(api.openSample)}>Open Sample Project</button>
+        </div>
+        {recent.length > 0 && (
+          <nav className="recent" aria-label="Recent projects">
+            <h2>Recent</h2>
+            <ul>
+              {recent.map((f) => (
+                <li key={f.path}>
+                  <button className="link" title={f.path} onClick={() => run(() => api.openRecent(f.path))}>
+                    {f.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
       </main>
     );
   }
