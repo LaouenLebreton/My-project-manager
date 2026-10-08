@@ -199,10 +199,25 @@ impl Calendar {
         if b < a {
             return -self.working_between(b, a);
         }
-        (a.day()..=b.day())
-            .flat_map(|d| self.ranges_on(d))
-            .map(|(s, e)| (e.min(b.0) - s.max(a.0)).max(0))
-            .sum()
+        let clipped = |day: i64| -> i64 { self.ranges_on(day).map(|(s, e)| (e.min(b.0) - s.max(a.0)).max(0)).sum() };
+        let (first, last) = (a.day(), b.day());
+        if first == last {
+            return clipped(first);
+        }
+        // Days strictly between lie wholly inside [a, b). Skip whole weeks without exceptions.
+        let week: i64 = self.week.iter().map(DayPattern::working_minutes).sum();
+        let mut total = clipped(first) + clipped(last);
+        let mut day = first + 1;
+        while day < last {
+            if last - day >= 7 && self.exceptions.range(day..day + 7).next().is_none() {
+                total += week;
+                day += 7;
+            } else {
+                total += self.pattern(day).working_minutes();
+                day += 1;
+            }
+        }
+        total
     }
 }
 
@@ -365,7 +380,21 @@ mod tests {
         (0i64..60 * MINUTES_PER_DAY).prop_map(move |m| Moment(base + m))
     }
 
+    /// Day-by-day reference for [`Calendar::working_between`].
+    fn working_between_naive(c: &Calendar, a: Moment, b: Moment) -> i64 {
+        if b < a {
+            return -working_between_naive(c, b, a);
+        }
+        (a.day()..=b.day()).flat_map(|d| c.ranges_on(d)).map(|(s, e)| (e.min(b.0) - s.max(a.0)).max(0)).sum()
+    }
+
     proptest! {
+        #[test]
+        fn fast_between_matches_naive(c in calendars(), a in moments(), span in -400 * MINUTES_PER_DAY..400 * MINUTES_PER_DAY) {
+            let b = Moment(a.0 + span);
+            prop_assert_eq!(c.working_between(a, b), working_between_naive(&c, a, b));
+        }
+
         #[test]
         fn between_measures_what_add_added(c in calendars(), t in moments(), d in -20_000i64..20_000) {
             let r = c.add_working(t, d);

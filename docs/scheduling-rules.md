@@ -1,6 +1,6 @@
 # Scheduling rules
 
-Status: **draft**. Each rule becomes one or more tests in `pm-core` before it is implemented.
+Status: **draft**, implemented in `crates/pm-core/src/schedule.rs` (step 3) except R28 duplicate-link checks, which belong to the command layer (step 4). Each rule becomes one or more tests in `pm-core` before it is implemented.
 Rules marked *verify* must be checked against the owner's Microsoft Project reference files
 (spec section 8) and updated here with the observed result.
 
@@ -49,6 +49,7 @@ Rules marked *verify* must be checked against the owner's Microsoft Project refe
 ## Hierarchy
 
 - R24. Only leaf tasks are scheduled. Summary start = min child ES, finish = max child EF; summary duration is derived and not stored as input.
+- R24a. Summary late dates: min child LS, max child LF. Summary total slack = the **smallest child slack**, so a summary is critical when it contains critical work. *verify*: MS Project may compute it from the summary's own dates.
 - R25. Links on summary tasks: **iteration 1 rejects them** with a clear message. *Proposal to owner:* MS Project allows them (they apply to all children); support them in iteration 2 once MSPDI import needs them.
 - R26. An empty summary (all children deleted) becomes a normal task with its last derived duration.
 

@@ -6,8 +6,10 @@
 
 pub mod calendar;
 pub mod model;
+pub mod schedule;
 pub mod time;
 
 pub use calendar::{Calendar, CalendarError, DayPattern, WorkRange};
 pub use model::*;
+pub use schedule::{schedule, ConstraintConflict, Schedule, ScheduleError, TaskSchedule};
 pub use time::{Moment, MINUTES_PER_DAY};
