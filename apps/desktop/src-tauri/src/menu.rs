@@ -20,6 +20,8 @@ pub mod id {
     pub const FIND: &str = "edit.find";
     pub const COMMAND_BAR: &str = "view.command_bar";
     pub const HELP: &str = "help.contents";
+    pub const OPEN_5K: &str = "dev.open_5000";
+    pub const OPEN_20K: &str = "dev.open_20000";
 }
 
 fn item<R: Runtime>(
@@ -100,9 +102,16 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .close_window()
         .build()?;
 
-    let help = SubmenuBuilder::new(app, "Help")
-        .item(&item(app, id::HELP, "Super PM Help", None)?)
-        .build()?;
+    let mut help = SubmenuBuilder::new(app, "Help").item(&item(app, id::HELP, "Super PM Help", None)?);
+    if cfg!(debug_assertions) {
+        // Performance checks (spec section 3); not in release builds.
+        let dev = |id, text| MenuItemBuilder::with_id(id, text).build(app);
+        help = help
+            .separator()
+            .item(&dev(id::OPEN_5K, "Open Test Project (5,000 Tasks)")?)
+            .item(&dev(id::OPEN_20K, "Open Test Project (20,000 Tasks)")?);
+    }
+    let help = help.build()?;
 
     let menu = Menu::new(app)?;
     if let Some(app_menu) = platform::app_menu(app)? {

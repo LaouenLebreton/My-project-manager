@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pm_core::{
-    outline, Command, Constraint, Dependency, DependencyId, Duration, LinkChange, LinkType, Percent, Project, SortKey,
-    Task, TaskChange, TaskId, Units,
+    outline, Command, Constraint, Dependency, DependencyId, Duration, LinkChange, LinkType, Moment, Percent, Project,
+    Schedule, SortKey, Task, TaskChange, TaskId, Units, MINUTES_PER_DAY,
 };
 use serde::Deserialize;
 use ts_rs::TS;
@@ -29,6 +29,10 @@ pub enum Edit {
     AddLink { predecessor_id: String, successor_id: String },
     Indent { ids: Vec<String> },
     Outdent { ids: Vec<String> },
+    /// Dragged bar: start no earlier than this date (`YYYY-MM-DD`), as Microsoft Project does.
+    MoveTask { id: String, start_date: String },
+    /// Dragged right edge: finish at the end of work on this date (`YYYY-MM-DD`).
+    SetFinish { id: String, finish_date: String },
 }
 
 /// A core command, plus the id of a task it creates (so the UI can select it).
@@ -62,7 +66,7 @@ fn child_keys(p: &Project, parent: Option<TaskId>) -> Vec<&SortKey> {
 
 /// The command for an edit, or `None` when it would change nothing (e.g. indenting the
 /// first task).
-pub fn plan(p: &Project, units: &Units, edit: Edit) -> Result<Option<Planned>, IpcError> {
+pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit) -> Result<Option<Planned>, IpcError> {
     let plain = |command| Ok(Some(Planned { command, created: None }));
     match edit {
         Edit::AddTask { after_id, name } => {
@@ -111,7 +115,41 @@ pub fn plan(p: &Project, units: &Units, edit: Edit) -> Result<Option<Planned>, I
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None })),
         Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None })),
+        Edit::MoveTask { id, start_date } => {
+            let id = task_id(&id)?;
+            task(p, id)?;
+            if is_summary(p, id) {
+                return Err(err("a summary task moves with the tasks inside it"));
+            }
+            let start = p.calendar.next_working(day_start(&start_date)?);
+            let change = TaskChange::Constraint(Constraint::StartNoEarlierThan(start));
+            plain(Command::Batch { label: "Move Task".into(), commands: vec![Command::SetTask { id, change }] })
+        }
+        Edit::SetFinish { id, finish_date } => {
+            let id = task_id(&id)?;
+            let t = task(p, id)?;
+            if is_summary(p, id) || t.is_milestone {
+                return Err(err("only regular tasks can be stretched; summaries follow their tasks"));
+            }
+            let start = schedule.and_then(|s| s.tasks.get(&id)).ok_or_else(|| err("dates cannot be calculated right now"))?.early_start;
+            // The end of work on the chosen day.
+            let end = p.calendar.prev_working_end(Moment(day_start(&finish_date)?.0 + MINUTES_PER_DAY));
+            let minutes = p.calendar.working_between(start, end);
+            if minutes <= 0 {
+                return Err(err("the finish cannot be before the start"));
+            }
+            if minutes == t.duration.get() {
+                return Ok(None);
+            }
+            plain(Command::SetTask { id, change: TaskChange::Duration(Duration::minutes(minutes)?) })
+        }
     }
+}
+
+/// Midnight at the start of a `YYYY-MM-DD` date.
+fn day_start(date: &str) -> Result<Moment, IpcError> {
+    let d: jiff::civil::Date = date.parse().map_err(|_| err(format!("{date:?} is not a date")))?;
+    Ok(Moment::from_datetime(d.at(0, 0, 0, 0)))
 }
 
 fn parse_ids(ids: &[String]) -> Result<HashSet<TaskId>, IpcError> {
@@ -308,7 +346,8 @@ mod tests {
     }
 
     fn run(p: &mut Project, edit: Edit) {
-        if let Some(plan) = plan(p, &Units::default(), edit).unwrap() {
+        let sched = pm_core::schedule(p).ok();
+        if let Some(plan) = plan(p, sched.as_ref(), &Units::default(), edit).unwrap() {
             apply(p, &plan.command).unwrap();
         }
     }
@@ -338,8 +377,8 @@ mod tests {
     #[test]
     fn indent_first_task_does_nothing() {
         let (p, id) = project(&[("A", 0), ("B", 0)]);
-        assert!(plan(&p, &Units::default(), Edit::Indent { ids: ids(&[id[0]]) }).unwrap().is_none());
-        assert!(plan(&p, &Units::default(), Edit::Outdent { ids: ids(&[id[0]]) }).unwrap().is_none());
+        assert!(plan(&p, None, &Units::default(), Edit::Indent { ids: ids(&[id[0]]) }).unwrap().is_none());
+        assert!(plan(&p, None, &Units::default(), Edit::Outdent { ids: ids(&[id[0]]) }).unwrap().is_none());
     }
 
     #[test]
@@ -373,7 +412,7 @@ mod tests {
     fn predecessor_mistakes_are_explained() {
         let (p, id) = project(&[("A", 0), ("B", 0)]);
         let u = Units::default();
-        let msg = |text: &str| match plan(&p, &u, Edit::SetPredecessors { id: id[1].0.to_string(), text: text.into() }) {
+        let msg = |text: &str| match plan(&p, None, &u, Edit::SetPredecessors { id: id[1].0.to_string(), text: text.into() }) {
             Err(e) => e.message,
             Ok(_) => "accepted".into(),
         };
@@ -394,14 +433,39 @@ mod tests {
         run(&mut p, Edit::SetDuration { id: a.clone(), text: "2w".into() });
         assert!(!p.tasks[&id[0]].is_milestone);
         assert_eq!(p.tasks[&id[0]].duration.get(), 4800);
-        let e = plan(&p, &Units::default(), Edit::SetDuration { id: a, text: "soon".into() }).err().unwrap();
+        let e = plan(&p, None, &Units::default(), Edit::SetDuration { id: a, text: "soon".into() }).err().unwrap();
         assert_eq!(e.message, "type a duration like 3d, 4h or 2w");
+    }
+
+    #[test]
+    fn dragging_a_bar_sets_start_no_earlier_than_on_working_time() {
+        // Project starts Monday 2026-10-05.
+        let (mut p, id) = project(&[("A", 0)]);
+        p.start = Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0));
+        run(&mut p, Edit::MoveTask { id: id[0].0.to_string(), start_date: "2026-10-10".into() }); // a Saturday
+        let monday = Moment::from_datetime(jiff::civil::date(2026, 10, 12).at(8, 0, 0, 0));
+        assert_eq!(p.tasks[&id[0]].constraint, Constraint::StartNoEarlierThan(monday));
+        let s = pm_core::schedule(&p).unwrap();
+        assert_eq!(s.tasks[&id[0]].early_start, monday);
+    }
+
+    #[test]
+    fn dragging_the_right_edge_sets_the_duration() {
+        let (mut p, id) = project(&[("A", 0)]);
+        p.start = Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0));
+        run(&mut p, Edit::SetFinish { id: id[0].0.to_string(), finish_date: "2026-10-07".into() });
+        assert_eq!(p.tasks[&id[0]].duration.get(), 3 * 480, "Monday to Wednesday");
+        run(&mut p, Edit::SetFinish { id: id[0].0.to_string(), finish_date: "2026-10-11".into() }); // Sunday
+        assert_eq!(p.tasks[&id[0]].duration.get(), 5 * 480, "ends with Friday's work");
+        let sched = pm_core::schedule(&p).ok();
+        let e = plan(&p, sched.as_ref(), &Units::default(), Edit::SetFinish { id: id[0].0.to_string(), finish_date: "2026-10-04".into() });
+        assert_eq!(e.err().unwrap().message, "the finish cannot be before the start");
     }
 
     #[test]
     fn summary_duration_is_not_editable() {
         let (p, id) = project(&[("A", 0), ("A1", 1)]);
-        let e = plan(&p, &Units::default(), Edit::SetDuration { id: id[0].0.to_string(), text: "3d".into() }).err().unwrap();
+        let e = plan(&p, None, &Units::default(), Edit::SetDuration { id: id[0].0.to_string(), text: "3d".into() }).err().unwrap();
         assert_eq!(e.message, "a summary task's duration comes from the tasks inside it");
     }
 }

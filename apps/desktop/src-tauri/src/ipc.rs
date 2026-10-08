@@ -78,6 +78,18 @@ pub struct ProjectInfo {
     pub finish: Option<String>,
     #[ts(type = "number")]
     pub minutes_per_day: i64,
+    /// For shading the chart: which weekdays are worked (Monday first) and dated exceptions.
+    pub working_weekdays: Vec<bool>,
+    pub calendar_exceptions: Vec<CalendarException>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarException {
+    /// `YYYY-MM-DD`
+    pub date: String,
+    pub working: bool,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -258,6 +270,12 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             start: iso(p.start),
             finish: sched.map(|s| iso(s.project_finish)),
             minutes_per_day: UNITS.minutes_per_day,
+            working_weekdays: p.calendar.week().iter().map(|d| d.is_working()).collect(),
+            calendar_exceptions: p
+                .calendar
+                .exceptions()
+                .map(|(date, pattern)| CalendarException { date: date.to_string(), working: pattern.is_working() })
+                .collect(),
         },
         rows,
         links,
@@ -297,11 +315,29 @@ pub fn open_sample(app: AppHandle, state: State<AppState>) -> Result<Snapshot, I
     Ok(snap)
 }
 
+/// Development builds only: opens a freshly generated project of `count` tasks.
+#[tauri::command]
+pub fn open_generated(count: u32, app: AppHandle, state: State<AppState>) -> Result<Snapshot, IpcError> {
+    if !cfg!(debug_assertions) {
+        return Err(err("test projects are only available in development builds"));
+    }
+    let dir = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("Test Project ({count} tasks).pmproj"));
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+    let doc = Document::create(&path, crate::sample::generated(count as usize, this_monday_morning()))?;
+    let snap = changed(&app, &doc);
+    *state.doc.lock().expect("state lock") = Some(doc);
+    Ok(snap)
+}
+
 #[tauri::command]
 pub fn apply_edit(edit: Edit, app: AppHandle, state: State<AppState>) -> Result<EditResult, IpcError> {
     let mut guard = state.doc.lock().expect("state lock");
     let doc = guard.as_mut().ok_or_else(|| err("no project is open"))?;
-    let created_id = match plan(&doc.project, &UNITS, edit)? {
+    let created_id = match plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, edit)? {
         Some(planned) => {
             doc.apply(&planned.command)?;
             planned.created.map(|id| id.0.to_string())
@@ -359,7 +395,7 @@ mod tests {
         assert!(row(&before, "Preparation").is_summary);
 
         // Added right after "Pack offices", inside the same summary.
-        let cmd = plan(&doc.project, &UNITS, Edit::AddTask { after_id: Some(pack.id.clone()), name: "Label boxes".into() }).unwrap().unwrap();
+        let cmd = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::AddTask { after_id: Some(pack.id.clone()), name: "Label boxes".into() }).unwrap().unwrap();
         assert!(cmd.created.is_some());
         doc.apply(&cmd.command).unwrap();
         let s = snapshot(&doc);
@@ -374,7 +410,7 @@ mod tests {
         let unpack = row(&s, "Unpack and set up").id.clone();
         let unpack_row = s.rows.iter().position(|r| r.id == unpack).unwrap() + 1;
         let edit = |doc: &mut Document, e: Edit| {
-            let planned = plan(&doc.project, &UNITS, e).unwrap().unwrap();
+            let planned = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, e).unwrap().unwrap();
             doc.apply(&planned.command).unwrap();
         };
         edit(&mut doc, Edit::SetPredecessors { id: new.clone(), text: unpack_row.to_string() });
@@ -407,9 +443,47 @@ mod tests {
         let s = snapshot(&doc);
         let a = row(&s, "List space requirements").id.clone();
         let b = row(&s, "Choose new office").id.clone();
-        let planned = plan(&doc.project, &UNITS, Edit::AddLink { predecessor_id: b, successor_id: a }).unwrap().unwrap();
+        let planned = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::AddLink { predecessor_id: b, successor_id: a }).unwrap().unwrap();
         let e = IpcError::from(doc.apply(&planned.command).unwrap_err());
         assert_eq!(e.message, "these two tasks are already linked; change the existing link instead");
+    }
+
+    /// The full cost of one edit at the spec's sizes: plan, save, schedule, build the snapshot,
+    /// serialize it. Run with `cargo test --release -p super-pm edit_cycle -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn edit_cycle_timing() {
+        for n in [5_000, 20_000] {
+            let dir = std::env::temp_dir().join(format!("super-pm-bench-{}", new_id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut doc = Document::create(&dir.join("b.pmproj"), crate::sample::generated(n, Moment(29_000_000))).unwrap();
+            let target = snapshot(&doc).rows.iter().find(|r| !r.is_summary && !r.is_milestone).unwrap().id.clone();
+            let runs = 10;
+            let (mut t_apply, mut t_snap, mut t_json, mut bytes) = (0.0, 0.0, 0.0, 0);
+            for k in 0..runs {
+                let edit = Edit::SetDuration { id: target.clone(), text: format!("{}h", 4 + k) };
+                let t0 = std::time::Instant::now();
+                let planned = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, edit).unwrap().unwrap();
+                doc.apply(&planned.command).unwrap();
+                let t1 = std::time::Instant::now();
+                let snap = snapshot(&doc);
+                let t2 = std::time::Instant::now();
+                let json = serde_json::to_vec(&snap).unwrap();
+                let t3 = std::time::Instant::now();
+                t_apply += (t1 - t0).as_secs_f64();
+                t_snap += (t2 - t1).as_secs_f64();
+                t_json += (t3 - t2).as_secs_f64();
+                bytes = json.len();
+            }
+            let ms = |t: f64| t * 1000.0 / runs as f64;
+            println!(
+                "{n:>6} tasks: save+schedule {:6.2} ms, snapshot {:6.2} ms, JSON {:6.2} ms, {:.1} MB per snapshot",
+                ms(t_apply),
+                ms(t_snap),
+                ms(t_json),
+                bytes as f64 / 1e6
+            );
+        }
     }
 
     #[test]

@@ -1,5 +1,18 @@
 :root {
   color-scheme: light dark;
+  /* Chart colours (read by Gantt.tsx); dark variants below. */
+  --gantt-text: #1d1d1f;
+  --gantt-secondary: #6e6e73;
+  --gantt-grid: rgba(0, 0, 0, 0.12);
+  --gantt-stripe: rgba(0, 0, 0, 0.035);
+  --gantt-nonworking: rgba(0, 0, 0, 0.055);
+  --gantt-bar: #0a84ff;
+  --gantt-critical: #d70015;
+  --gantt-summary: #3a3a3c;
+  --gantt-link: #8e8e93;
+  --gantt-accent: #0a84ff;
+  --gantt-warning: #ff9f0a;
+  --gantt-background: #ffffff;
   font: -apple-system-body;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   --text: CanvasText;
@@ -245,4 +258,79 @@ button.primary {
   * {
     scroll-behavior: auto !important;
   }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --gantt-text: #f5f5f7;
+    --gantt-secondary: #98989d;
+    --gantt-grid: rgba(255, 255, 255, 0.14);
+    --gantt-stripe: rgba(255, 255, 255, 0.04);
+    --gantt-nonworking: rgba(255, 255, 255, 0.06);
+    --gantt-bar: #409cff;
+    --gantt-critical: #ff453a;
+    --gantt-summary: #d1d1d6;
+    --gantt-link: #8e8e93;
+    --gantt-accent: #409cff;
+    --gantt-background: #1e1e1e;
+  }
+}
+
+.workspace {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.splitter {
+  width: 5px;
+  cursor: col-resize;
+  background: color-mix(in srgb, CanvasText 10%, transparent);
+  border-left: 2px solid Canvas;
+  border-right: 2px solid Canvas;
+}
+
+.gantt {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--gantt-background);
+}
+
+.gantt canvas {
+  display: block;
+  touch-action: none;
+}
+
+.gantt-zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 4px;
+}
+
+.gantt-zoom button {
+  width: 28px;
+  padding: 2px 0;
+}
+
+.status {
+  min-height: 22px;
+  padding: 3px 12px;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+}
+
+.grid-header {
+  box-sizing: border-box;
 }

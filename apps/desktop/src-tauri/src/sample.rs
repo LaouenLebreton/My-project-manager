@@ -77,6 +77,84 @@ pub fn office_move(start: Moment) -> Project {
     }
 }
 
+/// A large generated project for performance testing (spec section 3): phases of ten
+/// chained tasks, each phase also waiting on a task in a recent phase, milestones, all four
+/// link types and lags. Deterministic for a given `n`.
+pub fn generated(n: usize, start: Moment) -> Project {
+    let mut rng = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move |m: u64| {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        rng % m
+    };
+    let mut tasks = BTreeMap::new();
+    let mut dependencies = BTreeMap::new();
+    let mut phase_key: Option<SortKey> = None;
+    let mut child_key: Option<SortKey> = None;
+    let mut phase = None;
+    let mut leaves: Vec<TaskId> = Vec::new();
+    for k in 0..n {
+        let id = TaskId(new_id());
+        let is_phase = k % 11 == 0;
+        let key = if is_phase {
+            child_key = None;
+            SortKey::between(phase_key.as_ref(), None)
+        } else {
+            SortKey::between(child_key.as_ref(), None)
+        };
+        if is_phase {
+            phase_key = Some(key.clone());
+        } else {
+            child_key = Some(key.clone());
+        }
+        tasks.insert(
+            id,
+            Task {
+                id,
+                parent: if is_phase { None } else { phase },
+                sort_key: key,
+                name: if is_phase { format!("Phase {}", k / 11 + 1) } else { format!("Task {k}") },
+                duration: Duration::minutes(60 * (1 + next(40)) as i64).expect("positive"),
+                is_milestone: !is_phase && next(20) == 0,
+                constraint: Constraint::AsSoonAsPossible,
+                percent_complete: Percent::default(),
+                notes: String::new(),
+            },
+        );
+        if is_phase {
+            phase = Some(id);
+        } else {
+            leaves.push(id);
+        }
+    }
+    let kinds = [LinkType::FinishToStart, LinkType::StartToStart, LinkType::FinishToFinish, LinkType::StartToFinish];
+    for w in 1..leaves.len() {
+        let mut froms = Vec::new();
+        if w % 10 != 0 {
+            froms.push(w - 1);
+        }
+        if w > 60 && (w % 10 == 0 || next(8) == 0) {
+            froms.push(w - 60 + next(40) as usize);
+        }
+        for from in froms {
+            let id = DependencyId(new_id());
+            let kind = if next(4) == 0 { kinds[next(4) as usize] } else { LinkType::FinishToStart };
+            let lag = next(5) as i64 * 240 - 480;
+            dependencies.insert(id, Dependency { id, predecessor: leaves[from], successor: leaves[w], kind, lag });
+        }
+    }
+    Project {
+        id: ProjectId(new_id()),
+        name: format!("Test Project ({n} tasks)"),
+        start,
+        calendar_id: CalendarId(new_id()),
+        calendar: Calendar::standard(),
+        tasks,
+        dependencies,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -85,5 +163,12 @@ mod tests {
         let s = pm_core::schedule(&p).unwrap();
         assert!(s.tasks.values().any(|t| t.critical));
         assert!(s.tasks.values().any(|t| !t.critical), "some tasks have slack, to show the difference");
+    }
+
+    #[test]
+    fn generated_project_schedules() {
+        let p = super::generated(500, pm_core::Moment(29_000_000));
+        assert_eq!(p.tasks.len(), 500);
+        assert!(pm_core::schedule(&p).is_ok());
     }
 }

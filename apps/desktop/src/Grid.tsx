@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { errorMessage, type Edit, type Snapshot } from "./api";
 import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
 import { formatDate, formatDateTime, formatDays } from "./format";
 
-const ROW_HEIGHT = 26;
+import { HEADER_HEIGHT, ROW_HEIGHT } from "./Gantt";
+
 const OVERSCAN = 8;
 
 interface Column {
@@ -23,7 +24,7 @@ const COLUMNS: Column[] = [
   { label: "", width: "22px", text: () => "" },
   {
     label: "Task Name",
-    width: "minmax(220px, 1fr)",
+    width: "minmax(160px, 1fr)",
     text: (r) => r.name,
     edit: { initial: (r) => r.name, make: (r, text) => ({ kind: "RenameTask", id: r.id, name: text }) },
   },
@@ -34,8 +35,8 @@ const COLUMNS: Column[] = [
     text: (r, perDay) => (r.isMilestone ? "0 days" : formatDays(r.durationMinutes, perDay)),
     edit: { initial: (r) => r.durationText, make: (r, text) => ({ kind: "SetDuration", id: r.id, text }) },
   },
-  { label: "Start", width: "128px", text: (r) => formatDate(r.start), title: (r) => formatDateTime(r.start) },
-  { label: "Finish", width: "128px", text: (r) => formatDate(r.finish), title: (r) => formatDateTime(r.finish) },
+  { label: "Start", width: "112px", text: (r) => formatDate(r.start), title: (r) => formatDateTime(r.start) },
+  { label: "Finish", width: "112px", text: (r) => formatDate(r.finish), title: (r) => formatDateTime(r.finish) },
   {
     label: "Predecessors",
     width: "116px",
@@ -52,6 +53,15 @@ export interface GridProps {
   /** Resolves with the result, or rejects with a message to show next to the cell. */
   onEdit: (edit: Edit) => Promise<EditResult>;
   onTextEditing: (editing: boolean) => void;
+  /** Vertical scroll position, shared with the Gantt chart. */
+  onScrollTop: (scrollTop: number) => void;
+  onSelectionChange: (ids: Set<string>) => void;
+}
+
+/** What the Gantt chart can ask of the grid. */
+export interface GridHandle {
+  selectRow: (row: number) => void;
+  scrollBy: (dy: number) => void;
 }
 
 interface Editing {
@@ -64,7 +74,10 @@ interface Editing {
  * Tab / Shift-Tab indent and outdent, Delete removes rows, typing starts editing.
  * Only visible rows are rendered, so thousands of tasks scroll smoothly.
  */
-export function Grid({ snapshot, onEdit, onTextEditing }: GridProps) {
+export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
+  { snapshot, onEdit, onTextEditing, onScrollTop, onSelectionChange },
+  handle,
+) {
   const rows = snapshot.rows;
   const rowCount = rows.length + 1; // plus the blank row for new tasks
   const perDay = snapshot.project.minutesPerDay;
@@ -93,6 +106,8 @@ export function Grid({ snapshot, onEdit, onTextEditing }: GridProps) {
     return rows.slice(a, Math.min(b, rows.length - 1) + 1);
   })();
   const selectedIds = new Set(selection.map((r) => r.id));
+  const selectionKey = selection.map((r) => r.id).join(",");
+  useEffect(() => onSelectionChange(new Set(selectionKey ? selectionKey.split(",") : [])), [selectionKey, onSelectionChange]);
   const flagged = new Set([...(snapshot.problem?.taskIds ?? []), ...snapshot.conflicts.map((c) => c.taskId)]);
 
   useEffect(() => onTextEditing(editing !== null), [editing !== null, onTextEditing]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -122,6 +137,17 @@ export function Grid({ snapshot, onEdit, onTextEditing }: GridProps) {
   useEffect(() => gridRef.current?.focus(), []);
 
   const focusGrid = () => gridRef.current?.focus();
+
+  useImperativeHandle(handle, () => ({
+    selectRow: (r: number) => {
+      void commit();
+      moveTo(r, active.col);
+      focusGrid();
+    },
+    scrollBy: (dy: number) => {
+      if (bodyRef.current) bodyRef.current.scrollTop += dy;
+    },
+  }));
 
   // Moves can follow an edit that added rows, before this render's rowCount is updated.
   const rowCountRef = useRef(rowCount);
@@ -297,14 +323,21 @@ export function Grid({ snapshot, onEdit, onTextEditing }: GridProps) {
       tabIndex={0}
       onKeyDown={onGridKey}
     >
-      <div className="grid-header" role="row" aria-rowindex={1} style={{ gridTemplateColumns: TEMPLATE }}>
+      <div className="grid-header" role="row" aria-rowindex={1} style={{ gridTemplateColumns: TEMPLATE, height: HEADER_HEIGHT }}>
         {COLUMNS.map((c, i) => (
           <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined}>
             {c.label}
           </div>
         ))}
       </div>
-      <div ref={bodyRef} className="grid-body" onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+      <div
+        ref={bodyRef}
+        className="grid-body"
+        onScroll={(e) => {
+          setScrollTop(e.currentTarget.scrollTop);
+          onScrollTop(e.currentTarget.scrollTop);
+        }}
+      >
         <div style={{ height: rowCount * ROW_HEIGHT, position: "relative" }}>
           {visible.map((i) => {
             const r = rows[i];
@@ -368,7 +401,7 @@ export function Grid({ snapshot, onEdit, onTextEditing }: GridProps) {
       </div>
     </div>
   );
-}
+});
 
 function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDay: number) {
   if (!r) {

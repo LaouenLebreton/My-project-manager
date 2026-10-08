@@ -1,12 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, errorMessage, type Edit, type IpcError, type Snapshot } from "./api";
 import { formatDate } from "./format";
-import { Grid } from "./Grid";
+import { Gantt } from "./Gantt";
+import { Grid, type GridHandle } from "./Grid";
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [message, setMessage] = useState<string | null>(null);
+  const [gridWidth, setGridWidth] = useState(720);
+  const [timing, setTiming] = useState<string | null>(null);
+  const gridRef = useRef<GridHandle>(null);
 
   const run = useCallback(async (action: () => Promise<Snapshot>) => {
     try {
@@ -19,11 +26,34 @@ export function App() {
 
   /** For the grid: errors are shown next to the cell, so they are passed back, not shown here. */
   const edit = useCallback(async (e: Edit) => {
+    const t0 = performance.now();
     const result = await api.applyEdit(e);
+    const t1 = performance.now();
     setSnapshot(result.snapshot);
     setError(null);
+    if (import.meta.env.DEV) {
+      // Development readout for the performance check: round trip, then until painted.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const t2 = performance.now();
+          setTiming(`last edit: ${Math.round(t1 - t0)} ms round trip + ${Math.round(t2 - t1)} ms to draw, ${result.snapshot.rows.length} tasks`);
+        }),
+      );
+    }
     return result;
   }, []);
+
+  const startSplitDrag = (e: React.PointerEvent) => {
+    const startX = e.clientX;
+    const startWidth = gridWidth;
+    const move = (ev: PointerEvent) => setGridWidth(Math.max(320, Math.min(window.innerWidth - 200, startWidth + ev.clientX - startX)));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   const textEditing = useCallback((editing: boolean) => {
     void api.setTextEditing(editing);
@@ -71,7 +101,7 @@ export function App() {
             {formatDate(snapshot.project.start)} – {formatDate(snapshot.project.finish)} · {snapshot.rows.length} tasks
           </p>
         </div>
-        <p className="secondary hint">Return to edit · Tab to indent · Type numbers in Predecessors to link</p>
+        <p className="secondary hint">Return to edit · Tab to indent · Drag bars to move, their ends to stretch, onto another bar to link</p>
       </header>
       {error && (
         <p role="alert" className="banner error">
@@ -88,7 +118,37 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
-      <Grid snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
+      <div className="workspace">
+        <div className="pane" style={{ width: gridWidth }}>
+          <Grid
+            ref={gridRef}
+            snapshot={snapshot}
+            onEdit={edit}
+            onTextEditing={textEditing}
+            onScrollTop={setScrollTop}
+            onSelectionChange={setSelectedIds}
+          />
+        </div>
+        <div
+          className="splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize task list"
+          onPointerDown={startSplitDrag}
+        />
+        <Gantt
+          snapshot={snapshot}
+          scrollTop={scrollTop}
+          selectedIds={selectedIds}
+          onEdit={edit}
+          onSelectRow={(r) => gridRef.current?.selectRow(r)}
+          onScrollBy={(dy) => gridRef.current?.scrollBy(dy)}
+          onMessage={setMessage}
+        />
+      </div>
+      <footer className="status" role="status" aria-live="polite">
+        {message ?? (import.meta.env.DEV ? timing : null) ?? "\u00a0"}
+      </footer>
     </main>
   );
 }

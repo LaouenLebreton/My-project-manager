@@ -27,6 +27,8 @@ pub fn run() {
             // While a cell editor is open, Undo and Redo belong to the text being typed.
             let typing = state.editing_text.load(std::sync::atomic::Ordering::Relaxed);
             let result = match id {
+                menu::id::OPEN_5K => ipc::open_generated(5_000, app.clone(), state),
+                menu::id::OPEN_20K => ipc::open_generated(20_000, app.clone(), state),
                 menu::id::UNDO | menu::id::REDO if typing => {
                     let _ = app.emit(MENU_EVENT, id);
                     return;
@@ -54,6 +56,7 @@ pub fn run() {
             ipc::undo,
             ipc::redo,
             ipc::set_text_editing,
+            ipc::open_generated,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Super PM");

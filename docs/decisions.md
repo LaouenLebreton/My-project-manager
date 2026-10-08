@@ -45,3 +45,15 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **Virtualized DOM rows** (only visible rows rendered) with ARIA grid roles and `aria-activedescendant`, so VoiceOver follows the active cell.
 - **⌘Z while typing in a cell** undoes the typing: the grid tells Rust when an editor is open, and the Undo/Redo menu actions are then forwarded to the text field.
 - **Errors appear under the cell** that caused them, and the editor stays open with the text so it can be fixed (spec 5.1.5).
+
+## 2026-10-09, step 7 (Gantt chart)
+
+- **One canvas, visible rows only,** sharing row height and vertical scroll with the grid. Colours come from CSS variables, so the chart follows light and dark mode.
+- **Critical bars are red and hatched**, and critical links are red, so the critical path is clear without colour vision (spec 5.1.9).
+- **Dragging a bar sets "start no earlier than"** on the day it is dropped (snapped to working time by Rust), as Microsoft Project does. The undo name is "Move Task". Dragging earlier than the links allow has no effect on the dates, because links still win; showing a hint when that happens is a follow-up.
+- **Dragging the right end** sets the duration so the task finishes at the end of work on that day.
+- **Dragging from one bar onto another** creates a finish-to-start link. A mostly horizontal drag moves; a mostly vertical one links.
+- **Zoom:** pinch, ⌘-scroll, or the − and + buttons. Shift-scroll moves sideways.
+- **The chart is mouse-only for now.** Everything it does can also be done from the keyboard in the grid, except moving a task by date, which arrives with the constraint control. The canvas has a text description for VoiceOver.
+- **Debug builds only:** Help > Open Test Project (5,000 or 20,000 tasks) and an edit timing readout in the status bar, for the performance check.
+- **A dev-only mock backend** (`apps/desktop/src/dev/mockBackend.ts`) lets the UI run in a plain browser at `localhost:1420` (`?n=5000` generates a large project). It never loads inside Tauri or in release builds.
