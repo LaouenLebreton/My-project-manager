@@ -17,3 +17,7 @@ tauri = { version = "2.12.1", features = [] }
 serde.workspace = true
 serde_json.workspace = true
 pm-core.workspace = true
+pm-store.workspace = true
+jiff = "0.2.36"
+ts-rs = "12.0.1"
+uuid = { version = "1.27", features = ["v7"] }

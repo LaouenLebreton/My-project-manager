@@ -24,3 +24,12 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **Validation on load:** calendar types validate when deserialized, so a damaged file cannot produce a calendar with no working time, which would make date arithmetic loop forever.
 - **Reserved resource, assignment and baseline tables were not created.** A table in a shipped schema is a migration commitment, so the cost is not zero; they get added in iteration 2.
 - **Issue for step 8:** while a project is open, WAL keeps two side files next to it (`.pmproj-wal`, `.pmproj-shm`). They disappear on a clean close, and Save a Copy uses SQLite's backup API to write a single standalone file. If the side files look wrong in Finder, the option is to store projects as a macOS package (a folder that looks like one file).
+
+## 2026-10-08, step 5 (IPC)
+
+- **ts-rs 12 generates the TypeScript types** in `apps/desktop/src/bindings` (run `cargo test -p super-pm`). specta and tauri-specta would also generate the invoke wrappers, but after two years they are still release candidates; ts-rs is stable and far more widely used. The small cost is `apps/desktop/src/api.ts`, a hand-written typed wrapper around the commands.
+- **The UI sends edits, not core commands.** `Edit` is user intent ("add a task after this one"); the app layer chooses UUID v7 ids and sort keys and builds the core `Command`. The UI never makes ids, positions or dates.
+- **A full snapshot after every change**, as the spec allows for the first version. Snapshot size and IPC time at 5,000 tasks are measured in step 7, before deciding on deltas.
+- **Undo and Redo in the Edit menu run in Rust** and push the new snapshot to the UI. The menu items show the action ("Undo Change Duration") and are greyed out when there is nothing to undo.
+- **Issue for step 6:** ⌘Z is a menu shortcut, so while the user is typing in a cell it would undo the last project edit instead of the typing. A Mac text field should undo its own typing first. Plan: while a cell editor is open, the UI handles ⌘Z itself, and the menu action is skipped.
+- **Sample project** "Office Move (Sample)" is created in `~/Library/Application Support/app.superpm.desktop/` on first use. Until step 8 it is the only way to open a project.

@@ -2,7 +2,7 @@
 //! so the menu never offers an action that does nothing.
 
 use tauri::menu::{Menu, MenuItem, MenuItemBuilder, SubmenuBuilder};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Runtime, Wry};
 
 use crate::platform;
 
@@ -35,7 +35,23 @@ fn item<R: Runtime>(
     b.build(app)
 }
 
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+/// Menu items whose text or state changes while the app runs.
+pub struct MenuHandles {
+    undo: MenuItem<Wry>,
+    redo: MenuItem<Wry>,
+}
+
+impl MenuHandles {
+    /// "Undo Change Duration", or a disabled "Undo" when there is nothing to undo.
+    pub fn update_undo(&self, undo: Option<String>, redo: Option<String>) {
+        for (item, verb, label) in [(&self.undo, "Undo", undo), (&self.redo, "Redo", redo)] {
+            let _ = item.set_text(label.as_deref().map_or_else(|| verb.to_owned(), |l| format!("{verb} {l}")));
+            let _ = item.set_enabled(label.is_some());
+        }
+    }
+}
+
+pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let recent = SubmenuBuilder::new(app, "Open Recent")
         .item(&item(app, id::CLEAR_RECENT, "Clear Menu", None)?)
         .build()?;
@@ -57,9 +73,11 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     // Undo and redo go through the project's command log, not the web view's
     // text undo, so they are custom items. Clipboard items stay predefined so
     // they work in text fields.
+    let undo = item(app, id::UNDO, "Undo", Some("CmdOrCtrl+Z"))?;
+    let redo = item(app, id::REDO, "Redo", Some("CmdOrCtrl+Shift+Z"))?;
     let edit = SubmenuBuilder::new(app, "Edit")
-        .item(&item(app, id::UNDO, "Undo", Some("CmdOrCtrl+Z"))?)
-        .item(&item(app, id::REDO, "Redo", Some("CmdOrCtrl+Shift+Z"))?)
+        .item(&undo)
+        .item(&redo)
         .separator()
         .cut()
         .copy()
@@ -94,5 +112,5 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    Ok(menu)
+    Ok((menu, MenuHandles { undo, redo }))
 }
