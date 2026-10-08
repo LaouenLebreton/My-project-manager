@@ -4,6 +4,8 @@ import { api, errorMessage, type Edit, type IpcError, type RecentFile, type Snap
 import { formatDate } from "./format";
 import { Gantt } from "./Gantt";
 import { Grid, type GridHandle } from "./Grid";
+import { ImportReport } from "./ImportReport";
+import type { ReportView } from "./bindings/ReportView";
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -16,6 +18,7 @@ export function App() {
   const gridRef = useRef<GridHandle>(null);
 
   const [recent, setRecent] = useState<RecentFile[]>([]);
+  const [report, setReport] = useState<ReportView | null>(null);
 
   const run = useCallback(async (action: () => Promise<Snapshot | null>) => {
     try {
@@ -72,6 +75,7 @@ export function App() {
         setError(null);
       }),
       listen<IpcError>("error", (e) => setError(e.payload.message)),
+      listen<ReportView>("import-report", (e) => setReport(e.payload)),
       listen("document-closed", () => {
         setSnapshot(null);
         api.recentFiles().then(setRecent, () => {});
@@ -177,6 +181,7 @@ export function App() {
           onMessage={setMessage}
         />
       </div>
+      {report && <ImportReport report={report} onClose={() => setReport(null)} />}
       <footer className="status" role="status" aria-live="polite">
         {message ?? (import.meta.env.DEV ? timing : null) ?? "\u00a0"}
       </footer>

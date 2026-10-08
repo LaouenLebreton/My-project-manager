@@ -367,3 +367,50 @@ button.primary {
 .grid-header {
   box-sizing: border-box;
 }
+
+dialog.report {
+  max-width: 560px;
+  max-height: 80vh;
+  overflow: auto;
+  border: none;
+  border-radius: 12px;
+  padding: 20px 24px;
+  background: Canvas;
+  color: var(--text);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+dialog.report::backdrop {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+dialog.report h2 {
+  font-size: 1.15em;
+  margin: 0 0 8px;
+}
+
+dialog.report h3 {
+  font-size: 0.95em;
+  margin: 16px 0 4px;
+}
+
+dialog.report ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+dialog.report li {
+  margin: 3px 0;
+}
+
+.small {
+  font-size: 0.88em;
+}
+
+.report-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}

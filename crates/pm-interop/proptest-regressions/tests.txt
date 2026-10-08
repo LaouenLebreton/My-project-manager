@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ebf1822f0155a264705e5914963b0d8c0ef1d648d0c908184fddc20f736ed073 # shrinks to p = Project { id: ProjectId(00000000-0000-0000-0000-000000000001), name: "Random", start: Moment(29853120), calendar_id: CalendarId(00000000-0000-0000-0000-000000000002), calendar: Calendar { week: [DayPattern([WorkRange { start: 480, end: 720 }, WorkRange { start: 780, end: 1020 }]), DayPattern([WorkRange { start: 480, end: 720 }, WorkRange { start: 780, end: 1020 }]), DayPattern([WorkRange { start: 480, end: 720 }, WorkRange { start: 780, end: 1020 }]), DayPattern([WorkRange { start: 480, end: 720 }, WorkRange { start: 780, end: 1020 }]), DayPattern([WorkRange { start: 480, end: 720 }, WorkRange { start: 780, end: 1020 }]), DayPattern([]), DayPattern([])], exceptions: {} }, tasks: {TaskId(00000000-0000-0000-0000-000000000003): Task { id: TaskId(00000000-0000-0000-0000-000000000003), parent: None, sort_key: SortKey("V"), name: "  spaced  ", duration: Duration(0), is_milestone: false, constraint: AsSoonAsPossible, percent_complete: Percent(0), notes: "Note 0: <b>&amp;</b>\nline two" }}, dependencies: {} }

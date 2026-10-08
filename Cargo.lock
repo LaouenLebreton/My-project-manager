@@ -2298,6 +2298,15 @@ dependencies = [
 [[package]]
 name = "pm-interop"
 version = "0.1.0"
+dependencies = [
+ "jiff",
+ "pm-core",
+ "proptest",
+ "quick-xml",
+ "serde",
+ "thiserror 2.0.21",
+ "uuid",
+]
 
 [[package]]
 name = "pm-store"
@@ -3148,6 +3157,7 @@ version = "0.1.0"
 dependencies = [
  "jiff",
  "pm-core",
+ "pm-interop",
  "pm-store",
  "serde",
  "serde_json",

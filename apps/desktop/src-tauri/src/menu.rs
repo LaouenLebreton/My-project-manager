@@ -47,6 +47,7 @@ pub struct MenuHandles {
     undo: MenuItem<Wry>,
     redo: MenuItem<Wry>,
     save_copy: MenuItem<Wry>,
+    export: MenuItem<Wry>,
     recent: Submenu<Wry>,
 }
 
@@ -62,6 +63,7 @@ impl MenuHandles {
     /// Items that need an open project.
     pub fn set_document_open(&self, open: bool) {
         let _ = self.save_copy.set_enabled(open);
+        let _ = self.export.set_enabled(open);
     }
 
     /// Rebuilds File > Open Recent: file names, then Clear Menu.
@@ -102,6 +104,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         b.build(app)
     };
     let save_copy = item(app, id::SAVE_COPY, "Save a Copy…", Some("CmdOrCtrl+Shift+S"))?;
+    let export = item(app, id::EXPORT, "Export as Microsoft Project XML…", Some("CmdOrCtrl+Shift+E"))?;
     let file = SubmenuBuilder::new(app, "File")
         .item(&enabled(id::NEW, "New Project…", Some("CmdOrCtrl+N"))?)
         .item(&enabled(id::OPEN, "Open…", Some("CmdOrCtrl+O"))?)
@@ -111,8 +114,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&save_copy)
         .item(&enabled(id::OPEN_BACKUP, "Open Backup…", None)?)
         .separator()
-        .item(&item(app, id::IMPORT, "Import Microsoft Project XML…", None)?)
-        .item(&item(app, id::EXPORT, "Export as Microsoft Project XML…", None)?)
+        .item(&enabled(id::IMPORT, "Import Microsoft Project XML…", Some("CmdOrCtrl+Shift+I"))?)
+        .item(&export)
         .separator()
         .item(&item(app, id::PRINT, "Print…", Some("CmdOrCtrl+P"))?)
         .build()?;
@@ -166,5 +169,5 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    Ok((menu, MenuHandles { undo, redo, save_copy, recent }))
+    Ok((menu, MenuHandles { undo, redo, save_copy, export, recent }))
 }

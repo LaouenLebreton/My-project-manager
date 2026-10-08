@@ -24,6 +24,8 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
         menu::id::OPEN_BACKUP => {
             return actions::spawn_dialog(app, |a| actions::open_with_dialog(a, files::backups_root(a), "Open Backup"));
         }
+        menu::id::IMPORT => return actions::spawn_dialog(app, actions::import_with_dialog),
+        menu::id::EXPORT => return actions::spawn_dialog(app, actions::export_with_dialog),
         menu::id::SAVE_COPY => return actions::spawn_dialog(app, |a| actions::save_copy_with_dialog(a).map(|()| None)),
         menu::id::CLEAR_RECENT => {
             files::clear_recent(app);

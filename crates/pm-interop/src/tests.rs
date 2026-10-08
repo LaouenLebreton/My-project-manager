@@ -1,0 +1,222 @@
+use std::collections::BTreeMap;
+
+use pm_core::*;
+use proptest::prelude::*;
+use uuid::Uuid;
+
+use crate::{export_mspdi, import_mspdi, ImportReport};
+
+fn ids() -> impl FnMut() -> Uuid {
+    let mut n = 0u128;
+    move || {
+        n += 1;
+        Uuid::from_u128(n)
+    }
+}
+
+/// Depth, name, duration (None for summaries), milestone, constraint, % complete, notes.
+type CanonRow = (usize, String, Option<i64>, bool, Constraint, u8, String);
+
+/// Everything a round trip must keep, independent of ids and sort-key spelling.
+#[derive(Debug, PartialEq)]
+struct Canon {
+    name: String,
+    start: Moment,
+    calendar: Calendar,
+    rows: Vec<CanonRow>,
+    links: Vec<(usize, usize, LinkType, i64)>,
+}
+
+fn canon(p: &Project) -> Canon {
+    let rows = outline(p);
+    let index: BTreeMap<TaskId, usize> = rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
+    let mut links: Vec<_> = p.dependencies.values().map(|d| (index[&d.predecessor], index[&d.successor], d.kind, d.lag)).collect();
+    links.sort_by_key(|l| (l.0, l.1));
+    Canon {
+        name: p.name.clone(),
+        start: p.start,
+        calendar: p.calendar.clone(),
+        rows: rows
+            .iter()
+            .map(|r| {
+                let t = &p.tasks[&r.id];
+                // A summary's stored duration is unused; a milestone's is zero.
+                let duration = (!r.has_children).then_some(if t.is_milestone { 0 } else { t.duration.get() });
+                let milestone = t.is_milestone && !r.has_children;
+                (r.depth, t.name.clone(), duration, milestone, t.constraint, t.percent_complete.get(), t.notes.clone())
+            })
+            .collect(),
+        links,
+    }
+}
+
+fn lines(r: &ImportReport) -> Vec<String> {
+    r.approximated.iter().chain(&r.ignored).map(|l| l.what.clone()).collect()
+}
+
+const FIXTURE: &str = include_str!("../../../fixtures/mspdi/handwritten-msp2016-style.xml");
+
+#[test]
+fn fixture_imports_what_it_can_and_reports_the_rest() {
+    let (p, report) = import_mspdi(FIXTURE, &mut ids()).unwrap();
+    assert_eq!(p.name, "Website Relaunch");
+    let names: Vec<(usize, String)> = outline(&p).iter().map(|r| (r.depth, p.tasks[&r.id].name.clone())).collect();
+    assert_eq!(
+        names,
+        [(0, "Design"), (1, "Wireframes & sitemap"), (1, "Visual design"), (0, "Build"), (1, "Templates"), (1, "Content migration"), (0, "Go live 🚀")]
+            .map(|(d, n)| (d, n.to_owned()))
+    );
+    let task = |name: &str| p.tasks.values().find(|t| t.name == name).unwrap();
+    assert_eq!(task("Wireframes & sitemap").duration.get(), 2400);
+    assert_eq!(task("Wireframes & sitemap").percent_complete.get(), 60);
+    assert_eq!(task("Wireframes & sitemap").notes, "Agree with marketing first.");
+    assert_eq!(task("Visual design").duration.get(), 960, "2 elapsed days → 2 working days");
+    assert!(task("Go live 🚀").is_milestone);
+    assert!(matches!(task("Go live 🚀").constraint, Constraint::MustStartOn(_)));
+    assert!(matches!(task("Templates").constraint, Constraint::StartNoEarlierThan(_)));
+    assert_eq!(task("Content migration").constraint, Constraint::AsSoonAsPossible);
+
+    // Calendar: Friday afternoons off, Christmas off (three days), one working Saturday.
+    assert_eq!(p.calendar.week()[4].working_minutes(), 240);
+    assert!(!p.calendar.week()[5].is_working());
+    let day = |y, m, d| time::day_number(jiff::civil::date(y, m, d));
+    assert!(!p.calendar.pattern(day(2026, 12, 25)).is_working());
+    assert!(!p.calendar.pattern(day(2026, 12, 26)).is_working());
+    assert_eq!(p.calendar.pattern(day(2026, 10, 24)).working_minutes(), 240);
+
+    // Links: percentage lag 50% of 2 days = 1 day; FF −1 day; elapsed 1 day → 1 working day.
+    let link = |a: &str, b: &str| p.dependencies.values().find(|d| p.tasks[&d.predecessor].name == a && p.tasks[&d.successor].name == b);
+    assert_eq!(link("Wireframes & sitemap", "Visual design").map(|d| (d.kind, d.lag)), Some((LinkType::FinishToStart, 240)));
+    assert_eq!(link("Visual design", "Templates").map(|d| (d.kind, d.lag)), Some((LinkType::StartToStart, 480)));
+    assert_eq!(link("Templates", "Content migration").map(|d| (d.kind, d.lag)), Some((LinkType::FinishToFinish, -480)));
+    assert_eq!(link("Wireframes & sitemap", "Content migration").map(|d| d.lag), Some(480));
+    assert_eq!(p.dependencies.len(), 5, "links on summary tasks and to other projects are not imported");
+    assert!(schedule(&p).is_ok());
+
+    let reported = lines(&report).join("\n");
+    for expected in [
+        "Elapsed durations",
+        "“As late as possible” is not supported yet",
+        "“Must finish on” constraints are not supported yet",
+        "Manually scheduled tasks",
+        "Milestones with a duration",
+        "Lags given as a percentage",
+        "Elapsed lags",
+        "Links that Super PM cannot hold yet (summary tasks cannot have links yet",
+        "Links to tasks in other projects",
+        "Blank rows",
+        "Baselines",
+        "Actual start and finish dates",
+        "Custom fields",
+        "Deadlines",
+        "Task calendars",
+        "Task priorities",
+        "Work hours",
+        "Resources (arrive in iteration 2)",
+        "Resource assignments",
+        "Other calendars",
+        "Recurring calendar exceptions",
+        "Alternative work weeks",
+        "Status date",
+        "Project options Super PM does not use",
+    ] {
+        assert!(reported.contains(expected), "report should mention {expected:?}; it says:\n{reported}");
+    }
+    let resources = report.ignored.iter().find(|l| l.what.starts_with("Resources")).unwrap();
+    assert_eq!(resources.count, 2);
+    let options = report.ignored.iter().find(|l| l.what.starts_with("Project options")).unwrap();
+    assert!(options.examples.contains(&"CurrencySymbol".to_owned()));
+    assert!(report.recalculated.contains(&"TotalSlack".to_owned()) || report.recalculated.contains(&"Critical".to_owned()));
+    assert!(report.imported.iter().any(|l| l.what.starts_with("Tasks") && l.count == 7));
+}
+
+#[test]
+fn export_then_import_keeps_everything_and_reports_nothing() {
+    let (p, _) = import_mspdi(FIXTURE, &mut ids()).unwrap();
+    let xml = export_mspdi(&p, schedule(&p).ok().as_ref());
+    let (q, report) = import_mspdi(&xml, &mut ids()).unwrap();
+    assert_eq!(canon(&q), canon(&p));
+    assert!(lines(&report).is_empty(), "a Super PM export has nothing to approximate: {:?}", lines(&report));
+    // And the second export is identical to the first.
+    assert_eq!(export_mspdi(&q, schedule(&q).ok().as_ref()), xml);
+}
+
+#[test]
+fn export_escapes_text() {
+    let (mut p, _) = import_mspdi(FIXTURE, &mut ids()).unwrap();
+    p.name = "R&D <Phase 2> \"quoted\"".into();
+    let xml = export_mspdi(&p, None);
+    assert!(xml.contains("<Title>R&amp;D &lt;Phase 2&gt; &quot;quoted&quot;</Title>"));
+    let (q, _) = import_mspdi(&xml, &mut ids()).unwrap();
+    assert_eq!(q.name, p.name);
+}
+
+fn random_project() -> impl Strategy<Value = Project> {
+    let names = prop::sample::select(vec!["Plan", "R&D <1>", "“Quotes” & 'apostrophes'", "Ünïcødé 🚀", "Tab\there", "  spaced  ", ""]);
+    let task = (names, 0usize..3, 0i64..5000, prop::bool::weighted(0.15), 0u8..=100, 0usize..3);
+    let tasks = prop::collection::vec(task, 1..30);
+    let links = prop::collection::vec((0usize..30, 0usize..30, 0usize..4, -2000i64..2000), 0..40);
+    let holidays = prop::collection::vec((0i64..120, prop::bool::ANY), 0..6);
+    (tasks, links, holidays).prop_map(|(tasks, links, holidays)| {
+        let mut next = ids();
+        let mut p = Project {
+            id: ProjectId(next()),
+            name: "Random".into(),
+            start: Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0)),
+            calendar_id: CalendarId(next()),
+            calendar: Calendar::standard(),
+            tasks: BTreeMap::new(),
+            dependencies: BTreeMap::new(),
+        };
+        for (offset, working) in holidays {
+            let date = jiff::civil::date(2026, 10, 5).checked_add(jiff::Span::new().days(offset)).unwrap();
+            let pattern = if working { DayPattern::new(vec![WorkRange::hours(9, 12).unwrap()]).unwrap() } else { DayPattern::non_working() };
+            p.calendar.set_exception(date, pattern);
+        }
+        let mut created: Vec<(TaskId, usize)> = Vec::new();
+        let mut last_key: BTreeMap<Option<TaskId>, SortKey> = BTreeMap::new();
+        for (k, (name, depth, minutes, milestone, percent, constraint)) in tasks.into_iter().enumerate() {
+            // A depth can only go one deeper than the task above.
+            let depth = depth.min(created.last().map_or(0, |&(_, d)| d + 1));
+            let parent = created.iter().rev().find(|&&(_, d)| d + 1 == depth).map(|&(id, _)| id).filter(|_| depth > 0);
+            let id = TaskId(next());
+            let key = SortKey::between(last_key.get(&parent), None);
+            last_key.insert(parent, key.clone());
+            let date = Moment::from_datetime(jiff::civil::date(2026, 10, 7 + (k % 10) as i8).at(8, 0, 0, 0));
+            let task = Task {
+                id,
+                parent,
+                sort_key: key,
+                name: name.to_owned(),
+                duration: Duration::minutes(if milestone { 0 } else { minutes }).unwrap(),
+                is_milestone: milestone,
+                constraint: [Constraint::AsSoonAsPossible, Constraint::StartNoEarlierThan(date), Constraint::MustStartOn(date)][constraint],
+                percent_complete: Percent::new(percent).unwrap(),
+                notes: if k % 3 == 0 { format!("Note {k}: <b>&amp;</b>\nline two") } else { String::new() },
+            };
+            // Through the command layer, so the project is one the app could hold.
+            if apply(&mut p, &Command::InsertTasks { tasks: vec![task], dependencies: vec![] }).is_ok() {
+                created.push((id, depth));
+            }
+        }
+        let kinds = [LinkType::FinishToStart, LinkType::StartToStart, LinkType::FinishToFinish, LinkType::StartToFinish];
+        for (a, b, kind, lag) in links {
+            let (Some(&(pa, _)), Some(&(pb, _))) = (created.get(a), created.get(b)) else { continue };
+            let dependency = Dependency { id: DependencyId(next()), predecessor: pa, successor: pb, kind: kinds[kind], lag };
+            let _ = apply(&mut p, &Command::InsertLink { dependency });
+        }
+        p
+    })
+}
+
+proptest! {
+    /// Spec section 3: export then import keeps tasks, hierarchy, durations, links, lags and
+    /// calendars intact.
+    #[test]
+    fn round_trip_keeps_the_project(p in random_project()) {
+        let xml = export_mspdi(&p, schedule(&p).ok().as_ref());
+        let (q, report) = import_mspdi(&xml, &mut ids()).unwrap();
+        prop_assert_eq!(canon(&q), canon(&p));
+        prop_assert!(lines(&report).is_empty(), "{:?}", lines(&report));
+    }
+}

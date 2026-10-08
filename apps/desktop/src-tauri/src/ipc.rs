@@ -346,6 +346,41 @@ pub fn open_recent(path: String, app: AppHandle) -> Result<Snapshot, IpcError> {
     crate::actions::open_path(&app, std::path::Path::new(&path))
 }
 
+/// The import report, shaped for the dialog that shows it.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportView {
+    pub source: String,
+    pub imported: Vec<ReportLineView>,
+    pub approximated: Vec<ReportLineView>,
+    pub ignored: Vec<ReportLineView>,
+    pub recalculated: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ReportLineView {
+    pub what: String,
+    pub count: u32,
+    pub examples: Vec<String>,
+}
+
+impl ReportView {
+    pub fn new(source: &str, r: pm_interop::ImportReport) -> Self {
+        let lines = |v: Vec<pm_interop::ReportLine>| {
+            v.into_iter().map(|l| ReportLineView { what: l.what, count: l.count as u32, examples: l.examples }).collect()
+        };
+        ReportView {
+            source: source.to_owned(),
+            imported: lines(r.imported),
+            approximated: lines(r.approximated),
+            ignored: lines(r.ignored),
+            recalculated: r.recalculated,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
 pub struct RecentFile {

@@ -75,6 +75,26 @@ function generate(n: number): { rows: Row[]; links: Link[] } {
   return { rows, links };
 }
 
+/** `?report` in the URL shows a sample import report, to check the dialog. */
+function sampleReport() {
+  return {
+    source: "Website Relaunch",
+    imported: [
+      { what: "Tasks, with names, outline, durations, milestones, notes and % complete", count: 7, examples: [] },
+      { what: "Links, with type and lag", count: 5, examples: [] },
+    ],
+    approximated: [
+      { what: "Elapsed durations (counted in calendar days) were converted to working time", count: 1, examples: ["Visual design"] },
+      { what: "“As late as possible” is not supported yet; these tasks are scheduled as soon as possible", count: 1, examples: ["Visual design"] },
+    ],
+    ignored: [
+      { what: "Resources (arrive in iteration 2)", count: 2, examples: [] },
+      { what: "Baselines (arrive in iteration 2)", count: 1, examples: ["Wireframes & sitemap"] },
+    ],
+    recalculated: ["Critical", "Finish", "Start", "TotalSlack"],
+  };
+}
+
 export function install() {
   const n = Number(new URLSearchParams(location.search).get("n") ?? 0);
   const generated = n > 0 ? generate(n) : { rows: [row("Alpha"), row("Beta"), row("Gamma")], links: [] };
@@ -102,10 +122,25 @@ export function install() {
     throw { message };
   };
 
+  // Events: enough of Tauri's event plumbing for `listen()` to work.
+  const callbacks = new Map<number, (e: unknown) => void>();
+  const listeners: { event: string; handler: number }[] = [];
+  let nextCallback = 1;
+  const emit = (event: string, payload: unknown) => {
+    for (const l of listeners) if (l.event === event) callbacks.get(l.handler)?.({ event, id: 0, payload });
+  };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   window.__TAURI_INTERNALS__ = {
-    transformCallback: () => Math.random(),
+    transformCallback: (cb: (e: unknown) => void) => {
+      const id = nextCallback++;
+      callbacks.set(id, cb);
+      return id;
+    },
     invoke: async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "plugin:event|listen") {
+        listeners.push({ event: args.event as string, handler: args.handler as number });
+        return listeners.length;
+      }
       if (cmd.startsWith("plugin:event")) return 1;
       switch (cmd) {
         case "get_snapshot":
@@ -117,6 +152,10 @@ export function install() {
           return null; // as if the user cancelled the dialog
         case "open_recent":
         case "open_sample":
+          if (new URLSearchParams(location.search).has("report")) {
+            setTimeout(() => emit("import-report", sampleReport()), 50);
+          }
+          return snapshot();
         case "undo":
         case "redo":
           return snapshot();

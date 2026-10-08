@@ -47,12 +47,18 @@ pub fn empty_project(path: &Path) -> Project {
 /// Creates a project file. The save panel has already asked before replacing a file, so an
 /// existing file at `path` is removed first, with its SQLite side files.
 pub fn create(path: &Path) -> Result<Document, String> {
+    create_with(path, empty_project(path))
+}
+
+/// Like [`create`], with given contents (an import). The project takes the file's name.
+pub fn create_with(path: &Path, mut project: Project) -> Result<Document, String> {
+    project.name = display_name(path);
     if path.exists() {
         for p in sqlite_files(path) {
             let _ = std::fs::remove_file(p);
         }
     }
-    Document::create(path, empty_project(path)).map_err(|e| e.to_string())
+    Document::create(path, project).map_err(|e| e.to_string())
 }
 
 fn sqlite_files(path: &Path) -> [PathBuf; 3] {

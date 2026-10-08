@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <SaveVersion>14</SaveVersion>
+  <BuildNumber>16.0.4266.1001</BuildNumber>
+  <Name>Website Relaunch.xml</Name>
+  <Title>Website Relaunch</Title>
+  <Author>Laouen</Author>
+  <CreationDate>2026-09-01T09:00:00</CreationDate>
+  <ScheduleFromStart>1</ScheduleFromStart>
+  <StartDate>2026-10-05T08:00:00</StartDate>
+  <FinishDate>2026-11-20T17:00:00</FinishDate>
+  <CalendarUID>1</CalendarUID>
+  <DefaultStartTime>08:00:00</DefaultStartTime>
+  <DefaultFinishTime>17:00:00</DefaultFinishTime>
+  <MinutesPerDay>480</MinutesPerDay>
+  <MinutesPerWeek>2400</MinutesPerWeek>
+  <DaysPerMonth>20</DaysPerMonth>
+  <CurrencySymbol>€</CurrencySymbol>
+  <HonorConstraints>1</HonorConstraints>
+  <StatusDate>2026-10-16T17:00:00</StatusDate>
+  <Calendars>
+    <Calendar>
+      <UID>1</UID>
+      <GUID>0C9E7E72-0000-0000-0000-000000000001</GUID>
+      <Name>Standard</Name>
+      <IsBaseCalendar>1</IsBaseCalendar>
+      <IsBaselineCalendar>0</IsBaselineCalendar>
+      <BaseCalendarUID>-1</BaseCalendarUID>
+      <WeekDays>
+        <WeekDay><DayType>1</DayType><DayWorking>0</DayWorking></WeekDay>
+        <WeekDay><DayType>2</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>3</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>4</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>5</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime><WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>6</DayType><DayWorking>1</DayWorking><WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime></WorkingTimes></WeekDay>
+        <WeekDay><DayType>7</DayType><DayWorking>0</DayWorking></WeekDay>
+        <WeekDay><DayType>0</DayType><DayWorking>0</DayWorking><TimePeriod><FromDate>2026-12-24T00:00:00</FromDate><ToDate>2026-12-26T23:59:00</ToDate></TimePeriod></WeekDay>
+      </WeekDays>
+      <Exceptions>
+        <Exception>
+          <EnteredByOccurrences>0</EnteredByOccurrences>
+          <TimePeriod><FromDate>2026-12-24T00:00:00</FromDate><ToDate>2026-12-26T23:59:00</ToDate></TimePeriod>
+          <Occurrences>1</Occurrences>
+          <Name>Christmas</Name>
+          <Type>1</Type>
+          <DayWorking>0</DayWorking>
+        </Exception>
+        <Exception>
+          <EnteredByOccurrences>0</EnteredByOccurrences>
+          <TimePeriod><FromDate>2026-10-24T00:00:00</FromDate><ToDate>2026-10-24T23:59:00</ToDate></TimePeriod>
+          <Occurrences>1</Occurrences>
+          <Name>Launch Saturday</Name>
+          <Type>1</Type>
+          <DayWorking>1</DayWorking>
+          <WorkingTimes><WorkingTime><FromTime>09:00:00</FromTime><ToTime>13:00:00</ToTime></WorkingTime></WorkingTimes>
+        </Exception>
+        <Exception>
+          <EnteredByOccurrences>1</EnteredByOccurrences>
+          <TimePeriod><FromDate>2026-05-01T00:00:00</FromDate><ToDate>2030-05-01T23:59:00</ToDate></TimePeriod>
+          <Occurrences>5</Occurrences>
+          <Name>Labour Day</Name>
+          <Type>4</Type>
+          <Month>4</Month>
+          <MonthDay>1</MonthDay>
+          <DayWorking>0</DayWorking>
+        </Exception>
+      </Exceptions>
+      <WorkWeeks>
+        <WorkWeek>
+          <TimePeriod><FromDate>2026-07-01T00:00:00</FromDate><ToDate>2026-08-31T23:59:00</ToDate></TimePeriod>
+          <Name>Summer hours</Name>
+        </WorkWeek>
+      </WorkWeeks>
+    </Calendar>
+    <Calendar>
+      <UID>2</UID>
+      <Name>Sam</Name>
+      <IsBaseCalendar>0</IsBaseCalendar>
+      <BaseCalendarUID>1</BaseCalendarUID>
+    </Calendar>
+  </Calendars>
+  <Tasks>
+    <Task>
+      <UID>0</UID><ID>0</ID><Name>Website Relaunch</Name><OutlineNumber>0</OutlineNumber><OutlineLevel>0</OutlineLevel><Summary>1</Summary>
+    </Task>
+    <Task>
+      <UID>1</UID><ID>1</ID><Name>Design</Name><Active>1</Active><Manual>0</Manual><Type>1</Type><IsNull>0</IsNull>
+      <CreateDate>2026-09-01T09:00:00</CreateDate><WBS>1</WBS><OutlineNumber>1</OutlineNumber><OutlineLevel>1</OutlineLevel><Priority>500</Priority>
+      <Start>2026-10-05T08:00:00</Start><Finish>2026-10-16T17:00:00</Finish><Duration>PT80H0M0S</Duration><DurationFormat>53</DurationFormat>
+      <Milestone>0</Milestone><Summary>1</Summary><Critical>1</Critical><ConstraintType>0</ConstraintType><CalendarUID>-1</CalendarUID>
+    </Task>
+    <Task>
+      <UID>2</UID><ID>2</ID><Name>Wireframes &amp; sitemap</Name><Active>1</Active><Manual>0</Manual><Type>0</Type><IsNull>0</IsNull>
+      <WBS>1.1</WBS><OutlineNumber>1.1</OutlineNumber><OutlineLevel>2</OutlineLevel><Priority>500</Priority>
+      <Start>2026-10-05T08:00:00</Start><Finish>2026-10-09T17:00:00</Finish><Duration>PT40H0M0S</Duration><DurationFormat>7</DurationFormat>
+      <Work>PT40H0M0S</Work><Milestone>0</Milestone><Summary>0</Summary><PercentComplete>60</PercentComplete>
+      <ActualStart>2026-10-05T08:00:00</ActualStart><ConstraintType>0</ConstraintType><CalendarUID>-1</CalendarUID>
+      <Notes>Agree with marketing first.</Notes>
+      <Baseline><Number>0</Number><Start>2026-10-05T08:00:00</Start><Finish>2026-10-09T17:00:00</Finish><Duration>PT40H0M0S</Duration></Baseline>
+      <ExtendedAttribute><FieldID>188743731</FieldID><Value>Team A</Value></ExtendedAttribute>
+    </Task>
+    <Task>
+      <UID>3</UID><ID>3</ID><Name>Visual design</Name><Active>1</Active><Manual>0</Manual><Type>1</Type><IsNull>0</IsNull>
+      <OutlineNumber>1.2</OutlineNumber><OutlineLevel>2</OutlineLevel><Priority>700</Priority>
+      <Duration>PT48H0M0S</Duration><DurationFormat>8</DurationFormat><Milestone>0</Milestone><Summary>0</Summary>
+      <ConstraintType>1</ConstraintType><CalendarUID>-1</CalendarUID>
+      <PredecessorLink><PredecessorUID>2</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>2400</LinkLag><LagFormat>5</LagFormat></PredecessorLink>
+    </Task>
+    <Task>
+      <UID>4</UID><ID>4</ID><IsNull>1</IsNull>
+    </Task>
+    <Task>
+      <UID>5</UID><ID>5</ID><Name>Build</Name><Active>1</Active><Manual>0</Manual><Type>1</Type><IsNull>0</IsNull>
+      <OutlineNumber>2</OutlineNumber><OutlineLevel>1</OutlineLevel><Duration>PT120H0M0S</Duration><DurationFormat>7</DurationFormat>
+      <Milestone>0</Milestone><Summary>1</Summary><ConstraintType>0</ConstraintType><CalendarUID>-1</CalendarUID>
+      <PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
+    </Task>
+    <Task>
+      <UID>6</UID><ID>6</ID><Name>Templates</Name><Active>1</Active><Manual>1</Manual><Type>1</Type><IsNull>0</IsNull>
+      <OutlineNumber>2.1</OutlineNumber><OutlineLevel>2</OutlineLevel><Duration>PT64H0M0S</Duration><DurationFormat>7</DurationFormat>
+      <Milestone>0</Milestone><Summary>0</Summary><ConstraintType>4</ConstraintType><ConstraintDate>2026-10-19T08:00:00</ConstraintDate><CalendarUID>-1</CalendarUID>
+      <PredecessorLink><PredecessorUID>3</PredecessorUID><Type>3</Type><CrossProject>0</CrossProject><LinkLag>500</LinkLag><LagFormat>19</LagFormat></PredecessorLink>
+    </Task>
+    <Task>
+      <UID>7</UID><ID>7</ID><Name>Content migration</Name><Active>1</Active><Manual>0</Manual><Type>1</Type><IsNull>0</IsNull>
+      <OutlineNumber>2.2</OutlineNumber><OutlineLevel>2</OutlineLevel><Duration>PT24H0M0S</Duration><DurationFormat>7</DurationFormat>
+      <Milestone>0</Milestone><Summary>0</Summary><ConstraintType>3</ConstraintType><ConstraintDate>2026-11-06T17:00:00</ConstraintDate>
+      <CalendarUID>2</CalendarUID><Deadline>2026-11-06T17:00:00</Deadline>
+      <PredecessorLink><PredecessorUID>6</PredecessorUID><Type>0</Type><CrossProject>0</CrossProject><LinkLag>-4800</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
+      <PredecessorLink><PredecessorUID>2</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>14400</LinkLag><LagFormat>8</LagFormat></PredecessorLink>
+      <PredecessorLink><PredecessorUID>99</PredecessorUID><Type>1</Type><CrossProject>1</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
+    </Task>
+    <Task>
+      <UID>8</UID><ID>8</ID><Name>Go live 🚀</Name><Active>1</Active><Manual>0</Manual><Type>1</Type><IsNull>0</IsNull>
+      <OutlineNumber>3</OutlineNumber><OutlineLevel>1</OutlineLevel><Duration>PT8H0M0S</Duration><DurationFormat>7</DurationFormat>
+      <Milestone>1</Milestone><Summary>0</Summary><ConstraintType>2</ConstraintType><ConstraintDate>2026-11-23T08:00:00</ConstraintDate><CalendarUID>-1</CalendarUID>
+      <PredecessorLink><PredecessorUID>7</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
+      <PredecessorLink><PredecessorUID>5</PredecessorUID><Type>1</Type><CrossProject>0</CrossProject><LinkLag>0</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
+    </Task>
+  </Tasks>
+  <Resources>
+    <Resource><UID>0</UID><ID>0</ID><Type>1</Type><IsNull>0</IsNull></Resource>
+    <Resource><UID>1</UID><ID>1</ID><Name>Sam</Name><Type>1</Type><CalendarUID>2</CalendarUID></Resource>
+    <Resource><UID>2</UID><ID>2</ID><Name>Alex</Name><Type>1</Type></Resource>
+  </Resources>
+  <Assignments>
+    <Assignment><UID>1</UID><TaskUID>2</TaskUID><ResourceUID>1</ResourceUID><Units>1</Units></Assignment>
+    <Assignment><UID>2</UID><TaskUID>8</TaskUID><ResourceUID>-65535</ResourceUID></Assignment>
+  </Assignments>
+</Project>

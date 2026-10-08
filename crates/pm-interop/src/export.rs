@@ -1,0 +1,197 @@
+//! Super PM project → MSPDI that Microsoft Project opens.
+
+use std::collections::HashMap;
+use std::io::Cursor;
+
+use pm_core::{outline, Constraint, DayPattern, LinkType, Moment, Project, Schedule, TaskId};
+use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::Writer;
+
+use crate::NAMESPACE;
+
+type W = Writer<Cursor<Vec<u8>>>;
+
+fn leaf(w: &mut W, name: &str, text: &str) {
+    w.create_element(name).write_text_content(BytesText::new(text)).expect("writing to memory");
+}
+
+fn open(w: &mut W, name: &str) {
+    w.write_event(Event::Start(BytesStart::new(name))).expect("writing to memory");
+}
+
+fn close(w: &mut W, name: &str) {
+    w.write_event(Event::End(BytesEnd::new(name))).expect("writing to memory");
+}
+
+fn datetime(m: Moment) -> String {
+    m.to_datetime().strftime("%Y-%m-%dT%H:%M:%S").to_string()
+}
+
+fn time_of_day(minutes: u16) -> String {
+    if minutes >= 1440 {
+        "00:00:00".into() // MSPDI writes the end of the day as midnight
+    } else {
+        format!("{:02}:{:02}:00", minutes / 60, minutes % 60)
+    }
+}
+
+/// "PT16H0M0S": working time as MSPDI writes it.
+fn iso_duration(minutes: i64) -> String {
+    format!("PT{}H{}M0S", minutes / 60, minutes % 60)
+}
+
+fn working_times(w: &mut W, pattern: &DayPattern) {
+    if pattern.is_working() {
+        open(w, "WorkingTimes");
+        for range in pattern.ranges() {
+            open(w, "WorkingTime");
+            leaf(w, "FromTime", &time_of_day(range.start()));
+            leaf(w, "ToTime", &time_of_day(range.end()));
+            close(w, "WorkingTime");
+        }
+        close(w, "WorkingTimes");
+    }
+}
+
+/// Writes the project as MSPDI. `schedule` supplies the start and finish dates Microsoft
+/// Project shows before it recalculates; without one, dates are omitted.
+pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
+    let mut w = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
+    w.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), Some("yes")))).expect("writing to memory");
+    w.write_event(Event::Start(BytesStart::new("Project").with_attributes([("xmlns", NAMESPACE)])))
+        .expect("writing to memory");
+    leaf(&mut w, "SaveVersion", "14");
+    leaf(&mut w, "Name", &format!("{}.xml", p.name));
+    leaf(&mut w, "Title", &p.name);
+    leaf(&mut w, "ScheduleFromStart", "1");
+    leaf(&mut w, "StartDate", &datetime(p.start));
+    if let Some(s) = schedule {
+        leaf(&mut w, "FinishDate", &datetime(s.project_finish));
+    }
+    leaf(&mut w, "CalendarUID", "1");
+    let monday = &p.calendar.week()[0];
+    let first = monday.ranges().first().map_or(480, |r| r.start());
+    let last = monday.ranges().last().map_or(1020, |r| r.end());
+    leaf(&mut w, "DefaultStartTime", &time_of_day(first));
+    leaf(&mut w, "DefaultFinishTime", &time_of_day(last));
+    leaf(&mut w, "MinutesPerDay", "480");
+    leaf(&mut w, "MinutesPerWeek", "2400");
+    leaf(&mut w, "DaysPerMonth", "20");
+
+    // Calendar: one base calendar.
+    open(&mut w, "Calendars");
+    open(&mut w, "Calendar");
+    leaf(&mut w, "UID", "1");
+    leaf(&mut w, "Name", "Standard");
+    leaf(&mut w, "IsBaseCalendar", "1");
+    leaf(&mut w, "BaseCalendarUID", "-1");
+    open(&mut w, "WeekDays");
+    for day_type in 1..=7 {
+        // MSPDI: 1 = Sunday … 7 = Saturday. Super PM: Monday first.
+        let pattern = &p.calendar.week()[((day_type + 5) % 7) as usize];
+        open(&mut w, "WeekDay");
+        leaf(&mut w, "DayType", &day_type.to_string());
+        leaf(&mut w, "DayWorking", if pattern.is_working() { "1" } else { "0" });
+        working_times(&mut w, pattern);
+        close(&mut w, "WeekDay");
+    }
+    close(&mut w, "WeekDays");
+    let exceptions: Vec<_> = p.calendar.exceptions().collect();
+    if !exceptions.is_empty() {
+        open(&mut w, "Exceptions");
+        for (date, pattern) in exceptions {
+            open(&mut w, "Exception");
+            leaf(&mut w, "EnteredByOccurrences", "0");
+            open(&mut w, "TimePeriod");
+            leaf(&mut w, "FromDate", &format!("{date}T00:00:00"));
+            leaf(&mut w, "ToDate", &format!("{date}T23:59:00"));
+            close(&mut w, "TimePeriod");
+            leaf(&mut w, "Occurrences", "1");
+            leaf(&mut w, "Name", if pattern.is_working() { "Changed working hours" } else { "Non-working day" });
+            leaf(&mut w, "Type", "1");
+            leaf(&mut w, "DayWorking", if pattern.is_working() { "1" } else { "0" });
+            working_times(&mut w, pattern);
+            close(&mut w, "Exception");
+        }
+        close(&mut w, "Exceptions");
+    }
+    close(&mut w, "Calendar");
+    close(&mut w, "Calendars");
+
+    // Tasks in outline order. UIDs are row numbers; 0 is the project summary.
+    let rows = outline(p);
+    let uid: HashMap<TaskId, usize> = rows.iter().enumerate().map(|(i, r)| (r.id, i + 1)).collect();
+    let mut outline_numbers: Vec<usize> = Vec::new();
+    open(&mut w, "Tasks");
+    open(&mut w, "Task");
+    leaf(&mut w, "UID", "0");
+    leaf(&mut w, "ID", "0");
+    leaf(&mut w, "Name", &p.name);
+    leaf(&mut w, "OutlineLevel", "0");
+    leaf(&mut w, "Summary", "1");
+    close(&mut w, "Task");
+    for (i, row) in rows.iter().enumerate() {
+        let t = &p.tasks[&row.id];
+        outline_numbers.truncate(row.depth + 1);
+        while outline_numbers.len() < row.depth + 1 {
+            outline_numbers.push(0);
+        }
+        outline_numbers[row.depth] += 1;
+        let duration = if t.is_milestone { 0 } else { t.duration.get() };
+        let sched = schedule.and_then(|s| s.tasks.get(&row.id));
+        open(&mut w, "Task");
+        leaf(&mut w, "UID", &(i + 1).to_string());
+        leaf(&mut w, "ID", &(i + 1).to_string());
+        leaf(&mut w, "Name", &t.name);
+        leaf(&mut w, "Type", "1"); // fixed duration
+        leaf(&mut w, "IsNull", "0");
+        leaf(&mut w, "OutlineNumber", &outline_numbers.iter().map(usize::to_string).collect::<Vec<_>>().join("."));
+        leaf(&mut w, "OutlineLevel", &(row.depth + 1).to_string());
+        if let Some(s) = sched {
+            leaf(&mut w, "Start", &datetime(s.early_start));
+            leaf(&mut w, "Finish", &datetime(s.early_finish));
+        }
+        let summary_duration = sched.filter(|_| row.has_children).map(|s| p.calendar.working_between(s.early_start, s.early_finish));
+        let written = summary_duration.unwrap_or(duration);
+        leaf(&mut w, "Duration", &iso_duration(written));
+        leaf(&mut w, "DurationFormat", if written % 480 == 0 { "7" } else { "5" });
+        leaf(&mut w, "Manual", "0");
+        // A summary's dates come from its tasks, so a milestone flag on it means nothing.
+        leaf(&mut w, "Milestone", if t.is_milestone && !row.has_children { "1" } else { "0" });
+        leaf(&mut w, "Summary", if row.has_children { "1" } else { "0" });
+        leaf(&mut w, "PercentComplete", &t.percent_complete.get().to_string());
+        let (ctype, cdate) = match t.constraint {
+            Constraint::AsSoonAsPossible => ("0", None),
+            Constraint::MustStartOn(m) => ("2", Some(m)),
+            Constraint::StartNoEarlierThan(m) => ("4", Some(m)),
+        };
+        leaf(&mut w, "ConstraintType", ctype);
+        if let Some(d) = cdate {
+            leaf(&mut w, "ConstraintDate", &datetime(d));
+        }
+        leaf(&mut w, "CalendarUID", "-1");
+        if !t.notes.is_empty() {
+            leaf(&mut w, "Notes", &t.notes);
+        }
+        for d in p.dependencies.values().filter(|d| d.successor == row.id) {
+            let Some(pred) = uid.get(&d.predecessor) else { continue };
+            open(&mut w, "PredecessorLink");
+            leaf(&mut w, "PredecessorUID", &pred.to_string());
+            let kind = match d.kind {
+                LinkType::FinishToFinish => "0",
+                LinkType::FinishToStart => "1",
+                LinkType::StartToFinish => "2",
+                LinkType::StartToStart => "3",
+            };
+            leaf(&mut w, "Type", kind);
+            leaf(&mut w, "CrossProject", "0");
+            leaf(&mut w, "LinkLag", &(d.lag * 10).to_string()); // tenths of a minute
+            leaf(&mut w, "LagFormat", if d.lag % 480 == 0 { "7" } else { "5" });
+            close(&mut w, "PredecessorLink");
+        }
+        close(&mut w, "Task");
+    }
+    close(&mut w, "Tasks");
+    close(&mut w, "Project");
+    String::from_utf8(w.into_inner().into_inner()).expect("quick-xml writes UTF-8")
+}

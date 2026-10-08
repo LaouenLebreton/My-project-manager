@@ -7,10 +7,12 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::document::Document;
 use crate::files::{self, EXTENSION};
-use crate::ipc::{changed, AppState, IpcError, Snapshot};
+use crate::ipc::{changed, AppState, IpcError, ReportView, Snapshot};
 use crate::menu::MenuHandles;
 
 pub const CLOSED_EVENT: &str = "document-closed";
+/// Sent after an import, with the [`ReportView`] to show.
+pub const IMPORT_REPORT_EVENT: &str = "import-report";
 
 fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("main")
@@ -166,4 +168,69 @@ pub fn spawn_dialog(app: &AppHandle, action: impl FnOnce(&AppHandle) -> Result<O
             let _ = app.emit("error", e);
         }
     });
+}
+
+// Microsoft Project XML ---------------------------------------------------------------------
+
+fn err(message: impl Into<String>) -> IpcError {
+    IpcError { message: message.into() }
+}
+
+/// Import: pick the XML, convert it, ask where to save the new project, open it, and show
+/// the import report.
+pub fn import_with_dialog(app: &AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    let mut pick = app.dialog().file().set_title("Import Microsoft Project XML").add_filter("Microsoft Project XML", &["xml"]);
+    if let Some(dir) = documents_dir(app) {
+        pick = pick.set_directory(dir);
+    }
+    let Some(choice) = pick.blocking_pick_file() else { return Ok(None) };
+    let source = choice.into_path().map_err(|e| err(e.to_string()))?;
+    let bytes = std::fs::read(&source)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let (project, report) = pm_interop::import_mspdi(&text, &mut crate::document::new_id)
+        .map_err(|e| err(format!("“{}” could not be imported: {e}", files::display_name(&source))))?;
+
+    let mut save = app
+        .dialog()
+        .file()
+        .set_title("Save Imported Project")
+        .set_file_name(format!("{}.{EXTENSION}", files::display_name(&source)))
+        .add_filter("Super PM Project", &[EXTENSION]);
+    if let Some(dir) = source.parent() {
+        save = save.set_directory(dir);
+    }
+    let Some(choice) = save.blocking_save_file() else { return Ok(None) };
+    let path = files::with_extension(choice.into_path().map_err(|e| err(e.to_string()))?);
+    let doc = files::create_with(&path, project).map_err(err)?;
+    let snapshot = install(app, doc);
+    let _ = app.emit(IMPORT_REPORT_EVENT, ReportView::new(&files::display_name(&source), report));
+    Ok(Some(snapshot))
+}
+
+pub fn export_with_dialog(app: &AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    let state = app.state::<AppState>();
+    let (name, folder) = match state.doc.lock().expect("state lock").as_ref() {
+        Some(d) => (files::display_name(&d.path), d.path.parent().map(Path::to_owned)),
+        None => return Ok(None),
+    };
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Export as Microsoft Project XML")
+        .set_file_name(format!("{name}.xml"))
+        .add_filter("Microsoft Project XML", &["xml"]);
+    if let Some(dir) = folder {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(choice) = dialog.blocking_save_file() else { return Ok(None) };
+    let mut path = choice.into_path().map_err(|e| err(e.to_string()))?;
+    if path.extension().is_none() {
+        path.set_extension("xml");
+    }
+    let xml = match state.doc.lock().expect("state lock").as_ref() {
+        Some(d) => pm_interop::export_mspdi(&d.project, d.schedule.as_ref().ok()),
+        None => return Ok(None),
+    };
+    std::fs::write(&path, xml)?;
+    Ok(None)
 }
