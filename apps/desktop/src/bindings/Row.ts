@@ -4,4 +4,12 @@ export type Row = { id: string, parentId: string | null, depth: number, isSummar
 /**
  * Stored duration; for summaries the span of their children, in working minutes.
  */
-durationMinutes: number, start: string | null, finish: string | null, lateStart: string | null, lateFinish: string | null, totalSlackMinutes: number | null, critical: boolean, percentComplete: number, };
+durationMinutes: number, start: string | null, finish: string | null, lateStart: string | null, lateFinish: string | null, totalSlackMinutes: number | null, critical: boolean, percentComplete: number, 
+/**
+ * Duration as typed, e.g. "3d".
+ */
+durationText: string, 
+/**
+ * Incoming links as typed, e.g. "2, 5SS+1d" (row numbers).
+ */
+predecessors: string, };

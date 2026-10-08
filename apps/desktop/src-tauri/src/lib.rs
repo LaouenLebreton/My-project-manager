@@ -1,4 +1,5 @@
 mod document;
+mod edits;
 mod ipc;
 mod menu;
 mod platform;
@@ -23,7 +24,13 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             let state = app.state::<ipc::AppState>();
+            // While a cell editor is open, Undo and Redo belong to the text being typed.
+            let typing = state.editing_text.load(std::sync::atomic::Ordering::Relaxed);
             let result = match id {
+                menu::id::UNDO | menu::id::REDO if typing => {
+                    let _ = app.emit(MENU_EVENT, id);
+                    return;
+                }
                 menu::id::UNDO => ipc::undo(app.clone(), state),
                 menu::id::REDO => ipc::redo(app.clone(), state),
                 _ => {
@@ -46,6 +53,7 @@ pub fn run() {
             ipc::apply_edit,
             ipc::undo,
             ipc::redo,
+            ipc::set_text_editing,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Super PM");

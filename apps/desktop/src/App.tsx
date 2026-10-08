@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, errorMessage, type Edit, type IpcError, type Snapshot } from "./api";
 import { formatDate } from "./format";
-import { TaskTable } from "./TaskTable";
+import { Grid } from "./Grid";
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -17,6 +17,18 @@ export function App() {
     }
   }, []);
 
+  /** For the grid: errors are shown next to the cell, so they are passed back, not shown here. */
+  const edit = useCallback(async (e: Edit) => {
+    const result = await api.applyEdit(e);
+    setSnapshot(result.snapshot);
+    setError(null);
+    return result;
+  }, []);
+
+  const textEditing = useCallback((editing: boolean) => {
+    void api.setTextEditing(editing);
+  }, []);
+
   useEffect(() => {
     api.getSnapshot().then(setSnapshot, (e) => setError(errorMessage(e)));
     const subscriptions = [
@@ -26,6 +38,11 @@ export function App() {
         setError(null);
       }),
       listen<IpcError>("error", (e) => setError(e.payload.message)),
+      // While a cell is being edited, the menu's Undo and Redo apply to the typing.
+      listen<string>("menu", (e) => {
+        if (e.payload === "edit.undo") document.execCommand("undo");
+        if (e.payload === "edit.redo") document.execCommand("redo");
+      }),
     ];
     return () => {
       subscriptions.forEach((s) => s.then((unlisten) => unlisten()));
@@ -45,9 +62,6 @@ export function App() {
     );
   }
 
-  const edit = (e: Edit) => run(() => api.applyEdit(e));
-  const last = snapshot.rows.at(-1);
-
   return (
     <main className="document">
       <header className="toolbar">
@@ -57,7 +71,7 @@ export function App() {
             {formatDate(snapshot.project.start)} – {formatDate(snapshot.project.finish)} · {snapshot.rows.length} tasks
           </p>
         </div>
-        <button onClick={() => edit({ kind: "AddTask", afterId: last?.id ?? null, name: "New task" })}>Add Task</button>
+        <p className="secondary hint">Return to edit · Tab to indent · Type numbers in Predecessors to link</p>
       </header>
       {error && (
         <p role="alert" className="banner error">
@@ -74,9 +88,7 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
-      <div className="scroll">
-        <TaskTable snapshot={snapshot} />
-      </div>
+      <Grid snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
     </main>
   );
 }

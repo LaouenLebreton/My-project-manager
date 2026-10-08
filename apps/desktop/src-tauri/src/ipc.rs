@@ -4,26 +4,27 @@
 //! strings and times are ISO 8601 local date-times. TypeScript types are generated from
 //! these definitions into `apps/desktop/src/bindings` by `cargo test -p super-pm`.
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use pm_core::{
-    outline, Command, Constraint, Dependency, DependencyId, Duration, LinkType, Moment, Percent, ScheduleError, SortKey,
-    Task, TaskChange, TaskId,
-};
+use pm_core::{outline, LinkType, Moment, PredecessorEntry, ScheduleError, TaskId, Units};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use ts_rs::TS;
-use uuid::Uuid;
 
-use crate::document::{new_id, this_monday_morning, Document};
+use crate::document::{this_monday_morning, Document};
+use crate::edits::{plan, Edit};
 use crate::menu::MenuHandles;
 
-/// Minutes in a working day for display; the calendar setting arrives with calendar editing.
-const MINUTES_PER_DAY: i64 = 480;
+/// Unit sizes for display and typing; per-calendar settings arrive with calendar editing.
+pub const UNITS: Units = Units { minutes_per_day: 480, days_per_week: 5 };
 
 #[derive(Default)]
 pub struct AppState {
     pub doc: Mutex<Option<Document>>,
+    /// True while a grid cell editor has focus: ⌘Z then undoes typing, not project edits.
+    pub editing_text: AtomicBool,
 }
 
 /// An error shown to the user, in plain words.
@@ -41,6 +42,15 @@ impl<E: std::fmt::Display> From<E> for IpcError {
 
 fn err(message: &str) -> IpcError {
     IpcError { message: message.into() }
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct EditResult {
+    pub snapshot: Snapshot,
+    /// The task the edit created, if any, so the grid can select it.
+    pub created_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -91,6 +101,10 @@ pub struct Row {
     pub total_slack_minutes: Option<i64>,
     pub critical: bool,
     pub percent_complete: u8,
+    /// Duration as typed, e.g. "3d".
+    pub duration_text: String,
+    /// Incoming links as typed, e.g. "2, 5SS+1d" (row numbers).
+    pub predecessors: String,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -142,81 +156,22 @@ pub struct Conflict {
     pub message: String,
 }
 
-/// What the user did. The app turns it into a core command, choosing ids and positions.
-#[derive(Debug, Deserialize, TS)]
-#[ts(export)]
-#[serde(tag = "kind", rename_all_fields = "camelCase")]
-pub enum Edit {
-    /// A new task right after `afterId` at the same level, or at the end if absent.
-    AddTask { after_id: Option<String>, name: String },
-    RenameTask { id: String, name: String },
-    SetDuration {
-        id: String,
-        #[ts(type = "number")]
-        minutes: i64,
-    },
-    DeleteTasks { ids: Vec<String> },
-    AddLink { predecessor_id: String, successor_id: String },
-}
-
 fn iso(m: Moment) -> String {
     m.to_datetime().to_string()
-}
-
-fn task_id(s: &str) -> Result<TaskId, IpcError> {
-    Uuid::parse_str(s).map(TaskId).map_err(|_| err("this task no longer exists"))
-}
-
-fn to_command(doc: &Document, edit: Edit) -> Result<Command, IpcError> {
-    let p = &doc.project;
-    Ok(match edit {
-        Edit::AddTask { after_id, name } => {
-            let after = after_id.as_deref().map(task_id).transpose()?;
-            let parent = after.and_then(|a| p.tasks.get(&a)).and_then(|t| t.parent);
-            let mut siblings: Vec<&SortKey> = p.tasks.values().filter(|t| t.parent == parent).map(|t| &t.sort_key).collect();
-            siblings.sort();
-            let (before, next) = match after.and_then(|a| p.tasks.get(&a)) {
-                Some(a) => (Some(&a.sort_key), siblings.iter().copied().find(|k| **k > a.sort_key)),
-                None => (siblings.last().copied(), None),
-            };
-            let id = TaskId(new_id());
-            Command::InsertTasks {
-                tasks: vec![Task {
-                    id,
-                    parent,
-                    sort_key: SortKey::between(before, next),
-                    name,
-                    duration: Duration::minutes(MINUTES_PER_DAY).expect("positive"),
-                    is_milestone: false,
-                    constraint: Constraint::AsSoonAsPossible,
-                    percent_complete: Percent::default(),
-                    notes: String::new(),
-                }],
-                dependencies: vec![],
-            }
-        }
-        Edit::RenameTask { id, name } => Command::SetTask { id: task_id(&id)?, change: TaskChange::Name(name) },
-        Edit::SetDuration { id, minutes } => Command::SetTask {
-            id: task_id(&id)?,
-            change: TaskChange::Duration(Duration::minutes(minutes).map_err(|_| err("a duration cannot be negative"))?),
-        },
-        Edit::DeleteTasks { ids } => Command::DeleteTasks { ids: ids.iter().map(|s| task_id(s)).collect::<Result<_, _>>()? },
-        Edit::AddLink { predecessor_id, successor_id } => Command::InsertLink {
-            dependency: Dependency {
-                id: DependencyId(new_id()),
-                predecessor: task_id(&predecessor_id)?,
-                successor: task_id(&successor_id)?,
-                kind: LinkType::FinishToStart,
-                lag: 0,
-            },
-        },
-    })
 }
 
 pub fn snapshot(doc: &Document) -> Snapshot {
     let p = &doc.project;
     let sched = doc.schedule.as_ref().ok();
-    let rows = outline(p)
+    let outline_rows = outline(p);
+    let row_number: HashMap<TaskId, usize> = outline_rows.iter().enumerate().map(|(i, r)| (r.id, i + 1)).collect();
+    let mut incoming: HashMap<TaskId, Vec<PredecessorEntry>> = HashMap::new();
+    for d in p.dependencies.values() {
+        if let Some(&row) = row_number.get(&d.predecessor) {
+            incoming.entry(d.successor).or_default().push(PredecessorEntry { row, kind: d.kind, lag: d.lag });
+        }
+    }
+    let rows = outline_rows
         .into_iter()
         .map(|r| {
             let t = &p.tasks[&r.id];
@@ -241,6 +196,14 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 total_slack_minutes: s.map(|s| s.total_slack),
                 critical: s.is_some_and(|s| s.critical),
                 percent_complete: t.percent_complete.get(),
+                duration_text: UNITS.format(duration_minutes),
+                predecessors: incoming
+                    .get_mut(&r.id)
+                    .map(|list| {
+                        list.sort_by_key(|e| e.row);
+                        list.iter().map(|e| UNITS.format_predecessor(e)).collect::<Vec<_>>().join(", ")
+                    })
+                    .unwrap_or_default(),
             }
         })
         .collect();
@@ -294,7 +257,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             path: doc.path.display().to_string(),
             start: iso(p.start),
             finish: sched.map(|s| iso(s.project_finish)),
-            minutes_per_day: MINUTES_PER_DAY,
+            minutes_per_day: UNITS.minutes_per_day,
         },
         rows,
         links,
@@ -335,12 +298,23 @@ pub fn open_sample(app: AppHandle, state: State<AppState>) -> Result<Snapshot, I
 }
 
 #[tauri::command]
-pub fn apply_edit(edit: Edit, app: AppHandle, state: State<AppState>) -> Result<Snapshot, IpcError> {
+pub fn apply_edit(edit: Edit, app: AppHandle, state: State<AppState>) -> Result<EditResult, IpcError> {
     let mut guard = state.doc.lock().expect("state lock");
     let doc = guard.as_mut().ok_or_else(|| err("no project is open"))?;
-    let cmd = to_command(doc, edit)?;
-    doc.apply(&cmd)?;
-    Ok(changed(&app, doc))
+    let created_id = match plan(&doc.project, &UNITS, edit)? {
+        Some(planned) => {
+            doc.apply(&planned.command)?;
+            planned.created.map(|id| id.0.to_string())
+        }
+        None => None,
+    };
+    Ok(EditResult { snapshot: changed(&app, doc), created_id })
+}
+
+/// The grid reports when a cell editor opens and closes (see [`AppState::editing_text`]).
+#[tauri::command]
+pub fn set_text_editing(editing: bool, state: State<AppState>) {
+    state.editing_text.store(editing, Ordering::Relaxed);
 }
 
 #[tauri::command]
@@ -362,6 +336,7 @@ pub fn redo(app: AppHandle, state: State<AppState>) -> Result<Snapshot, IpcError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::new_id;
 
     fn sample_doc() -> Document {
         let dir = std::env::temp_dir().join(format!("super-pm-ipc-{}", new_id()));
@@ -384,8 +359,9 @@ mod tests {
         assert!(row(&before, "Preparation").is_summary);
 
         // Added right after "Pack offices", inside the same summary.
-        let cmd = to_command(&doc, Edit::AddTask { after_id: Some(pack.id.clone()), name: "Label boxes".into() }).unwrap();
-        doc.apply(&cmd).unwrap();
+        let cmd = plan(&doc.project, &UNITS, Edit::AddTask { after_id: Some(pack.id.clone()), name: "Label boxes".into() }).unwrap().unwrap();
+        assert!(cmd.created.is_some());
+        doc.apply(&cmd.command).unwrap();
         let s = snapshot(&doc);
         let names: Vec<&str> = s.rows.iter().map(|r| r.name.as_str()).collect();
         let at = names.iter().position(|n| *n == "Pack offices").unwrap();
@@ -396,12 +372,19 @@ mod tests {
         // Link it after "Unpack and set up" and stretch it: the project finish moves.
         let new = row(&s, "Label boxes").id.clone();
         let unpack = row(&s, "Unpack and set up").id.clone();
-        doc.apply(&to_command(&doc, Edit::AddLink { predecessor_id: unpack, successor_id: new.clone() }).unwrap()).unwrap();
-        doc.apply(&to_command(&doc, Edit::SetDuration { id: new.clone(), minutes: 10 * 480 }).unwrap()).unwrap();
+        let unpack_row = s.rows.iter().position(|r| r.id == unpack).unwrap() + 1;
+        let edit = |doc: &mut Document, e: Edit| {
+            let planned = plan(&doc.project, &UNITS, e).unwrap().unwrap();
+            doc.apply(&planned.command).unwrap();
+        };
+        edit(&mut doc, Edit::SetPredecessors { id: new.clone(), text: unpack_row.to_string() });
+        edit(&mut doc, Edit::SetDuration { id: new.clone(), text: "2w".into() });
         let s = snapshot(&doc);
         assert!(s.project.finish > before.project.finish);
         assert!(row(&s, "Label boxes").critical);
         assert!(!row(&s, "New office open").critical, "the milestone now has slack");
+        assert_eq!(row(&s, "Label boxes").predecessors, unpack_row.to_string());
+        assert_eq!(row(&s, "Label boxes").duration_text, "10d");
 
         doc.undo().unwrap();
         doc.undo().unwrap();
@@ -415,6 +398,7 @@ mod tests {
         let reopened = Document::open(&doc.path).unwrap();
         assert_eq!(snapshot(&reopened).rows.len(), before.rows.len() + 1);
         assert_eq!(snapshot(&reopened).redo_label.as_deref(), Some("Add Link"));
+        assert!(!snapshot(&reopened).rows.iter().any(|r| r.name == "Label boxes" && !r.predecessors.is_empty()));
     }
 
     #[test]
@@ -423,10 +407,19 @@ mod tests {
         let s = snapshot(&doc);
         let a = row(&s, "List space requirements").id.clone();
         let b = row(&s, "Choose new office").id.clone();
-        let cmd = to_command(&doc, Edit::AddLink { predecessor_id: b, successor_id: a }).unwrap();
-        let e = IpcError::from(doc.apply(&cmd).unwrap_err());
+        let planned = plan(&doc.project, &UNITS, Edit::AddLink { predecessor_id: b, successor_id: a }).unwrap().unwrap();
+        let e = IpcError::from(doc.apply(&planned.command).unwrap_err());
         assert_eq!(e.message, "these two tasks are already linked; change the existing link instead");
-        let e = to_command(&doc, Edit::SetDuration { id: row(&s, "Moving day").id.clone(), minutes: -5 }).unwrap_err();
-        assert_eq!(e.message, "a duration cannot be negative");
+    }
+
+    #[test]
+    fn sample_predecessor_column_reads_like_microsoft_project() {
+        let s = snapshot(&sample_doc());
+        let number = |name: &str| s.rows.iter().position(|r| r.name == name).unwrap() + 1;
+        assert_eq!(row(&s, "Plan network and IT").predecessors, format!("{}SS+1d", number("Lease signed")));
+        assert_eq!(row(&s, "Pack offices").predecessors, format!("{}FS+2d", number("Book movers")));
+        assert_eq!(row(&s, "Moving day").predecessors, format!("{}, {}", number("Order furniture"), number("Pack offices")));
+        assert_eq!(row(&s, "Lease signed").duration_text, "0d");
+        assert_eq!(row(&s, "Planning").duration_text, "5d");
     }
 }

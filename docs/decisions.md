@@ -33,3 +33,15 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **Undo and Redo in the Edit menu run in Rust** and push the new snapshot to the UI. The menu items show the action ("Undo Change Duration") and are greyed out when there is nothing to undo.
 - **Issue for step 6:** ⌘Z is a menu shortcut, so while the user is typing in a cell it would undo the last project edit instead of the typing. A Mac text field should undo its own typing first. Plan: while a cell editor is open, the UI handles ⌘Z itself, and the menu action is skipped.
 - **Sample project** "Office Move (Sample)" is created in `~/Library/Application Support/app.superpm.desktop/` on first use. Until step 8 it is the only way to open a project.
+
+## 2026-10-08, step 6 (task grid)
+
+- **Keyboard model:** arrows move; Return edits, and while editing saves and moves down; Escape cancels; typing a character starts editing; Delete removes the selected rows; Shift extends the selection. **Tab and Shift-Tab always indent and outdent** (spec 5.1.2), even while editing, as in Mac outliners. Moving between cells uses the arrow keys.
+- **Fast entry:** the blank last row accepts a name; Return adds the task and moves to the new blank row, so 50 tasks can be typed without the mouse.
+- **Linking from the keyboard:** a Predecessors column in Microsoft Project syntax (`2, 5SS, 7FF+2d`, row numbers). Typing replaces the task's incoming links, changing only what differs (existing links keep their ids), as one undo step.
+- **Typed durations** (`3d`, `4h`, `2w`, a bare number means days) are parsed in `pm-core::text`, so file import can reuse it. `0` makes a milestone and keeps the stored duration, so a later non-zero value restores a regular task. Formatting is exact (decimals only when they read back the same).
+- **Outdent** moves the task to just below its summary; the following siblings stay where they are. Microsoft Project instead makes them children of the outdented task. The simpler rule is easier to predict; revisit if the owner prefers MSP's behaviour.
+- **Start and Finish are read-only in the grid.** Typing a start date in Microsoft Project silently adds a "start no earlier than" constraint, a common source of confusion. Constraints get their own visible control later (progressive disclosure, spec 5.1.8).
+- **Virtualized DOM rows** (only visible rows rendered) with ARIA grid roles and `aria-activedescendant`, so VoiceOver follows the active cell.
+- **⌘Z while typing in a cell** undoes the typing: the grid tells Rust when an editor is open, and the Undo/Redo menu actions are then forwarded to the text field.
+- **Errors appear under the cell** that caused them, and the editor stays open with the text so it can be fixed (spec 5.1.5).
