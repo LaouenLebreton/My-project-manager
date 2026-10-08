@@ -114,7 +114,8 @@ export function Grid({ snapshot, onEdit, onTextEditing }: GridProps) {
     else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_HEIGHT - el.clientHeight;
   }, [row]);
 
-  useEffect(() => {
+  // Focus the editor before the browser paints, so the next keystroke lands in it.
+  useLayoutEffect(() => {
     if (editing) inputRef.current?.focus();
   }, [editing !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -122,20 +123,21 @@ export function Grid({ snapshot, onEdit, onTextEditing }: GridProps) {
 
   const focusGrid = () => gridRef.current?.focus();
 
-  const moveTo = useCallback(
-    (r: number, c: number, extend = false) => {
-      const nr = Math.max(0, Math.min(rowCount - 1, r));
-      setActive({ row: nr, col: Math.max(0, Math.min(COLUMNS.length - 1, c)) });
-      if (!extend) setAnchor(nr);
-    },
-    [rowCount],
-  );
+  // Moves can follow an edit that added rows, before this render's rowCount is updated.
+  const rowCountRef = useRef(rowCount);
+  rowCountRef.current = rowCount;
+  const moveTo = useCallback((r: number, c: number, extend = false) => {
+    const nr = Math.max(0, Math.min(rowCountRef.current - 1, r));
+    setActive({ row: nr, col: Math.max(0, Math.min(COLUMNS.length - 1, c)) });
+    if (!extend) setAnchor(nr);
+  }, []);
 
   const send = async (edit: Edit): Promise<string | null> => {
     if (busy.current) return null; // one edit at a time; extra key presses are ignored
     busy.current = true;
     try {
       const result = await onEdit(edit);
+      rowCountRef.current = result.snapshot.rows.length + 1;
       if (result.createdId) {
         const at = result.snapshot.rows.findIndex((r) => r.id === result.createdId);
         if (at >= 0) moveTo(at, active.col);
@@ -193,7 +195,17 @@ export function Grid({ snapshot, onEdit, onTextEditing }: GridProps) {
   };
 
   const onGridKey = (e: React.KeyboardEvent) => {
-    if (editing) return;
+    const open = editingRef.current;
+    if (open) {
+      // The editor just opened and has not taken focus yet: keep fast typing, don't lose it.
+      if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
+        setEditing({ text: open.text + e.key, error: null });
+        e.preventDefault();
+      } else if (e.key === "Enter" || e.key === "Escape") {
+        void onEditorKey(e as React.KeyboardEvent<HTMLInputElement>);
+      }
+      return;
+    }
     const page = Math.max(1, Math.floor(viewport / ROW_HEIGHT) - 1);
     const shift = e.shiftKey;
     switch (e.key) {
