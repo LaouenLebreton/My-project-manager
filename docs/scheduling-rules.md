@@ -1,6 +1,6 @@
 # Scheduling rules
 
-Status: **draft**, implemented in `crates/pm-core/src/schedule.rs` (step 3) except R28 duplicate-link checks, which belong to the command layer (step 4). Each rule becomes one or more tests in `pm-core` before it is implemented.
+Status: **draft**, implemented in `crates/pm-core/src/schedule.rs` (step 3) R28 is enforced by the command layer in `command.rs`. Each rule becomes one or more tests in `pm-core` before it is implemented.
 Rules marked *verify* must be checked against the owner's Microsoft Project reference files
 (spec section 8) and updated here with the observed result.
 

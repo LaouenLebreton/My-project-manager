@@ -21,10 +21,27 @@ pub enum CalendarError {
 }
 
 /// Working time within one day, in minutes from midnight: `start..end`, `end <= 1440`.
+///
+/// Deserializing validates like the constructors do, so a damaged file cannot produce
+/// an invalid calendar (which could make the arithmetic loop forever).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "RawRange")]
 pub struct WorkRange {
     start: u16,
     end: u16,
+}
+
+#[derive(Deserialize)]
+struct RawRange {
+    start: u16,
+    end: u16,
+}
+
+impl TryFrom<RawRange> for WorkRange {
+    type Error = CalendarError;
+    fn try_from(r: RawRange) -> Result<Self, CalendarError> {
+        WorkRange::new(r.start, r.end)
+    }
 }
 
 impl WorkRange {
@@ -52,7 +69,15 @@ impl WorkRange {
 
 /// The working time of one day: sorted, non-overlapping ranges. Empty means non-working.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<WorkRange>")]
 pub struct DayPattern(Vec<WorkRange>);
+
+impl TryFrom<Vec<WorkRange>> for DayPattern {
+    type Error = CalendarError;
+    fn try_from(ranges: Vec<WorkRange>) -> Result<Self, CalendarError> {
+        DayPattern::new(ranges)
+    }
+}
 
 impl DayPattern {
     pub fn non_working() -> Self {
@@ -88,11 +113,25 @@ impl DayPattern {
 
 /// A project calendar: a working week plus dated exceptions (R8).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawCalendar")]
 pub struct Calendar {
     /// Monday first.
     week: [DayPattern; 7],
     /// Keyed by day number (see [`crate::time::day_number`]).
     exceptions: BTreeMap<i64, DayPattern>,
+}
+
+#[derive(Deserialize)]
+struct RawCalendar {
+    week: [DayPattern; 7],
+    exceptions: BTreeMap<i64, DayPattern>,
+}
+
+impl TryFrom<RawCalendar> for Calendar {
+    type Error = CalendarError;
+    fn try_from(r: RawCalendar) -> Result<Self, CalendarError> {
+        Ok(Calendar { exceptions: r.exceptions, ..Calendar::new(r.week)? })
+    }
 }
 
 impl Calendar {
@@ -242,6 +281,17 @@ mod tests {
         assert!(WorkRange::new(0, 1440).is_ok());
         let overlapping = vec![WorkRange::hours(8, 12).unwrap(), WorkRange::hours(11, 17).unwrap()];
         assert_eq!(DayPattern::new(overlapping), Err(CalendarError::OverlappingRanges));
+    }
+
+    #[test]
+    fn deserializing_validates() {
+        let c = Calendar::standard();
+        let json = serde_json::to_string(&c).unwrap();
+        assert_eq!(serde_json::from_str::<Calendar>(&json).unwrap(), c);
+        let off = r#"{"week":[[],[],[],[],[],[],[]],"exceptions":{}}"#;
+        assert!(serde_json::from_str::<Calendar>(off).is_err());
+        assert!(serde_json::from_str::<WorkRange>(r#"{"start":600,"end":500}"#).is_err());
+        assert!(serde_json::from_str::<DayPattern>(r#"[{"start":0,"end":600},{"start":500,"end":700}]"#).is_err());
     }
 
     #[test]

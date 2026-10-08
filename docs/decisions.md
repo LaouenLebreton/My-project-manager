@@ -12,3 +12,15 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **Ordered maps (`BTreeMap`) in the model,** for deterministic output (rule R29).
 - **No network in the app:** the capability file grants only `core:event:default`, and the CSP allows only `'self'` and Tauri IPC.
 - **Placeholder identity:** product name `Super PM`, bundle id `app.superpm.desktop`, placeholder icon in `apps/desktop/app-icon.svg`. See `open-questions.md`.
+
+## 2026-10-08, step 4 (commands and storage)
+
+- **Undo survives reopening, capped at 500 edits** (owner decision, open question 1). The `undo_history` table holds the stack; `change_log` stays append-only and records undo and redo as entries of their own, which keeps it usable for sync later.
+- **Commands live in `pm-core`.** `apply` returns the exact inverse or refuses the command with nothing changed. `Batch` makes several commands one undo step and rolls back fully if any part fails.
+- **Commands refuse what would break scheduling:** links that would create a loop, duplicate links between the same two tasks, links on summary tasks, moving a task inside itself, and putting a task under a linked task. A property test applies random command sequences and checks the project always stays schedulable. The engine still reports loops, for imported files.
+- **Grouping rapid edits:** the UI sends one command when an edit is finished (Return in a cell, mouse-up after a drag), or a `Batch` for multi-row actions. The store does not merge entries by time.
+- **File format:** SQLite with `application_id` "PMPJ" and `user_version` for the schema version; forward-only migrations; a newer file is refused with a clear message. Times are integer minutes (`Moment`); the calendar is one JSON value, validated on load.
+- **Durability:** WAL journal with `synchronous = FULL`; each command and its log entry are one transaction. If the write fails, the in-memory change is reverted. A test kills a writer process mid-write three times and checks integrity and that data matches the log.
+- **Validation on load:** calendar types validate when deserialized, so a damaged file cannot produce a calendar with no working time, which would make date arithmetic loop forever.
+- **Reserved resource, assignment and baseline tables were not created.** A table in a shipped schema is a migration commitment, so the cost is not zero; they get added in iteration 2.
+- **Issue for step 8:** while a project is open, WAL keeps two side files next to it (`.pmproj-wal`, `.pmproj-shm`). They disappear on a clean close, and Save a Copy uses SQLite's backup API to write a single standalone file. If the side files look wrong in Finder, the option is to store projects as a macOS package (a folder that looks like one file).
