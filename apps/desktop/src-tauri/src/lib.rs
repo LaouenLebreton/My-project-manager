@@ -6,6 +6,7 @@ mod ipc;
 mod menu;
 mod platform;
 mod sample;
+mod team;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
@@ -121,6 +122,15 @@ pub fn run() {
             ipc::recent_files,
             ipc::import_project,
             ipc::export_project,
+            team::team_status,
+            team::team_sign_in,
+            team::team_sign_out,
+            team::team_teams,
+            team::team_create_team,
+            team::team_add_member,
+            team::team_projects,
+            team::team_share,
+            team::team_open,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Super PM");

@@ -160,6 +160,17 @@ pub struct ProjectInfo {
     pub earned_value: Option<EarnedView>,
     /// When the baseline had the project finish.
     pub baseline_finish: Option<String>,
+    /// Set for projects shared through a team server.
+    pub team: Option<TeamInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamInfo {
+    pub server: String,
+    /// Edits not yet confirmed by the server.
+    pub pending: u32,
 }
 
 /// Earned value in cents, as in Microsoft Project's Earned Value table.
@@ -572,6 +583,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             cost_cents: doc.loads.project_cost,
             earned_value: earned.as_ref().map(|e| EarnedView::new(as_of, e.project)),
             baseline_finish: p.baseline.as_ref().and_then(|b| b.tasks.values().map(|t| t.finish).max()).map(iso),
+            team: crate::team::snapshot_info(doc).map(|(server, pending)| TeamInfo { server, pending }),
         },
         rows,
         links,

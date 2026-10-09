@@ -128,6 +128,7 @@ pub fn install(app: &AppHandle, asking: Option<&str>, doc: Document) -> Option<S
     let snap = snapshot(&doc);
     // Registered before the window exists, so a new window finds it when its page loads.
     state.docs.lock().expect("lock").insert(label.clone(), doc);
+    crate::team::start_sync(app, &label);
 
     let window = match app.get_webview_window(&label) {
         Some(w) => Some(w),
