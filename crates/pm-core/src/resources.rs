@@ -132,6 +132,30 @@ pub fn loads(p: &Project, s: &Schedule) -> Loads {
 }
 
 /// Today's plan as a baseline: dates from the schedule, work and cost from the loads.
+/// Work an assignment asks for on each day it runs, in working minutes (Workload view).
+/// Materials and milestones ask for no time.
+pub fn assignment_days(p: &Project, s: &Schedule, a: &crate::model::Assignment) -> BTreeMap<i64, i64> {
+    let mut days = BTreeMap::new();
+    let (Some(r), Some(t)) = (p.resources.get(&a.resource), s.tasks.get(&a.task)) else { return days };
+    if r.kind == ResourceKind::Material {
+        return days;
+    }
+    for day in t.early_start.day()..=t.early_finish.day() {
+        let from = t.early_start.max(Moment::from_day_minute(day, 0));
+        let to = t.early_finish.min(Moment::from_day_minute(day + 1, 0));
+        let minutes = mul_div(p.calendar.working_between(from, to), i64::from(a.units.0), 100);
+        if minutes > 0 {
+            days.insert(day, minutes);
+        }
+    }
+    days
+}
+
+/// What a work resource can give on a day: its working time × maximum units, in minutes.
+pub fn capacity(p: &Project, resource: ResourceId, day: i64) -> i64 {
+    p.resources.get(&resource).map_or(0, |r| mul_div(p.calendar.pattern(day).working_minutes(), i64::from(r.max_units.0), 100))
+}
+
 pub fn capture_baseline(p: &Project, s: &Schedule, l: &Loads, saved_at: &str) -> crate::model::Baseline {
     let tasks = s
         .tasks
@@ -292,6 +316,22 @@ mod tests {
     }
 
     use ResourceKind::*;
+
+    #[test]
+    fn workload_by_day() {
+        // 1 runs Monday–Wednesday at 100%, 2 Monday afternoon (half a day) at 50%.
+        let p = P::new().task(1, 3 * DAY).task(2, DAY / 2).resource(1, Work, 100).assign(1, 1, 100).assign(2, 1, 50);
+        let s = schedule(&p.0).unwrap();
+        let days = |n: u128| {
+            let a = p.0.assignments.values().find(|a| a.task == tid(n)).unwrap();
+            assignment_days(&p.0, &s, a).into_iter().collect::<Vec<_>>()
+        };
+        let mon = at(5, 8).day();
+        assert_eq!(days(1), [(mon, 480), (mon + 1, 480), (mon + 2, 480)]);
+        assert_eq!(days(2), [(mon, 120)]);
+        assert_eq!(capacity(&p.0, rid(1), mon), 480);
+        assert_eq!(capacity(&p.0, rid(1), mon + 5), 0, "Saturday");
+    }
 
     #[test]
     fn two_full_time_tasks_at_once_overload_one_person() {

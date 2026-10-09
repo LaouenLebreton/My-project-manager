@@ -50,6 +50,10 @@ export const GLOSSARY = {
     term: "Earned value",
     text: "Compares the work done with the baseline, in money, as of the status date. Planned value is what should be done by then, earned value what is done, actual cost what it cost. An SPI or CPI below 1 means behind schedule or over budget. Keep % Done up to date for meaningful numbers.",
   },
+  workload: {
+    term: "Workload",
+    text: "Hours each person is asked to work, day by day or week by week, with the tasks underneath. Red means more than they have that day (their working time × Max Units). Click a task to find it in the task list.",
+  },
   overallocated: {
     term: "Over-allocated",
     text: "A resource asked for more than it has at the same time, such as one person on two full-time tasks at once. Marked ⚠. Move a task, share the work, or lower the units to fix it.",
@@ -72,7 +76,7 @@ export const SHORTCUTS: [string, string][] = [
   ["⌘Z / ⇧⌘Z", "Undo / redo any change"],
   ["⌘I", "Task Info: constraint, % complete, notes"],
   ["⌘F", "Find a task by name; Return for the next match"],
-  ["⌘1 / ⌘2 / ⌘3", "Tasks / Resource Sheet / Work breakdown structure"],
+  ["⌘1 / ⌘2 / ⌘3 / ⌘4", "Tasks / Resource Sheet / Work breakdown structure / Workload"],
   ["Return / Tab (WBS)", "Add a task / a subtask in the WBS chart; Space renames"],
   ["⌘K", "Command bar: run any command by name"],
   ["⌘N / ⌘O", "New project / open a project"],

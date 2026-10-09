@@ -90,6 +90,37 @@ pub struct ResourceRow {
     /// Total cost of the resource's assignments, in cents.
     #[ts(type = "number")]
     pub cost_cents: i64,
+    /// Workload view: work asked of the resource on each day it has any, and per task.
+    pub days: Vec<DayWork>,
+    pub assignments: Vec<AssignmentWork>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct DayWork {
+    /// `YYYY-MM-DD`
+    pub date: String,
+    /// Working minutes asked for.
+    #[ts(type = "number")]
+    pub minutes: i64,
+    /// Working minutes the resource has that day (working time × max units).
+    #[ts(type = "number")]
+    pub capacity: i64,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentWork {
+    pub task_id: String,
+    pub task_name: String,
+    /// The task's row number in the task grid.
+    pub row: u32,
+    /// Units as typed: "50%".
+    pub units_text: String,
+    /// Days with work; `capacity` is unused (0).
+    pub days: Vec<DayWork>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -308,11 +339,39 @@ fn hours(minutes: i64) -> String {
 fn resource_rows(doc: &Document) -> Vec<ResourceRow> {
     let p = &doc.project;
     let outline_rows = outline(p);
+    let row_of: HashMap<TaskId, u32> = outline_rows.iter().enumerate().map(|(i, r)| (r.id, i as u32 + 1)).collect();
+    let date = |day: i64| pm_core::time::date_from_day_number(day).to_string();
+    let workload = |r: &pm_core::Resource| -> (Vec<DayWork>, Vec<AssignmentWork>) {
+        let Ok(s) = doc.schedule.as_ref() else { return Default::default() };
+        let mut total: std::collections::BTreeMap<i64, i64> = Default::default();
+        let mut list: Vec<AssignmentWork> = p
+            .assignments
+            .values()
+            .filter(|a| a.resource == r.id)
+            .map(|a| {
+                let days = pm_core::assignment_days(p, s, a);
+                for (d, m) in &days {
+                    *total.entry(*d).or_default() += m;
+                }
+                AssignmentWork {
+                    task_id: a.task.0.to_string(),
+                    task_name: p.tasks.get(&a.task).map(|t| t.name.clone()).unwrap_or_default(),
+                    row: row_of.get(&a.task).copied().unwrap_or(0),
+                    units_text: format!("{}%", a.units.0),
+                    days: days.into_iter().map(|(d, minutes)| DayWork { date: date(d), minutes, capacity: 0 }).collect(),
+                }
+            })
+            .collect();
+        list.sort_by_key(|a| a.row);
+        let days = total.into_iter().map(|(d, minutes)| DayWork { date: date(d), minutes, capacity: pm_core::capacity(p, r.id, d) }).collect();
+        (days, list)
+    };
     let mut list: Vec<&pm_core::Resource> = p.resources.values().collect();
     list.sort_by(|a, b| a.sort_key.cmp(&b.sort_key).then(a.id.cmp(&b.id)));
     list.into_iter()
         .map(|r| {
             let load = doc.loads.resources.get(&r.id);
+            let (days, assignments) = workload(r);
             let material = r.kind == ResourceKind::Material;
             let total = load.map_or(0, |l| l.total);
             let number = |h: i64| {
@@ -332,6 +391,8 @@ fn resource_rows(doc: &Document) -> Vec<ResourceRow> {
                 tasks_text: crate::edits::resource_tasks_text(p, &outline_rows, r.id),
                 rate_cents: r.rate.0,
                 cost_cents: doc.loads.resource_cost.get(&r.id).copied().unwrap_or(0),
+                days,
+                assignments,
                 overloads: load
                     .map(|l| {
                         l.overloads

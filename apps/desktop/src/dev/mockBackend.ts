@@ -140,6 +140,11 @@ export function install() {
     peakPercent: overloaded ? 200 : 100,
     taskCount: 2,
     tasksText: "Task 1, Task 2[50%]",
+    days: [6, 7, 8].map((d) => ({ date: `2026-10-0${d}`, minutes: overloaded && d < 8 ? 720 : 480, capacity: 480 })),
+    assignments: [
+      { taskId: "t1", taskName: "Task 1", row: 2, unitsText: "100%", days: [6, 7, 8].map((d) => ({ date: `2026-10-0${d}`, minutes: 480, capacity: 0 })) },
+      { taskId: "t2", taskName: "Task 2", row: 3, unitsText: "50%", days: overloaded ? [6, 7].map((d) => ({ date: `2026-10-0${d}`, minutes: 240, capacity: 0 })) : [] },
+    ],
     rateCents: 4_550,
     costCents: 182_000,
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],

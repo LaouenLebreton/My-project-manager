@@ -874,3 +874,98 @@ table.stats td {
   font-variant-numeric: tabular-nums;
   padding: 3px 0;
 }
+
+/* Workload: hours per person per day, with sticky names and dates. */
+.workload {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.workload-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 16px;
+}
+.workload-bar p {
+  margin: 0;
+  max-width: 70ch;
+}
+.workload-empty {
+  padding: 24px 16px;
+}
+.workload-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.workload-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.workload-table th,
+.workload-table td {
+  border-bottom: 1px solid var(--gantt-grid);
+  padding: 3px 4px;
+  white-space: nowrap;
+}
+.workload-table thead th {
+  position: sticky;
+  background: Canvas;
+  z-index: 1;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.workload-table thead tr:first-child th {
+  top: 0;
+  text-align: left;
+}
+.workload-table thead tr:nth-child(2) th {
+  top: 22px;
+}
+.workload-table th.day,
+.workload-table td {
+  min-width: 34px;
+  text-align: right;
+}
+.workload-table .off {
+  background: color-mix(in srgb, CanvasText 5%, Canvas);
+}
+.workload-table th.name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: Canvas;
+  text-align: left;
+  min-width: 220px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: normal;
+}
+.workload-table thead th.name {
+  z-index: 3;
+}
+.workload-table tr.resource th.name,
+.workload-table tr.resource td {
+  font-weight: 600;
+}
+.workload-table tr.task th.name {
+  padding-left: 28px;
+}
+.workload-table td.over {
+  background: color-mix(in srgb, var(--gantt-critical) 22%, Canvas);
+  color: var(--gantt-critical);
+}
+.workload-table .disclosure {
+  border: none;
+  background: none;
+  color: inherit;
+  width: 18px;
+  padding: 0;
+  cursor: pointer;
+}

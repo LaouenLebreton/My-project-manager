@@ -11,6 +11,7 @@ import { ProjectInfo, ProjectStatistics, TaskInfo, UpdateProject, WorkingTime } 
 import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { WbsChart } from "./WbsChart";
+import { Workload } from "./Workload";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
 import type { ReportView } from "./bindings/ReportView";
@@ -33,7 +34,7 @@ export function App() {
   const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
-  const [view, setView] = useState<"tasks" | "resources" | "wbs">("tasks");
+  const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload">("tasks");
   const [notice, setNotice] = useState<string | null>(null);
   const ganttRef = useRef<GanttHandle>(null);
 
@@ -83,6 +84,19 @@ export function App() {
   const editRef = useRef(edit);
   editRef.current = edit;
 
+  /** From another view: back to the task list with that row (1-based) selected. */
+  const pendingRow = useRef<number | null>(null);
+  const showTask = useCallback((row: number) => {
+    pendingRow.current = row - 1;
+    setView("tasks");
+  }, []);
+  // Runs once the task list is mounted again.
+  useEffect(() => {
+    if (view === "tasks" && pendingRow.current !== null) {
+      gridRef.current?.selectRow(pendingRow.current);
+      pendingRow.current = null;
+    }
+  }, [view]);
   const textEditing = useCallback((editing: boolean) => {
     void api.setTextEditing(editing);
   }, []);
@@ -130,6 +144,7 @@ export function App() {
         if (e.payload === "view.tasks") setView("tasks");
         if (e.payload === "view.resources") setView("resources");
         if (e.payload === "view.wbs") setView("wbs");
+        if (e.payload === "view.workload") setView("workload");
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
@@ -164,6 +179,7 @@ export function App() {
       { name: "Show Tasks", shortcut: "⌘1", run: () => setView("tasks") },
       { name: "Show Resource Sheet", shortcut: "⌘2", run: () => setView("resources") },
       { name: "Show Work Breakdown Structure (WBS)", shortcut: "⌘3", run: () => setView("wbs") },
+      { name: "Show Workload (hours per person per day)", shortcut: "⌘4", run: () => setView("workload") },
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
@@ -264,6 +280,9 @@ export function App() {
           <button role="tab" aria-selected={view === "wbs"} className={view === "wbs" ? "on" : undefined} onClick={() => setView("wbs")}>
             WBS
           </button>
+          <button role="tab" aria-selected={view === "workload"} className={view === "workload" ? "on" : undefined} onClick={() => setView("workload")}>
+            Workload
+          </button>
         </div>
       </header>
       {error && (
@@ -289,7 +308,9 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
-      {view === "wbs" ? (
+      {view === "workload" ? (
+        <Workload snapshot={snapshot} onShowTask={showTask} />
+      ) : view === "wbs" ? (
         <WbsChart snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
       ) : view === "resources" ? (
         <ResourceSheet snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
