@@ -8,6 +8,7 @@ pub mod calendar;
 pub mod command;
 pub mod model;
 pub mod outline;
+pub mod resources;
 pub mod schedule;
 pub mod text;
 pub mod time;
@@ -17,5 +18,6 @@ pub use command::{apply, Command, CommandError, LinkChange, ProjectChange, Resou
 pub use model::*;
 pub use outline::{outline, OutlineRow};
 pub use text::{PredecessorEntry, TextError, Units};
+pub use resources::{loads, Loads, Overload, ResourceLoad};
 pub use schedule::{check, schedule, ConstraintConflict, Schedule, ScheduleError, TaskSchedule};
 pub use time::{Moment, MINUTES_PER_DAY};
