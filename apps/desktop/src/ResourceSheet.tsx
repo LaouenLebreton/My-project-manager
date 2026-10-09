@@ -12,6 +12,10 @@ interface Column {
   text: (r: ResourceRow, currency: string) => string;
   /** Editable columns: what the editor starts with, and the edit to send. */
   edit?: (r: ResourceRow) => { initial: string; make: (text: string) => Edit } | null;
+  /** A choice from a list instead of typing (the resource type, as in Microsoft Project). */
+  choose?: { options: string[]; value: (r: ResourceRow) => string; make: (r: ResourceRow, value: string) => Edit };
+  /** Fields that do not apply to this kind of resource show "—" and cannot be edited. */
+  notApplicable?: (r: ResourceRow) => boolean;
 }
 
 const update = (r: ResourceRow, fields: Partial<Extract<Edit, { kind: "UpdateResource" }>>): Edit => ({
@@ -42,12 +46,13 @@ const COLUMNS: Column[] = [
   },
   {
     label: "Type",
-    width: "90px",
+    width: "100px",
     text: (r) => r.resourceType,
-    edit: (r) => ({
-      initial: r.resourceType,
-      make: (t) => update(r, { resourceType: t.toLowerCase().startsWith("m") ? "Material" : "Work" }),
-    }),
+    choose: {
+      options: ["Work", "Material"],
+      value: (r) => r.resourceType,
+      make: (r, value) => update(r, { resourceType: value === "Material" ? "Material" : "Work" }),
+    },
   },
   {
     label: "Max Units",
@@ -55,23 +60,26 @@ const COLUMNS: Column[] = [
     align: "right",
     text: (r) => r.maxUnitsText,
     edit: (r) => (r.resourceType === "Work" ? { initial: r.maxUnitsText, make: (t) => update(r, { maxUnits: t }) } : null),
+    notApplicable: (r) => r.resourceType === "Material",
   },
   {
     label: "Material Label",
     width: "110px",
     text: (r) => r.materialLabel,
     edit: (r) => (r.resourceType === "Material" ? { initial: r.materialLabel, make: (t) => update(r, { materialLabel: t }) } : null),
+    notApplicable: (r) => r.resourceType === "Work",
   },
   {
     label: "Rate",
     width: "110px",
     align: "right",
-    text: (r, currency) => (r.rateCents ? `${formatMoney(r.rateCents, currency)}${r.resourceType === "Work" ? "/h" : ""}` : ""),
+    // Per hour for people and equipment, per unit for materials ("€120.00/ton").
+    text: (r, currency) => (r.rateCents ? `${formatMoney(r.rateCents, currency)}/${r.resourceType === "Work" ? "h" : r.materialLabel || "unit"}` : ""),
     edit: (r) => ({ initial: r.rateCents ? (r.rateCents / 100).toFixed(2) : "", make: (t) => update(r, { rate: t }) }),
   },
-  { label: "Work", width: "90px", align: "right", text: (r) => r.totalText },
+  { label: "Work / Qty", width: "96px", align: "right", text: (r) => r.totalText },
   { label: "Cost", width: "100px", align: "right", text: (r, currency) => (r.costCents ? formatMoney(r.costCents, currency) : "") },
-  { label: "Peak", width: "70px", align: "right", text: (r) => (r.resourceType === "Work" ? `${r.peakPercent}%` : "") },
+  { label: "Peak", width: "70px", align: "right", text: (r) => `${r.peakPercent}%`, notApplicable: (r) => r.resourceType === "Material" },
   { label: "Tasks", width: "60px", align: "right", text: (r) => String(r.taskCount) },
 ];
 const NAME_COL = 1;
@@ -114,9 +122,32 @@ export function ResourceSheet({ snapshot, onEdit, onTextEditing }: { snapshot: S
     return COLUMNS[active.col].edit?.(current) ?? null;
   };
 
+  const chooseRef = useRef<HTMLSelectElement>(null);
+
   const start = (initial?: string) => {
+    const col = COLUMNS[active.col];
+    if (current && col.choose) {
+      // A typed first letter picks the matching option; Return or Space opens the list.
+      const match = initial && col.choose.options.find((o) => o.toLowerCase().startsWith(initial.toLowerCase()));
+      if (match) void choose(current, match);
+      else chooseRef.current?.focus();
+      return;
+    }
+    if (current && col.notApplicable?.(current)) return;
     const e = editorFor();
     if (e) setEditing({ text: initial ?? e.initial, error: null });
+  };
+
+  const choose = async (r: ResourceRow, value: string) => {
+    const col = COLUMNS[active.col];
+    if (col.choose && value !== col.choose.value(r)) {
+      try {
+        await onEdit(col.choose.make(r, value));
+      } catch (err) {
+        setEditing({ text: "", error: errorMessage(err) });
+      }
+    }
+    gridRef.current?.focus();
   };
 
   const commit = async (): Promise<boolean> => {
@@ -153,6 +184,7 @@ export function ResourceSheet({ snapshot, onEdit, onTextEditing }: { snapshot: S
         move(row, active.col + 1);
         break;
       case "Enter":
+      case " ":
         start();
         break;
       case "Backspace":
@@ -251,6 +283,31 @@ export function ResourceSheet({ snapshot, onEdit, onTextEditing }: { snapshot: S
                           ⚠
                         </span>
                       ) : null
+                    ) : c.choose ? (
+                      <select
+                        ref={isActive ? chooseRef : undefined}
+                        className="cell-select"
+                        aria-label={`${c.label} of ${r.name}`}
+                        value={c.choose.value(r)}
+                        tabIndex={-1}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Escape") gridRef.current?.focus();
+                        }}
+                        onChange={(e) => {
+                          move(i, ci);
+                          void choose(r, e.target.value);
+                        }}
+                      >
+                        {c.choose.options.map((o) => (
+                          <option key={o}>{o}</option>
+                        ))}
+                      </select>
+                    ) : c.notApplicable?.(r) ? (
+                      <span className="secondary" aria-label="Does not apply">
+                        —
+                      </span>
                     ) : (
                       c.text(r, snapshot.project.currency)
                     )}
