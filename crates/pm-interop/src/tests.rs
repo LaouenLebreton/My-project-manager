@@ -14,6 +14,9 @@ fn ids() -> impl FnMut() -> Uuid {
     }
 }
 
+/// Task row, start, finish, duration, work, cost of one baseline entry.
+type CanonBaseline = (usize, Moment, Moment, i64, i64, i64);
+
 /// Depth, name, duration (None for summaries), milestone, constraint, % complete, notes.
 type CanonRow = (usize, String, Option<i64>, bool, Constraint, u8, String, Option<Moment>);
 
@@ -31,7 +34,7 @@ struct Canon {
     assignments: Vec<(usize, String, u32)>,
     currency: String,
     /// Baseline entries by task row.
-    baseline: Option<Vec<(usize, Moment, Moment, i64, i64, i64)>>,
+    baseline: Option<Vec<CanonBaseline>>,
     /// Fixed cost per task row, and rate per resource name.
     costs: (Vec<i64>, Vec<(String, i64)>),
 }
