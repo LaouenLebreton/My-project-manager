@@ -121,6 +121,10 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE task_v5 RENAME TO task;
     CREATE INDEX task_parent ON task (parent_id, sort_key);
     "#,
+    // 5 -> 6: manually scheduled tasks (their start; NULL = automatic).
+    r#"
+    ALTER TABLE task ADD COLUMN manual_start_min INTEGER;
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

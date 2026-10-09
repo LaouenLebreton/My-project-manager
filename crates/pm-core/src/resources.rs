@@ -226,6 +226,7 @@ mod tests {
                 percent_complete: Percent::default(),
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
+                manual_start: None,
                 notes: String::new(),
             };
             apply(&mut self.0, &Command::InsertTasks { tasks: vec![t], dependencies: vec![] }).unwrap();

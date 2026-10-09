@@ -43,6 +43,7 @@ function row(name: string, depth = 0): Row {
     resourceNames: "",
     overloaded: false,
     levelingDelayMinutes: 0,
+    manual: false,
     leveledFrom: null,
     costCents: 36_400,
     fixedCostCents: 0,

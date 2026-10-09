@@ -34,6 +34,9 @@ pub struct ConstraintConflict {
     pub task: TaskId,
     pub constraint_start: Moment,
     pub link_driven_start: Moment,
+    /// The fixed start is a manually scheduled task's own date (R34), not a constraint.
+    #[serde(default)]
+    pub manual: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +116,15 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         if dur > 0 {
             es = snap(es);
         }
+        // Manually scheduled (R34): the typed start wins; broken links are reported.
+        if let Some(m) = task.manual_start {
+            let target = if dur > 0 { snap(m) } else { m };
+            if es > target {
+                conflicts.push(ConstraintConflict { task: task.id, constraint_start: target, link_driven_start: es, manual: true });
+            }
+            early[node] = (target, cal.add_working(target, dur));
+            continue;
+        }
         // Leveling waits after everything else that drives the start (R30).
         let delay = task.leveling_delay.get();
         if delay > 0 && !task.constraint.is_fixed() {
@@ -130,7 +142,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         let start_for_finish = |f: Moment| cal.add_working(f, -dur);
         let mut honour = |target: Moment, es: &mut Moment| {
             if *es > target {
-                conflicts.push(ConstraintConflict { task: task.id, constraint_start: target, link_driven_start: *es });
+                conflicts.push(ConstraintConflict { task: task.id, constraint_start: target, link_driven_start: *es, manual: false });
             }
             *es = target;
         };
@@ -159,7 +171,12 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
 
     // As late as possible (R33): latest tasks first, each moves as late as it can without
     // moving anything after it (at their early dates) or the project's finish.
-    let alap: Vec<usize> = order.iter().rev().copied().filter(|&v| v < n && g.children[v].is_empty() && g.tasks[v].constraint == Constraint::AsLateAsPossible).collect();
+    let alap: Vec<usize> = order
+        .iter()
+        .rev()
+        .copied()
+        .filter(|&v| v < n && g.children[v].is_empty() && g.tasks[v].manual_start.is_none() && g.tasks[v].constraint == Constraint::AsLateAsPossible)
+        .collect();
     if !alap.is_empty() {
         for i in alap {
             let dur = g.duration(i);
@@ -237,6 +254,10 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
             lf = cal.prev_working_end(lf);
         }
         let finish_on = |d: Moment| if dur > 0 { cal.prev_working_end(d) } else { d };
+        if g.tasks[i].manual_start.is_some() {
+            // A manual task's dates are fixed, like Must Start On.
+            lf = early[i].1;
+        }
         match g.tasks[i].constraint {
             Constraint::MustStartOn(d) => lf = cal.add_working(snap(d), dur),
             Constraint::MustFinishOn(d) => lf = finish_on(d),
@@ -505,6 +526,7 @@ mod tests {
                     percent_complete: Percent::default(),
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
+                    manual_start: None,
                     notes: String::new(),
                 },
             );
@@ -675,7 +697,7 @@ mod tests {
         assert_eq!(dates(&s, 2), (at(6, 8, 0), at(6, 17, 0)));
         assert_eq!(
             s.conflicts,
-            vec![ConstraintConflict { task: tid(2), constraint_start: at(6, 8, 0), link_driven_start: at(7, 8, 0) }]
+            vec![ConstraintConflict { task: tid(2), constraint_start: at(6, 8, 0), link_driven_start: at(7, 8, 0), manual: false }]
         );
         // Task 1 would have to finish a day earlier than it can.
         assert_eq!(s.tasks[&tid(1)].total_slack, -DAY);
@@ -754,6 +776,24 @@ mod tests {
             .run();
         assert_eq!(dates(&s, 2), (at(9, 8, 0), at(9, 17, 0)));
         assert_eq!(dates(&s, 1), (at(8, 8, 0), at(8, 17, 0)));
+    }
+
+    #[test]
+    fn r34_manual_tasks_keep_their_start_and_successors_follow_them() {
+        // 1 (2d) -> 2 (1d, manual on Monday) -> 3 (1d).
+        let mut p = P::new().task(1, 2 * DAY).task(2, DAY).task(3, DAY).fs(1, 2).fs(2, 3);
+        p.0.tasks.get_mut(&tid(2)).unwrap().manual_start = Some(at(5, 8, 0));
+        p.0.tasks.get_mut(&tid(2)).unwrap().constraint = Constraint::StartNoEarlierThan(at(9, 8, 0));
+        let s = p.run();
+        assert_eq!(dates(&s, 2), (at(5, 8, 0), at(5, 17, 0)), "constraints and links do not move it");
+        assert_eq!(dates(&s, 3), (at(6, 8, 0), at(6, 17, 0)), "its successor follows its real dates");
+        assert_eq!(s.conflicts.len(), 1);
+        assert!(s.conflicts[0].manual);
+        // A manual task later than its links allow is simply later; no conflict.
+        p.0.tasks.get_mut(&tid(2)).unwrap().manual_start = Some(at(12, 8, 0));
+        let s = p.run();
+        assert_eq!(dates(&s, 2).0, at(12, 8, 0));
+        assert!(s.conflicts.is_empty());
     }
 
     #[test]

@@ -48,6 +48,8 @@ pub enum Edit {
         resources: Option<String>,
         /// Typed amount, e.g. "1,500".
         fixed_cost: Option<String>,
+        /// Manually scheduled (keeps its current start) or automatic.
+        manual: Option<bool>,
     },
     /// Project Info: the day the project starts (`YYYY-MM-DD`).
     SetProjectStart { date: String },
@@ -195,6 +197,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     percent_complete: Percent::default(),
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
+                    manual_start: None,
                     notes: String::new(),
                 }],
                 dependencies: vec![],
@@ -222,7 +225,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
         Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
-        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost } => {
+        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost, manual } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
             let set = |change| Command::SetTask { id, change };
@@ -280,6 +283,16 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 && let Some(planned) = set_task_resources(p, id, &text)?
             {
                 commands.push(planned.command);
+            }
+            if let Some(m) = manual
+                && m != t.manual_start.is_some()
+            {
+                if m && is_summary(p, id) {
+                    return Err(err("a summary task's dates come from the tasks inside it, so it cannot be scheduled manually"));
+                }
+                // Switching to manual keeps the task where it is now.
+                let start = schedule.and_then(|s| s.tasks.get(&id)).map(|s| s.early_start).unwrap_or(p.start);
+                commands.push(set(TaskChange::ManualStart(m.then_some(start))));
             }
             if let Some(text) = fixed_cost {
                 let cents = if text.trim().is_empty() { 0 } else { parse_money(&text)? };
@@ -404,6 +417,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     notes: String::new(),
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
+                    manual_start: None,
                 }],
                 dependencies: vec![],
             };
@@ -439,6 +453,10 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 return Err(err("this task has a fixed date (Task Info > Start); change it there to move the task"));
             }
             let start = p.calendar.next_working(day_start(&start_date)?);
+            if p.tasks[&id].manual_start.is_some() {
+                // A manual task simply moves to where it was dropped.
+                return plain(Command::Batch { label: "Move Task".into(), commands: vec![Command::SetTask { id, change: TaskChange::ManualStart(Some(start)) }] });
+            }
             let change = TaskChange::Constraint(Constraint::StartNoEarlierThan(start));
             plain(Command::Batch { label: "Move Task".into(), commands: vec![Command::SetTask { id, change }] })
         }
@@ -827,6 +845,7 @@ mod tests {
                     percent_complete: Percent::default(),
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
+                    manual_start: None,
                     notes: String::new(),
                 },
             );
@@ -987,6 +1006,7 @@ mod tests {
             notes: Some("Bring the drone".into()),
             resources: Some("Robin[50%]".into()),
             fixed_cost: Some("1.250,00".into()),
+            manual: None,
         };
         let planned = plan(&p, None, &Units::default(), edit).unwrap().unwrap();
         assert_eq!(planned.command.label(), "Change Task Info");
@@ -999,7 +1019,7 @@ mod tests {
 
         assert_eq!(p.assignments.values().next().map(|a| a.units.0), Some(50), "resources set in the same step");
         assert_eq!(p.tasks[&id[0]].fixed_cost, Money(125_000));
-        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()) };
+        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()), manual: None };
         assert!(plan(&p, None, &Units::default(), unchanged).unwrap().is_none(), "nothing to undo when nothing changed");
         let no_date = Edit::UpdateTask {
             id: id[0].0.to_string(),
@@ -1011,6 +1031,7 @@ mod tests {
             notes: None,
             resources: None,
             fixed_cost: None,
+            manual: None,
         };
         assert_eq!(plan(&p, None, &Units::default(), no_date).err().unwrap().message, "choose a date for “Start no earlier than”");
     }
@@ -1087,6 +1108,21 @@ mod tests {
         let e = plan(&p, None, &Units::default(), Edit::MoveUnder { id: id[0].0.to_string(), parent_id: Some(id[1].0.to_string()) });
         let planned = e.unwrap().unwrap();
         assert!(pm_core::apply(&mut p.clone(), &planned.command).is_err());
+    }
+
+    #[test]
+    fn switching_to_manual_keeps_the_task_where_it_is_and_drags_move_it() {
+        let (mut p, id) = project(&[("A", 0)]);
+        p.start = Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0));
+        let a = id[0].0.to_string();
+        let manual = |on| Edit::UpdateTask { id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: None, fixed_cost: None, manual: Some(on) };
+        run(&mut p, manual(true));
+        assert_eq!(p.tasks[&id[0]].manual_start, Some(p.start));
+        run(&mut p, Edit::MoveTask { id: a.clone(), start_date: "2026-10-08".into() });
+        assert_eq!(p.tasks[&id[0]].manual_start, Some(Moment::from_datetime(jiff::civil::date(2026, 10, 8).at(8, 0, 0, 0))));
+        assert_eq!(p.tasks[&id[0]].constraint, Constraint::AsSoonAsPossible, "no constraint added");
+        run(&mut p, manual(false));
+        assert_eq!(p.tasks[&id[0]].manual_start, None);
     }
 
     #[test]

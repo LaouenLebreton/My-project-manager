@@ -36,6 +36,7 @@ fn task(n: u128) -> Task {
         percent_complete: Percent::default(),
         leveling_delay: Duration::ZERO,
         fixed_cost: Money(0),
+        manual_start: None,
         notes: String::new(),
     }
 }
@@ -75,6 +76,7 @@ fn rich_project() -> Project {
     late.fixed_cost = Money(150_000);
     let mut deadline = task(5);
     deadline.constraint = Constraint::FinishNoLaterThan(Moment(29_003_000));
+    deadline.manual_start = Some(Moment(29_000_480));
     for t in [summary, child, milestone, late, deadline] {
         p.tasks.insert(t.id, t);
     }
@@ -137,7 +139,7 @@ fn version_1_files_are_upgraded() {
     drop(Store::create(&path, &p).unwrap());
     // Turn it back into a version 1 file, as an iteration 1 build would have written it.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; PRAGMA user_version = 1;").unwrap();
     drop(conn);
     let (mut s, mut loaded) = Store::open(&path).unwrap();
     // Version 1 had no leveling delays; they come back as zero.
@@ -145,6 +147,7 @@ fn version_1_files_are_upgraded() {
     for t in expected.tasks.values_mut() {
         t.leveling_delay = Duration::ZERO;
         t.fixed_cost = Money(0);
+        t.manual_start = None;
     }
     expected.currency = String::new();
     assert_eq!(loaded, expected, "everything from version 1 is still there");

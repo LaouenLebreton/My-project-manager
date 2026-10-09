@@ -15,7 +15,7 @@ fn ids() -> impl FnMut() -> Uuid {
 }
 
 /// Depth, name, duration (None for summaries), milestone, constraint, % complete, notes.
-type CanonRow = (usize, String, Option<i64>, bool, Constraint, u8, String);
+type CanonRow = (usize, String, Option<i64>, bool, Constraint, u8, String, Option<Moment>);
 
 /// Everything a round trip must keep, independent of ids and sort-key spelling.
 #[derive(Debug, PartialEq)]
@@ -50,7 +50,8 @@ fn canon(p: &Project) -> Canon {
                 // A summary's stored duration is unused; a milestone's is zero.
                 let duration = (!r.has_children).then_some(if t.is_milestone { 0 } else { t.duration.get() });
                 let milestone = t.is_milestone && !r.has_children;
-                (r.depth, t.name.clone(), duration, milestone, t.constraint, t.percent_complete.get(), t.notes.clone())
+                let manual = t.manual_start.filter(|_| !r.has_children);
+                (r.depth, t.name.clone(), duration, milestone, t.constraint, t.percent_complete.get(), t.notes.clone(), manual)
             })
             .collect(),
         links,
@@ -110,6 +111,7 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     assert!(matches!(task("Templates").constraint, Constraint::StartNoEarlierThan(_)));
     assert!(matches!(task("Content migration").constraint, Constraint::MustFinishOn(_)));
     assert_eq!(task("Visual design").constraint, Constraint::AsLateAsPossible);
+    assert!(task("Templates").manual_start.is_none(), "Templates is manual but the file gives it no start");
 
     // Calendar: Friday afternoons off, Christmas off (three days), one working Saturday.
     assert_eq!(p.calendar.week()[4].working_minutes(), 240);
@@ -145,7 +147,6 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     let reported = lines(&report).join("\n");
     for expected in [
         "Elapsed durations",
-        "Manually scheduled tasks",
         "Milestones with a duration",
         "Lags given as a percentage",
         "Elapsed lags",
@@ -257,6 +258,7 @@ fn random_project() -> impl Strategy<Value = Project> {
                 percent_complete: Percent::new(percent).unwrap(),
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
+                manual_start: None,
                 notes: if k % 3 == 0 { format!("Note {k}: <b>&amp;</b>\nline two") } else { String::new() },
             };
             // Through the command layer, so the project is one the app could hold.
@@ -294,8 +296,11 @@ fn random_project() -> impl Strategy<Value = Project> {
             r.rate = Money(*rate);
         }
         p.currency = currency.to_owned();
-        for (t, cost) in p.tasks.values_mut().zip(&fixed) {
+        for (k, (t, cost)) in p.tasks.values_mut().zip(&fixed).enumerate() {
             t.fixed_cost = Money(*cost);
+            if k % 4 == 1 {
+                t.manual_start = Some(Moment::from_datetime(jiff::civil::date(2026, 10, 6).at(8, 0, 0, 0)));
+            }
         }
         let ids: Vec<ResourceId> = resources.iter().map(|r| r.id).collect();
         let _ = apply(&mut p, &Command::InsertResources { resources, assignments: vec![] });

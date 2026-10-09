@@ -150,6 +150,10 @@ pub struct Task {
     /// A one-off cost on top of the resources' cost (a venue fee, a permit).
     #[serde(default)]
     pub fixed_cost: Money,
+    /// Manually scheduled (R34): the task starts here whatever its links and constraints say.
+    /// `None` means scheduled automatically.
+    #[serde(default)]
+    pub manual_start: Option<Moment>,
 }
 
 /// An amount in hundredths of the project's currency (cents), so totals never pick up

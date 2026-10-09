@@ -73,7 +73,7 @@ pub fn level(p: &Project) -> Result<Leveled, ScheduleError> {
             let ts = s.tasks[t];
             (ts.total_slack, ts.early_start, position.get(t).copied().unwrap_or(usize::MAX))
         });
-        let movable = |t: &TaskId| !q.tasks[t].constraint.is_fixed();
+        let movable = |t: &TaskId| !q.tasks[t].constraint.is_fixed() && q.tasks[t].manual_start.is_none();
         let Some(&pick) = tasks.iter().rev().find(|t| movable(t)) else {
             unresolved.push(Unresolved::FixedDates { resource, tasks: overload.tasks.clone() });
             skipped.insert((resource, start));
@@ -155,6 +155,7 @@ mod tests {
                 notes: String::new(),
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
+                manual_start: None,
             };
             apply(&mut self.0, &Command::InsertTasks { tasks: vec![t], dependencies: vec![] }).unwrap();
             self

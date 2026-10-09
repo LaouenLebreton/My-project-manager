@@ -87,6 +87,7 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
   const [percent, setPercent] = useState(String(row.percentComplete));
   const [notes, setNotes] = useState(row.notes);
   const [resources, setResources] = useState(row.resourceNames);
+  const [manual, setManual] = useState(row.manual);
   const [fixedCost, setFixedCost] = useState(row.fixedCostCents ? (row.fixedCostCents / 100).toFixed(2) : "");
   return (
     <Sheet
@@ -104,6 +105,7 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           notes,
           resources: row.isSummary ? null : resources,
           fixedCost,
+          manual: row.isSummary ? null : manual,
         })
       }
     >
@@ -119,6 +121,23 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
               <label className="inline">
                 <input type="checkbox" checked={milestone} onChange={(e) => setMilestone(e.target.checked)} /> Milestone
               </label>
+            </div>
+          </>
+        )}
+
+        {!row.isSummary && (
+          <>
+            <label htmlFor="ti-mode">Scheduling</label>
+            <div>
+              <select id="ti-mode" value={manual ? "manual" : "auto"} onChange={(e) => setManual(e.target.value === "manual")}>
+                <option value="auto">Automatic</option>
+                <option value="manual">Manual</option>
+              </select>
+              <p className="secondary small">
+                {manual
+                  ? "The task stays where you put it (drag its bar to move it). Links and constraints no longer move it; Super PM warns if a predecessor finishes too late."
+                  : "Super PM works out the dates from links, constraints and the calendar."}
+              </p>
             </div>
           </>
         )}

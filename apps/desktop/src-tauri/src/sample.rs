@@ -29,6 +29,7 @@ pub fn office_move(start: Moment) -> Project {
                 percent_complete: Percent::default(),
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
+                manual_start: None,
                 notes: String::new(),
             },
         );
@@ -126,6 +127,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
                 percent_complete: Percent::default(),
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
+                manual_start: None,
                 notes: String::new(),
             },
         );

@@ -142,9 +142,8 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         }
         let constraint = import_constraint(t, &label, &mut r);
         let percent = t.int_of("PercentComplete").unwrap_or(0).clamp(0, 100) as u8;
-        if t.flag("Manual") {
-            r.approximated("Manually scheduled tasks are scheduled automatically", Some(&label));
-        }
+        // Manually scheduled tasks keep their start (ManualStart, or Start in older files).
+        let manual_start = t.flag("Manual").then(|| t.text_of("ManualStart").or(t.text_of("Start")).and_then(parse_datetime)).flatten();
         if t.text_of("Active") == Some("0") {
             r.approximated("Inactive tasks were imported as active tasks", Some(&label));
         }
@@ -163,6 +162,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
                 percent_complete: Percent::new(percent).expect("clamped"),
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(money(t.text_of("FixedCost"))),
+                manual_start,
                 notes: t.raw_of("Notes").unwrap_or("").to_owned(),
             },
         );

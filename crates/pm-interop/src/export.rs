@@ -165,7 +165,10 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         let written = summary_duration.unwrap_or(duration);
         leaf(&mut w, "Duration", &iso_duration(written));
         leaf(&mut w, "DurationFormat", if written % 480 == 0 { "7" } else { "5" });
-        leaf(&mut w, "Manual", "0");
+        leaf(&mut w, "Manual", if t.manual_start.is_some() && !row.has_children { "1" } else { "0" });
+        if let Some(m) = t.manual_start.filter(|_| !row.has_children) {
+            leaf(&mut w, "ManualStart", &datetime(m));
+        }
         // A summary's dates come from its tasks, so a milestone flag on it means nothing.
         leaf(&mut w, "Milestone", if t.is_milestone && !row.has_children { "1" } else { "0" });
         leaf(&mut w, "Summary", if row.has_children { "1" } else { "0" });

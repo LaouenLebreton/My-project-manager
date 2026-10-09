@@ -169,6 +169,8 @@ pub struct Row {
     pub leveling_delay_minutes: i64,
     /// Where the task would start without its leveling delay; drawn as a line before the bar.
     pub leveled_from: Option<String>,
+    /// Manually scheduled: its start is kept whatever its links say.
+    pub manual: bool,
     /// Total cost in cents (fixed cost plus resources; summaries add up their tasks).
     #[ts(type = "number")]
     pub cost_cents: i64,
@@ -368,6 +370,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 resource_names: resource_names(p, r.id),
                 overloaded: doc.loads.overloaded_tasks.contains(&r.id),
                 leveling_delay_minutes: t.leveling_delay.get(),
+                manual: t.manual_start.is_some() && !r.has_children,
                 cost_cents: doc.loads.task_cost.get(&r.id).copied().unwrap_or(0),
                 fixed_cost_cents: t.fixed_cost.0,
                 leveled_from: s
@@ -411,11 +414,19 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 .iter()
                 .map(|c| Conflict {
                     task_id: c.task.0.to_string(),
-                    message: format!(
-                        "Must start on {}, but its predecessors only allow {} at the earliest. The schedule keeps the constraint date; move the date or change the links.",
-                        iso(c.constraint_start),
-                        iso(c.link_driven_start)
-                    ),
+                    message: if c.manual {
+                        format!(
+                            "Scheduled manually to start {}, but its predecessors finish later (it could start {} at the earliest). Move it, or switch it to automatic scheduling in Task Info.",
+                            iso(c.constraint_start),
+                            iso(c.link_driven_start)
+                        )
+                    } else {
+                        format!(
+                            "Its constraint needs it to start by {}, but its predecessors only allow {} at the earliest. The schedule keeps the constraint date; change the date in Task Info or change the links.",
+                            iso(c.constraint_start),
+                            iso(c.link_driven_start)
+                        )
+                    },
                 })
                 .collect()
         })

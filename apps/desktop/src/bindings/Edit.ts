@@ -12,7 +12,11 @@ resources: string | null,
 /**
  * Typed amount, e.g. "1,500".
  */
-fixedCost: string | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
+fixedCost: string | null, 
+/**
+ * Manually scheduled (keeps its current start) or automatic.
+ */
+manual: boolean | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
 /**
  * Typed maximum: `100%`, `300%` or `3` (people).
  */

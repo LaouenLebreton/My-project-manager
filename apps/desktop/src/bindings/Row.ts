@@ -35,6 +35,10 @@ levelingDelayMinutes: number,
  */
 leveledFrom: string | null, 
 /**
+ * Manually scheduled: its start is kept whatever its links say.
+ */
+manual: boolean, 
+/**
  * Total cost in cents (fixed cost plus resources; summaries add up their tasks).
  */
 costCents: number, fixedCostCents: number, };

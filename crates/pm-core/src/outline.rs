@@ -179,6 +179,7 @@ mod tests {
             percent_complete: Percent::default(),
             leveling_delay: Duration::ZERO,
             fixed_cost: Money(0),
+            manual_start: None,
             notes: String::new(),
         }
     }

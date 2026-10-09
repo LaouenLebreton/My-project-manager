@@ -55,7 +55,7 @@ resolve over-allocation) and **costs** (rates, fixed costs, task and project tot
 10. **[Done]** **All Microsoft Project constraint types:** as late as possible, start no later than,
     finish no earlier than, finish no later than, must finish on (in addition to as soon as
     possible, start no earlier than, must start on). Conflicts are reported, never hidden.
-11. **Manually scheduled tasks:** dates the user types are kept; the engine does not move them,
+11. **[Done]** **Manually scheduled tasks:** dates the user types are kept; the engine does not move them,
     but warns when links are broken.
 12. **Baselines:** save the plan as a baseline; show baseline bars and variances.
 13. **Progress:** status date, actual start and finish, % complete driving remaining work.

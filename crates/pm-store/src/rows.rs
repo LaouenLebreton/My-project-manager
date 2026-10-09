@@ -62,8 +62,8 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
     let cdate = t.constraint.date().map(|m| m.0);
     conn.execute(
         "INSERT OR REPLACE INTO task
-         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             t.id.0.to_string(),
             t.parent.map(|p| p.0.to_string()),
@@ -77,6 +77,7 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
             t.notes,
             t.leveling_delay.get(),
             t.fixed_cost.0,
+            t.manual_start.map(|m| m.0),
         ],
     )?;
     Ok(())
@@ -155,6 +156,7 @@ fn task_from_row(r: &Row) -> Result<Task, StoreError> {
         percent_complete: Percent::new(percent).ok_or_else(|| StoreError::Damaged(format!("percent {percent}")))?,
         leveling_delay: Duration::minutes(r.get(10)?).map_err(|e| StoreError::Damaged(e.to_string()))?,
         fixed_cost: Money(r.get(11)?),
+        manual_start: r.get::<_, Option<i64>>(12)?.map(Moment),
         notes: r.get(9)?,
     })
 }
@@ -172,7 +174,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
 
     let mut tasks = BTreeMap::new();
     let mut stmt = conn.prepare(
-        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents FROM task",
+        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min FROM task",
     )?;
     let mut q = stmt.query([])?;
     while let Some(r) = q.next()? {

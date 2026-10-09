@@ -292,7 +292,17 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
       const top = cy - BAR_HEIGHT / 2;
       ctx.fillStyle = r.critical ? c.critical : c.bar;
       roundRect(ctx, x1, top, x2 - x1, BAR_HEIGHT, 3);
-      ctx.fill();
+      if (r.manual) {
+        // Manually scheduled: an outline with solid ends, so it reads as "placed by hand".
+        ctx.strokeStyle = ctx.fillStyle as string;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillRect(x1, top, 3, BAR_HEIGHT);
+        ctx.fillRect(x2 - 3, top, 3, BAR_HEIGHT);
+        ctx.lineWidth = 1;
+      } else {
+        ctx.fill();
+      }
       if (r.critical && hatch) {
         // Pattern as well as colour, so critical tasks are clear without colour vision.
         ctx.fillStyle = hatch;
