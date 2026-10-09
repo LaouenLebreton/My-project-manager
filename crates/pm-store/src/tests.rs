@@ -415,3 +415,34 @@ fn killed_writer_leaves_a_consistent_file() {
         assert_eq!(p.tasks.len() as i64, base.tasks.len() as i64 + edits, "round {round}: data matches the log");
     }
 }
+
+#[test]
+fn team_changes_are_kept_out_of_undo_and_the_outbox_saved_with_edits() {
+    let path = temp_dir().join("shared.pmproj");
+    let mut p = rich_project();
+    let mut s = Store::create(&path, &p).unwrap();
+    let t2 = TaskId(Uuid::from_u128(2));
+    // A local edit, saved with the outbox that lists it.
+    let rename = Command::SetTask { id: t2, change: TaskChange::Name("Mine".into()) };
+    let outbox = |c: &Command, inv: &Command| format!("{{\"cmd\":{},\"inv\":{}}}", serde_json::to_string(c).unwrap(), serde_json::to_string(inv).unwrap());
+    let applied = s.apply_with(&mut p, &rename, &meta(1), Some(&outbox)).unwrap();
+    assert_eq!(applied.command, rename);
+    assert!(s.meta(TEAM_OUTBOX).unwrap().unwrap().contains("Mine"));
+
+    // A change from the team: applied and saved, but Undo still undoes the local edit.
+    let theirs = Command::SetTask { id: t2, change: TaskChange::Notes("from Alex".into()) };
+    s.apply_remote(&mut p, &theirs, &meta(2), "{}").unwrap();
+    assert_eq!(s.meta(TEAM_OUTBOX).unwrap().as_deref(), Some("{}"));
+    assert_eq!(s.undo_label().unwrap().as_deref(), Some("Rename Task"));
+    drop(s);
+    let (mut s, mut reopened) = Store::open(&path).unwrap();
+    assert_eq!(reopened, p);
+    s.undo(&mut reopened, &meta(3)).unwrap();
+    assert_eq!(reopened.tasks[&t2].notes, "from Alex", "the team's change stays");
+    assert_ne!(reopened.tasks[&t2].name, "Mine");
+
+    s.set_meta(TEAM_SERVER, Some("https://pm.example.com")).unwrap();
+    assert_eq!(s.meta(TEAM_SERVER).unwrap().as_deref(), Some("https://pm.example.com"));
+    s.set_meta(TEAM_SERVER, None).unwrap();
+    assert_eq!(s.meta(TEAM_SERVER).unwrap(), None);
+}

@@ -70,7 +70,20 @@ pub struct Applied {
     pub seq: i64,
     pub label: String,
     pub origin: Origin,
+    /// What was applied and what undoes it (for team sync's outbox).
+    #[serde(skip)]
+    pub command: Command,
+    #[serde(skip)]
+    pub inverse: Command,
 }
+
+/// Where a shared project syncs (iteration 3): kept in the file's `meta` table.
+pub const TEAM_SERVER: &str = "team.server";
+pub const TEAM_OUTBOX: &str = "team.outbox";
+
+/// For shared projects: the outbox to save in the same transaction as a change, given what was
+/// applied and its inverse. Keeps unsent edits and the file in step, even after a crash.
+pub type OutboxFn<'a> = &'a dyn Fn(&Command, &Command) -> String;
 
 pub struct Store {
     conn: Connection,
@@ -126,9 +139,15 @@ impl Store {
 
     /// Applies a user edit and records it. On any error `project` is left unchanged.
     pub fn apply(&mut self, project: &mut Project, cmd: &Command, meta: &EntryMeta) -> Result<Applied, StoreError> {
+        self.apply_with(project, cmd, meta, None)
+    }
+
+    /// `apply`, also saving the shared project's outbox.
+    pub fn apply_with(&mut self, project: &mut Project, cmd: &Command, meta: &EntryMeta, outbox: Option<OutboxFn>) -> Result<Applied, StoreError> {
         let inverse = pm_core::apply(project, cmd)?;
         let label = cmd.label();
-        let result = self.persist(project, cmd, &inverse, Origin::Edit, None, &label, meta);
+        let saved = outbox.map(|f| f(cmd, &inverse));
+        let result = self.persist(project, cmd, &inverse, Origin::Edit, None, &label, meta, saved.as_deref(), true);
         if result.is_err() {
             pm_core::apply(project, &inverse).expect("inverse of an applied command applies");
         }
@@ -137,16 +156,50 @@ impl Store {
 
     /// Undoes the most recent edit that has not been undone. `Ok(None)` if there is none.
     pub fn undo(&mut self, project: &mut Project, meta: &EntryMeta) -> Result<Option<Applied>, StoreError> {
+        self.undo_with(project, meta, None)
+    }
+
+    pub fn undo_with(&mut self, project: &mut Project, meta: &EntryMeta, outbox: Option<OutboxFn>) -> Result<Option<Applied>, StoreError> {
         let Some((pos, target, label)) = self.top(false)? else { return Ok(None) };
         let cmd: Command = serde_json::from_str(&self.log_field(target, "inverse")?)?;
-        self.replay(project, &cmd, Origin::Undo, pos, target, &label, meta).map(Some)
+        self.replay(project, &cmd, Origin::Undo, pos, target, &label, meta, outbox).map(Some)
     }
 
     /// Redoes the most recently undone edit. `Ok(None)` if there is none.
     pub fn redo(&mut self, project: &mut Project, meta: &EntryMeta) -> Result<Option<Applied>, StoreError> {
+        self.redo_with(project, meta, None)
+    }
+
+    pub fn redo_with(&mut self, project: &mut Project, meta: &EntryMeta, outbox: Option<OutboxFn>) -> Result<Option<Applied>, StoreError> {
         let Some((pos, target, label)) = self.top(true)? else { return Ok(None) };
         let cmd: Command = serde_json::from_str(&self.log_field(target, "payload")?)?;
-        self.replay(project, &cmd, Origin::Redo, pos, target, &label, meta).map(Some)
+        self.replay(project, &cmd, Origin::Redo, pos, target, &label, meta, outbox).map(Some)
+    }
+
+    /// Changes from the team (a delta from team sync): recorded in the change log but not in
+    /// the user's undo history, with the outbox that goes with them.
+    pub fn apply_remote(&mut self, project: &mut Project, cmd: &Command, meta: &EntryMeta, outbox: &str) -> Result<Applied, StoreError> {
+        let inverse = pm_core::apply(project, cmd)?;
+        let label = cmd.label();
+        let result = self.persist(project, cmd, &inverse, Origin::Edit, None, &label, meta, Some(outbox), false);
+        if result.is_err() {
+            pm_core::apply(project, &inverse).expect("inverse of an applied command applies");
+        }
+        result
+    }
+
+    /// A value from the file's settings (`TEAM_SERVER`, `TEAM_OUTBOX`).
+    pub fn meta(&self, key: &str) -> Result<Option<String>, StoreError> {
+        Ok(self.conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+    }
+
+    /// Sets (or with `None` removes) a setting.
+    pub fn set_meta(&mut self, key: &str, value: Option<&str>) -> Result<(), StoreError> {
+        match value {
+            Some(v) => self.conn.execute("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2", params![key, v])?,
+            None => self.conn.execute("DELETE FROM meta WHERE key = ?1", [key])?,
+        };
+        Ok(())
     }
 
     /// Name of the edit that Undo would reverse, for "Undo Change Duration".
@@ -204,9 +257,11 @@ impl Store {
         target: i64,
         label: &str,
         meta: &EntryMeta,
+        outbox: Option<OutboxFn>,
     ) -> Result<Applied, StoreError> {
         let inverse = pm_core::apply(project, cmd).map_err(|e| StoreError::Damaged(format!("undo history no longer matches the project: {e}")))?;
-        let result = self.persist(project, cmd, &inverse, origin, Some((pos, target)), label, meta);
+        let saved = outbox.map(|f| f(cmd, &inverse));
+        let result = self.persist(project, cmd, &inverse, origin, Some((pos, target)), label, meta, saved.as_deref(), true);
         if result.is_err() {
             pm_core::apply(project, &inverse).expect("inverse of an applied command applies");
         }
@@ -224,8 +279,13 @@ impl Store {
         history: Option<(i64, i64)>,
         label: &str,
         meta: &EntryMeta,
+        outbox: Option<&str>,
+        undoable: bool,
     ) -> Result<Applied, StoreError> {
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(o) = outbox {
+            tx.execute("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2", params![TEAM_OUTBOX, o])?;
+        }
         let mut touched = pm_core::Touched::default();
         cmd.touched(&mut touched);
         inverse.touched(&mut touched);
@@ -274,6 +334,7 @@ impl Store {
         )?;
         let seq = tx.last_insert_rowid();
         match (origin, history) {
+            (Origin::Edit, _) if !undoable => {}
             (Origin::Edit, _) => {
                 // A new edit discards whatever could have been redone, then caps the history.
                 tx.execute("DELETE FROM undo_history WHERE undone = 1", [])?;
@@ -289,7 +350,7 @@ impl Store {
             _ => unreachable!("undo and redo always name a history entry"),
         }
         tx.commit()?;
-        Ok(Applied { seq, label: label.to_owned(), origin })
+        Ok(Applied { seq, label: label.to_owned(), origin, command: cmd.clone(), inverse: inverse.clone() })
     }
 }
 
