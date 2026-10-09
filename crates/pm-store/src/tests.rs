@@ -52,6 +52,7 @@ fn rich_project() -> Project {
         id: ProjectId(Uuid::from_u128(7)),
         name: "Office move".into(),
         currency: "€".into(),
+        baseline: None,
         start: Moment(29_000_000),
         calendar_id: CalendarId(Uuid::from_u128(8)),
         calendar,
@@ -133,13 +134,34 @@ fn resources_and_assignments_are_saved_and_restored() {
 }
 
 #[test]
+fn the_baseline_is_saved_restored_and_undone() {
+    let path = temp_dir().join("a.pmproj");
+    let mut p = rich_project();
+    let mut s = Store::create(&path, &p).unwrap();
+    let mut tasks = BTreeMap::new();
+    tasks.insert(tid(4), BaselineTask { start: Moment(100), finish: Moment(900), duration: 480, work: 240, cost: Money(1_000) });
+    let b = Baseline { saved_at: "2026-10-09T10:00:00Z".into(), tasks };
+    s.apply(&mut p, &Command::SetProject { change: ProjectChange::Baseline(Some(b.clone())) }, &meta(1)).unwrap();
+    s.apply(&mut p, &Command::SetProject { change: ProjectChange::Name("Renamed".into()) }, &meta(2)).unwrap();
+    drop(s);
+    let (mut s, mut loaded) = Store::open(&path).unwrap();
+    assert_eq!(loaded.baseline, Some(b));
+    assert_eq!(loaded, p);
+    s.undo(&mut loaded, &meta(3)).unwrap();
+    s.undo(&mut loaded, &meta(4)).unwrap();
+    assert_eq!(loaded.baseline, None);
+    drop(s);
+    assert_eq!(Store::open(&path).unwrap().1.baseline, None);
+}
+
+#[test]
 fn version_1_files_are_upgraded() {
     let path = temp_dir().join("old.pmproj");
     let p = rich_project();
     drop(Store::create(&path, &p).unwrap());
     // Turn it back into a version 1 file, as an iteration 1 build would have written it.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; PRAGMA user_version = 1;").unwrap();
     drop(conn);
     let (mut s, mut loaded) = Store::open(&path).unwrap();
     // Version 1 had no leveling delays; they come back as zero.

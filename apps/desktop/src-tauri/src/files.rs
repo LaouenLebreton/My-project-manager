@@ -44,6 +44,7 @@ pub fn empty_project(path: &Path) -> Project {
         resources: Default::default(),
         assignments: Default::default(),
         currency: String::new(),
+        baseline: None,
     }
 }
 

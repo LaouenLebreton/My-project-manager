@@ -137,6 +137,7 @@ mod tests {
                     resources: Default::default(),
                     assignments: Default::default(),
                     currency: String::new(),
+                    baseline: None,
                 },
                 900,
             )

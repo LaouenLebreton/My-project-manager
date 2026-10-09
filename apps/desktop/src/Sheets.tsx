@@ -7,6 +7,7 @@ import type { ConstraintKind } from "./bindings/ConstraintKind";
 import type { Row } from "./bindings/Row";
 import type { Snapshot } from "./bindings/Snapshot";
 import type { TimeRange } from "./bindings/TimeRange";
+import { formatDate } from "./format";
 import { GLOSSARY } from "./help";
 
 
@@ -180,6 +181,16 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           <input id="ti-fixed-cost" value={fixedCost} onChange={(e) => setFixedCost(e.target.value)} placeholder="0.00" size={12} />
           <p className="secondary small">A one-off cost on top of the resources, such as a venue fee or a permit.</p>
         </div>
+
+        {row.baselineFinish && (
+          <>
+            <span className="form-label">Baseline</span>
+            <p className="secondary small">
+              Planned to finish {formatDate(row.baselineFinish)}
+              {row.finishVarianceMinutes ? `; now ${leveledBy(Math.abs(row.finishVarianceMinutes))} ${row.finishVarianceMinutes > 0 ? "later" : "earlier"}` : "; still on plan"}.
+            </p>
+          </>
+        )}
 
         <label htmlFor="ti-percent">% complete</label>
         <input id="ti-percent" type="number" min={0} max={100} value={percent} onChange={(e) => setPercent(e.target.value)} />

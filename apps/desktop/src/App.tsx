@@ -134,6 +134,8 @@ export function App() {
         if (e.payload === "project.working_time") setOverlay("working");
         if (e.payload === "project.level") void editRef.current({ kind: "LevelResources" }).catch((err) => setError(errorMessage(err)));
         if (e.payload === "project.clear_leveling") void editRef.current({ kind: "ClearLeveling" }).catch((err) => setError(errorMessage(err)));
+        if (e.payload === "project.set_baseline") void editRef.current({ kind: "SetBaseline" }).catch((err) => setError(errorMessage(err)));
+        if (e.payload === "project.clear_baseline") void editRef.current({ kind: "ClearBaseline" }).catch((err) => setError(errorMessage(err)));
       }),
     ];
     return () => {
@@ -159,6 +161,8 @@ export function App() {
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
       { name: "Project Info…", run: () => setOverlay("project") },
       { name: "Level Resources", run: () => void edit({ kind: "LevelResources" }).catch((e) => setError(errorMessage(e))) },
+      { name: "Set Baseline", run: () => void edit({ kind: "SetBaseline" }).catch((e) => setError(errorMessage(e))) },
+      { name: "Clear Baseline", run: () => void edit({ kind: "ClearBaseline" }).catch((e) => setError(errorMessage(e))) },
       { name: "Clear Leveling", run: () => void edit({ kind: "ClearLeveling" }).catch((e) => setError(errorMessage(e))) },
       { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },

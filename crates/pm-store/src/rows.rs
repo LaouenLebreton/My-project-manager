@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use pm_core::{Money, 
+use pm_core::{Baseline, BaselineTask, Money, 
     Assignment, AssignmentId, Calendar, CalendarId, Constraint, Dependency, DependencyId, Duration, LinkType, Moment,
     Percent, Project, ProjectId, Resource, ResourceId, ResourceKind, ResourceUnits, SortKey, Task, TaskId,
 };
@@ -46,6 +46,36 @@ pub fn write_project(conn: &Connection, p: &Project) -> Result<(), StoreError> {
         params![p.calendar_id.0.to_string(), serde_json::to_string(&p.calendar)?],
     )?;
     Ok(())
+}
+
+/// Replaces the saved baseline (or removes it).
+pub fn write_baseline(conn: &Connection, b: Option<&Baseline>) -> Result<(), StoreError> {
+    conn.execute("DELETE FROM baseline_task", [])?;
+    conn.execute("UPDATE project SET baseline_saved_at = ?1 WHERE singleton = 1", [b.map(|b| b.saved_at.as_str())])?;
+    if let Some(b) = b {
+        let mut stmt = conn.prepare(
+            "INSERT INTO baseline_task (task_id, start_min, finish_min, duration_min, work_min, cost_cents) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for (id, t) in &b.tasks {
+            stmt.execute(params![id.0.to_string(), t.start.0, t.finish.0, t.duration, t.work, t.cost.0])?;
+        }
+    }
+    Ok(())
+}
+
+fn read_baseline(conn: &Connection) -> Result<Option<Baseline>, StoreError> {
+    let saved_at: Option<String> = conn.query_row("SELECT baseline_saved_at FROM project WHERE singleton = 1", [], |r| r.get(0))?;
+    let Some(saved_at) = saved_at else { return Ok(None) };
+    let mut tasks = BTreeMap::new();
+    let mut stmt = conn.prepare("SELECT task_id, start_min, finish_min, duration_min, work_min, cost_cents FROM baseline_task")?;
+    let mut q = stmt.query([])?;
+    while let Some(r) = q.next()? {
+        tasks.insert(
+            TaskId(uuid(r.get(0)?)?),
+            BaselineTask { start: Moment(r.get(1)?), finish: Moment(r.get(2)?), duration: r.get(3)?, work: r.get(4)?, cost: Money(r.get(5)?) },
+        );
+    }
+    Ok(Some(Baseline { saved_at, tasks }))
 }
 
 pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
@@ -243,5 +273,6 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
         resources,
         assignments,
         currency,
+        baseline: read_baseline(conn)?,
     })
 }

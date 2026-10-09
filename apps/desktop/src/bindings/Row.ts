@@ -39,6 +39,11 @@ leveledFrom: string | null,
  */
 manual: boolean, 
 /**
+ * The saved baseline, if any: dates, and how far the finish has moved since (working
+ * minutes; positive = later).
+ */
+baselineStart: string | null, baselineFinish: string | null, finishVarianceMinutes: number | null, baselineCostCents: number | null, 
+/**
  * Total cost in cents (fixed cost plus resources; summaries add up their tasks).
  */
 costCents: number, fixedCostCents: number, };

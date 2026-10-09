@@ -20,6 +20,6 @@ pub use model::*;
 pub use outline::{outline, OutlineRow};
 pub use text::{format_resource, parse_money, parse_resource_list, PredecessorEntry, ResourceEntry, TextError, Units};
 pub use leveling::{level, Leveled, Unresolved};
-pub use resources::{loads, Loads, Overload, ResourceLoad};
+pub use resources::{capture_baseline, loads, Loads, Overload, ResourceLoad};
 pub use schedule::{check, schedule, ConstraintConflict, Schedule, ScheduleError, TaskSchedule};
 pub use time::{Moment, MINUTES_PER_DAY};

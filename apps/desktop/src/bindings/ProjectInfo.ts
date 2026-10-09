@@ -14,4 +14,8 @@ workingWeek: Array<Array<TimeRange>>,
 /**
  * Currency symbol for costs; empty if not set.
  */
-currency: string, costCents: number, };
+currency: string, 
+/**
+ * When the baseline was saved (RFC 3339), if there is one.
+ */
+baselineSavedAt: string | null, costCents: number, };

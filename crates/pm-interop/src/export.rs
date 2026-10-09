@@ -195,6 +195,16 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         if !t.notes.is_empty() {
             leaf(&mut w, "Notes", &t.notes);
         }
+        if let Some(b) = p.baseline.as_ref().and_then(|b| b.tasks.get(&row.id)) {
+            open(&mut w, "Baseline");
+            leaf(&mut w, "Number", "0");
+            leaf(&mut w, "Start", &datetime(b.start));
+            leaf(&mut w, "Finish", &datetime(b.finish));
+            leaf(&mut w, "Duration", &iso_duration(b.duration));
+            leaf(&mut w, "Work", &iso_duration(b.work));
+            leaf(&mut w, "Cost", &cents(b.cost.0));
+            close(&mut w, "Baseline");
+        }
         for d in p.dependencies.values().filter(|d| d.successor == row.id) {
             let Some(pred) = uid.get(&d.predecessor) else { continue };
             open(&mut w, "PredecessorLink");

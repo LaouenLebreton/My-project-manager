@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::Calendar;
 use crate::schedule::ScheduleError;
 use crate::model::{
-    Money, Assignment, AssignmentId, Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, Resource,
+    Baseline, Money, Assignment, AssignmentId, Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, Resource,
     ResourceId, ResourceKind, ResourceUnits, SortKey, Task, TaskId,
 };
 use crate::time::Moment;
@@ -85,6 +85,8 @@ pub enum ProjectChange {
     Start(Moment),
     Calendar(Calendar),
     Currency(String),
+    /// Project > Set Baseline (Some) or Clear Baseline (None).
+    Baseline(Option<Baseline>),
 }
 
 /// Why a command was refused. Messages are written for the person using the app.
@@ -137,6 +139,8 @@ pub struct Touched {
     pub project: bool,
     pub resources: BTreeSet<ResourceId>,
     pub assignments: BTreeSet<AssignmentId>,
+    /// The saved baseline changed (stored apart from the project row).
+    pub baseline: bool,
 }
 
 impl Command {
@@ -171,6 +175,8 @@ impl Command {
                 ProjectChange::Start(_) => "Change Project Start",
                 ProjectChange::Calendar(_) => "Change Calendar",
                 ProjectChange::Currency(_) => "Change Currency",
+                ProjectChange::Baseline(Some(_)) => "Set Baseline",
+                ProjectChange::Baseline(None) => "Clear Baseline",
             }
             .into(),
             Command::InsertResources { resources, .. } if resources.len() == 1 => "Add Resource".into(),
@@ -213,6 +219,7 @@ impl Command {
             Command::DeleteLink { id } | Command::SetLink { id, .. } => {
                 t.links.insert(*id);
             }
+            Command::SetProject { change: ProjectChange::Baseline(_) } => t.baseline = true,
             Command::SetProject { .. } => t.project = true,
             Command::InsertResources { resources, assignments } => {
                 t.resources.extend(resources.iter().map(|r| r.id));
@@ -270,6 +277,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
                 ProjectChange::Start(s) => ProjectChange::Start(std::mem::replace(&mut p.start, *s)),
                 ProjectChange::Calendar(c) => ProjectChange::Calendar(std::mem::replace(&mut p.calendar, c.clone())),
                 ProjectChange::Currency(c) => ProjectChange::Currency(std::mem::replace(&mut p.currency, c.clone())),
+                ProjectChange::Baseline(b) => ProjectChange::Baseline(std::mem::replace(&mut p.baseline, b.clone())),
             };
             Ok(Command::SetProject { change: old })
         }
@@ -602,6 +610,7 @@ mod tests {
             resources: Default::default(),
             assignments: Default::default(),
             currency: String::new(),
+            baseline: None,
         }
     }
 

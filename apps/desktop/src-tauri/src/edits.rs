@@ -83,6 +83,10 @@ pub enum Edit {
     LevelResources,
     /// Project > Clear Leveling: remove every leveling delay.
     ClearLeveling,
+    /// Project > Set Baseline: save today's plan to compare against.
+    SetBaseline,
+    /// Project > Clear Baseline.
+    ClearBaseline,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
@@ -436,6 +440,20 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             let last = child_keys(p, parent).last().copied().cloned();
             let change = TaskChange::Position { parent, sort_key: SortKey::between(last.as_ref(), None) };
             plain(Command::SetTask { id, change })
+        }
+        Edit::SetBaseline => {
+            let s = schedule.ok_or_else(|| err("the baseline cannot be saved while dates cannot be calculated"))?;
+            let l = pm_core::loads(p, s);
+            let baseline = pm_core::capture_baseline(p, s, &l, &jiff::Timestamp::now().to_string());
+            let command = Command::SetProject { change: ProjectChange::Baseline(Some(baseline)) };
+            let message = if p.baseline.is_some() { "Baseline saved again, replacing the previous one." } else { "Baseline saved. Grey bars now show the plan as it is today; the Finish Variance column shows how far each task has moved." };
+            Ok(Some(Planned { command, created: None, message: Some(message.into()) }))
+        }
+        Edit::ClearBaseline => {
+            if p.baseline.is_none() {
+                return Ok(None);
+            }
+            plain(Command::SetProject { change: ProjectChange::Baseline(None) })
         }
         Edit::LevelResources => level_resources(p),
         Edit::ClearLeveling => {
@@ -823,6 +841,7 @@ mod tests {
             resources: Default::default(),
             assignments: Default::default(),
             currency: String::new(),
+            baseline: None,
         };
         let mut ids = Vec::new();
         let mut stack: Vec<TaskId> = Vec::new();

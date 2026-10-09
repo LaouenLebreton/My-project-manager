@@ -44,6 +44,10 @@ function row(name: string, depth = 0): Row {
     overloaded: false,
     levelingDelayMinutes: 0,
     manual: false,
+    baselineStart: null,
+    baselineFinish: null,
+    finishVarianceMinutes: null,
+    baselineCostCents: null,
     leveledFrom: null,
     costCents: 36_400,
     fixedCostCents: 0,
@@ -136,7 +140,7 @@ export function install() {
     costCents: 182_000,
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
   });
-  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)] };
+  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null };
   if (state.rows[1]) {
     state.rows[1].resourceNames = "Alex";
     state.rows[1].overloaded = true;
@@ -153,6 +157,7 @@ export function install() {
       calendarExceptions: [{ date: "2026-10-14", working: false, ranges: [] }],
       workingWeek: [0, 1, 2, 3, 4].map(() => [{ start: 480, end: 720 }, { start: 780, end: 1020 }]).concat([[], []]),
       currency: "€",
+      baselineSavedAt: state.baselineSavedAt,
       costCents: 1_234_550,
     },
     rows: state.rows.map((r) => ({ ...r })),
@@ -262,6 +267,15 @@ export function install() {
               if (e.milestone !== null) r.isMilestone = e.milestone;
               break;
             }
+            case "SetBaseline":
+              state.baselineSavedAt = "2026-10-09T10:00:00Z";
+              for (const r of state.rows) {
+                r.baselineStart = r.start;
+                r.baselineFinish = r.finish;
+                r.finishVarianceMinutes = 0;
+              }
+              if (state.rows[2]) state.rows[2].finishVarianceMinutes = 960;
+              break;
             case "AddResource":
               if (state.resources.some((r) => r.name.toLowerCase() === e.name.toLowerCase())) fail(`there is already a resource called “${e.name}”`);
               state.resources.push(person(e.name, false));

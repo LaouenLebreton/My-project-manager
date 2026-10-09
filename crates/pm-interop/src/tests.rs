@@ -30,6 +30,8 @@ struct Canon {
     /// Task row, resource name, units.
     assignments: Vec<(usize, String, u32)>,
     currency: String,
+    /// Baseline entries by task row.
+    baseline: Option<Vec<(usize, Moment, Moment, i64, i64, i64)>>,
     /// Fixed cost per task row, and rate per resource name.
     costs: (Vec<i64>, Vec<(String, i64)>),
 }
@@ -71,6 +73,11 @@ fn canon(p: &Project) -> Canon {
             list
         },
         currency: p.currency.clone(),
+        baseline: p.baseline.as_ref().map(|b| {
+            let mut v: Vec<_> = b.tasks.iter().filter_map(|(t, e)| index.get(t).map(|i| (*i, e.start, e.finish, e.duration, e.work, e.cost.0))).collect();
+            v.sort();
+            v
+        }),
         costs: (
             rows.iter().map(|r| p.tasks[&r.id].fixed_cost.0).collect(),
             {
@@ -93,6 +100,9 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     let (p, report) = import_mspdi(FIXTURE, &mut ids()).unwrap();
     assert_eq!(p.name, "Website Relaunch");
     assert_eq!(p.currency, "€");
+    let b = p.baseline.as_ref().expect("Baseline 0 of “Wireframes & sitemap” is imported");
+    let wire = p.tasks.values().find(|t| t.name == "Wireframes & sitemap").unwrap().id;
+    assert_eq!(b.tasks[&wire].duration, 2400);
     assert_eq!(p.tasks.values().find(|t| t.name == "Content migration").unwrap().fixed_cost, Money(125_050));
     assert_eq!(p.resources.values().find(|r| r.name == "Alex").unwrap().rate, Money(8_500));
     let names: Vec<(usize, String)> = outline(&p).iter().map(|r| (r.depth, p.tasks[&r.id].name.clone())).collect();
@@ -152,7 +162,6 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
         "Elapsed lags",
         "Links to tasks in other projects",
         "Blank rows",
-        "Baselines",
         "Actual start and finish dates",
         "Custom fields",
         "Deadlines",
@@ -222,6 +231,7 @@ fn random_project() -> impl Strategy<Value = Project> {
             resources: Default::default(),
             assignments: Default::default(),
             currency: String::new(),
+            baseline: None,
         };
         for (offset, working) in holidays {
             let date = jiff::civil::date(2026, 10, 5).checked_add(jiff::Span::new().days(offset)).unwrap();
@@ -301,6 +311,13 @@ fn random_project() -> impl Strategy<Value = Project> {
             if k % 4 == 1 {
                 t.manual_start = Some(Moment::from_datetime(jiff::civil::date(2026, 10, 6).at(8, 0, 0, 0)));
             }
+        }
+        if currency == "€" {
+            // Some projects carry a baseline: one entry per task, with odd values.
+            let tasks = p.tasks.keys().enumerate().map(|(k, id)| {
+                (*id, BaselineTask { start: Moment(29_000_000 + k as i64 * 60), finish: Moment(29_001_000 + k as i64 * 60), duration: 480 + k as i64, work: 60 * k as i64, cost: Money(k as i64 * 101) })
+            });
+            p.baseline = Some(Baseline { saved_at: "imported".into(), tasks: tasks.collect() });
         }
         let ids: Vec<ResourceId> = resources.iter().map(|r| r.id).collect();
         let _ = apply(&mut p, &Command::InsertResources { resources, assignments: vec![] });

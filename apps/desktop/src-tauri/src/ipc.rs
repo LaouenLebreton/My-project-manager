@@ -117,6 +117,8 @@ pub struct ProjectInfo {
     pub working_week: Vec<Vec<crate::edits::TimeRange>>,
     /// Currency symbol for costs; empty if not set.
     pub currency: String,
+    /// When the baseline was saved (RFC 3339), if there is one.
+    pub baseline_saved_at: Option<String>,
     #[ts(type = "number")]
     pub cost_cents: i64,
 }
@@ -171,6 +173,14 @@ pub struct Row {
     pub leveled_from: Option<String>,
     /// Manually scheduled: its start is kept whatever its links say.
     pub manual: bool,
+    /// The saved baseline, if any: dates, and how far the finish has moved since (working
+    /// minutes; positive = later).
+    pub baseline_start: Option<String>,
+    pub baseline_finish: Option<String>,
+    #[ts(type = "number | null")]
+    pub finish_variance_minutes: Option<i64>,
+    #[ts(type = "number | null")]
+    pub baseline_cost_cents: Option<i64>,
     /// Total cost in cents (fixed cost plus resources; summaries add up their tasks).
     #[ts(type = "number")]
     pub cost_cents: i64,
@@ -336,6 +346,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             let wbs = counters.iter().map(usize::to_string).collect::<Vec<_>>().join(".");
             let t = &p.tasks[&r.id];
             let s = sched.and_then(|s| s.tasks.get(&r.id));
+            let base = p.baseline.as_ref().and_then(|b| b.tasks.get(&r.id));
             let duration_minutes = match (r.has_children, s) {
                 (true, Some(s)) => p.calendar.working_between(s.early_start, s.early_finish),
                 _ if t.is_milestone => 0,
@@ -371,6 +382,10 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 overloaded: doc.loads.overloaded_tasks.contains(&r.id),
                 leveling_delay_minutes: t.leveling_delay.get(),
                 manual: t.manual_start.is_some() && !r.has_children,
+                baseline_start: base.map(|b| iso(b.start)),
+                baseline_finish: base.map(|b| iso(b.finish)),
+                finish_variance_minutes: base.zip(s).map(|(b, s)| p.calendar.working_between(b.finish, s.early_finish)),
+                baseline_cost_cents: base.map(|b| b.cost.0),
                 cost_cents: doc.loads.task_cost.get(&r.id).copied().unwrap_or(0),
                 fixed_cost_cents: t.fixed_cost.0,
                 leveled_from: s
@@ -446,6 +461,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 .collect(),
             working_week: p.calendar.week().iter().map(ranges).collect(),
             currency: p.currency.clone(),
+            baseline_saved_at: p.baseline.as_ref().map(|b| b.saved_at.clone()),
             cost_cents: doc.loads.project_cost,
         },
         rows,

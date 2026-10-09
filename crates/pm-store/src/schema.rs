@@ -125,6 +125,18 @@ pub const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE task ADD COLUMN manual_start_min INTEGER;
     "#,
+    // 6 -> 7: the saved baseline.
+    r#"
+    ALTER TABLE project ADD COLUMN baseline_saved_at TEXT;
+    CREATE TABLE baseline_task (
+        task_id       TEXT PRIMARY KEY,
+        start_min     INTEGER NOT NULL,
+        finish_min    INTEGER NOT NULL,
+        duration_min  INTEGER NOT NULL,
+        work_min      INTEGER NOT NULL,
+        cost_cents    INTEGER NOT NULL
+    );
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { errorMessage, type Edit, type Snapshot } from "./api";
 import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
@@ -64,10 +64,27 @@ const COLUMNS: Column[] = [
   { label: "Slack", width: "76px", align: "right", help: "slack", text: (r, perDay) => formatDays(r.totalSlackMinutes, perDay) },
 ];
 const NAME_COL = 2;
-const TEMPLATE = COLUMNS.map((c) => c.width).join(" ");
+
+/** Shown only once a baseline exists: how far each finish has moved since it was saved. */
+const VARIANCE_COLUMN: Column = {
+  label: "Finish Var.",
+  width: "92px",
+  align: "right",
+  help: "baseline",
+  text: (r, perDay) => {
+    const v = r.finishVarianceMinutes;
+    if (v === null) return "";
+    if (v === 0) return "on plan";
+    return `${v > 0 ? "+" : "−"}${formatDays(Math.abs(v), perDay)}`;
+  },
+};
+
+function columnsFor(hasBaseline: boolean): Column[] {
+  return hasBaseline ? [...COLUMNS, VARIANCE_COLUMN] : COLUMNS;
+}
 /** The columns' combined minimum width: rows and headers never get narrower, so a narrow
  * window scrolls sideways with headers and rows staying in line. */
-const MIN_WIDTH = COLUMNS.reduce((sum, c) => sum + Number(/(\d+)px/.exec(c.width)?.[1] ?? 0), 0);
+const minWidthOf = (cols: Column[]) => cols.reduce((sum, c) => sum + Number(/(\d+)px/.exec(c.width)?.[1] ?? 0), 0);
 
 export interface GridProps {
   snapshot: Snapshot;
@@ -111,6 +128,12 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
   handle,
 ) {
   const rows = snapshot.rows;
+  const hasBaseline = snapshot.project.baselineSavedAt !== null;
+  const cols = useMemo(() => columnsFor(hasBaseline), [hasBaseline]);
+  const template = cols.map((c) => c.width).join(" ");
+  const minWidth = minWidthOf(cols);
+  const colCount = useRef(cols.length);
+  colCount.current = cols.length;
   const rowCount = rows.length + 1; // plus the blank row for new tasks
   const perDay = snapshot.project.minutesPerDay;
 
@@ -207,7 +230,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
   rowCountRef.current = rowCount;
   const moveTo = useCallback((r: number, c: number, extend = false) => {
     const nr = Math.max(0, Math.min(rowCountRef.current - 1, r));
-    setActive({ row: nr, col: Math.max(0, Math.min(COLUMNS.length - 1, c)) });
+    setActive({ row: nr, col: Math.max(0, Math.min(colCount.current - 1, c)) });
     if (!extend) setAnchor(nr);
   }, []);
 
@@ -231,7 +254,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
 
   /** `initial`: a typed character that replaces the cell. Without it, the cell's text is selected. */
   const startEditing = (initial?: string) => {
-    const col = COLUMNS[active.col];
+    const col = cols[active.col];
     if (current && col.edit) {
       setEditing({ text: initial ?? col.edit.initial(current), error: null, selectAll: initial === undefined });
     } else if (!current && active.col === NAME_COL) {
@@ -245,7 +268,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     if (!ed) return true;
     editingRef.current = null;
     const text = ed.text;
-    const col = COLUMNS[active.col];
+    const col = cols[active.col];
     let edit: Edit | null = null;
     if (current && col.edit) {
       if (text !== col.edit.initial(current)) edit = col.edit.make(current, text);
@@ -299,7 +322,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
         moveTo(row, e.metaKey ? 0 : active.col - 1);
         break;
       case "ArrowRight":
-        moveTo(row, e.metaKey ? COLUMNS.length - 1 : active.col + 1);
+        moveTo(row, e.metaKey ? cols.length - 1 : active.col + 1);
         break;
       case "PageUp":
         moveTo(row - page, active.col, shift);
@@ -371,7 +394,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       role="grid"
       aria-label="Tasks"
       aria-rowcount={rowCount + 1}
-      aria-colcount={COLUMNS.length}
+      aria-colcount={cols.length}
       aria-multiselectable
       aria-activedescendant={`cell-${row}-${active.col}`}
       tabIndex={0}
@@ -382,9 +405,9 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
           className="grid-header"
           role="row"
           aria-rowindex={1}
-          style={{ gridTemplateColumns: TEMPLATE, height: HEADER_HEIGHT, minWidth: MIN_WIDTH, transform: `translateX(${-scrollLeft}px)` }}
+          style={{ gridTemplateColumns: template, height: HEADER_HEIGHT, minWidth: minWidth, transform: `translateX(${-scrollLeft}px)` }}
         >
-          {COLUMNS.map((c, i) => (
+          {cols.map((c, i) => (
             <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined} data-tour={c.tour}>
               {c.label}
               {c.help && <HeaderHelp term={c.help} />}
@@ -401,7 +424,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
           onScrollTop(e.currentTarget.scrollTop);
         }}
       >
-        <div style={{ height: rowCount * ROW_HEIGHT, position: "relative", minWidth: MIN_WIDTH }}>
+        <div style={{ height: rowCount * ROW_HEIGHT, position: "relative", minWidth: minWidth }}>
           {visible.map((i) => {
             const r = rows[i];
             const selected = r ? selectedIds.has(r.id) : false;
@@ -413,9 +436,9 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                 aria-rowindex={i + 2}
                 aria-selected={selected}
                 className={classes.filter(Boolean).join(" ")}
-                style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT, gridTemplateColumns: TEMPLATE }}
+                style={{ top: i * ROW_HEIGHT, height: ROW_HEIGHT, gridTemplateColumns: template }}
               >
-                {COLUMNS.map((c, ci) => {
+                {cols.map((c, ci) => {
                   const isActive = i === row && ci === active.col;
                   const isEditing = isActive && editing !== null;
                   return (

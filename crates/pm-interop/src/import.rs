@@ -94,6 +94,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         resources: Default::default(),
         assignments: Default::default(),
         currency: root.raw_of("CurrencySymbol").unwrap_or("").trim().to_owned(),
+        baseline: None,
     };
 
     // Tasks, in file order (ID). The outline comes from OutlineLevel.
@@ -103,6 +104,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         .unwrap_or_default();
     file_tasks.sort_by_key(|t| t.int_of("ID").unwrap_or(i64::MAX));
     let mut by_uid: HashMap<i64, TaskId> = HashMap::new();
+    let mut baseline: BTreeMap<TaskId, pm_core::BaselineTask> = BTreeMap::new();
     let mut durations: HashMap<TaskId, i64> = HashMap::new();
     let mut parents: Vec<(i64, TaskId)> = Vec::new(); // (outline level, id)
     let mut last_key: HashMap<Option<TaskId>, SortKey> = HashMap::new();
@@ -168,10 +170,32 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         );
         by_uid.insert(uid, id);
         durations.insert(id, minutes);
+        for b in t.children("Baseline") {
+            if b.int_of("Number").unwrap_or(0) != 0 {
+                r.ignored("Baselines 1 to 10 (Super PM keeps the main baseline, Baseline 0)", Some(&label));
+                continue;
+            }
+            if let (Some(start), Some(finish)) = (b.text_of("Start").and_then(parse_datetime), b.text_of("Finish").and_then(parse_datetime)) {
+                baseline.insert(
+                    id,
+                    pm_core::BaselineTask {
+                        start,
+                        finish,
+                        duration: b.text_of("Duration").and_then(parse_iso_duration).unwrap_or(0),
+                        work: b.text_of("Work").and_then(parse_iso_duration).unwrap_or(0),
+                        cost: Money(money(b.text_of("Cost"))),
+                    },
+                );
+            }
+        }
         parents.push((level, id));
         tasks_imported += 1;
     }
     r.imported("Tasks, with names, outline, durations, milestones, notes and % complete", tasks_imported);
+    r.imported("Baseline dates, work and cost (Baseline 0)", baseline.len());
+    if !baseline.is_empty() {
+        project.baseline = Some(pm_core::Baseline { saved_at: "imported".into(), tasks: baseline });
+    }
 
     // Links, through the same checks as links typed in the app.
     let mut links_imported = 0;
@@ -248,7 +272,6 @@ fn report_task_extras(t: &Element, label: &str, r: &mut ReportBuilder) {
         ("ActualStart", "Actual start and finish dates (progress tracking arrives in iteration 2)"),
         ("ActualDuration", "Actual durations (progress tracking arrives in iteration 2)"),
         ("Deadline", "Deadlines"),
-        ("Baseline", "Baselines (arrive in iteration 2)"),
         ("ExtendedAttribute", "Custom fields"),
         ("Hyperlink", "Hyperlinks"),
         ("HyperlinkAddress", "Hyperlinks"),

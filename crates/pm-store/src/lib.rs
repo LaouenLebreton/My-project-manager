@@ -100,6 +100,7 @@ impl Store {
         for a in project.assignments.values() {
             rows::upsert_assignment(&tx, a)?;
         }
+        rows::write_baseline(&tx, project.baseline.as_ref())?;
         tx.commit()?;
         Ok(Store { conn })
     }
@@ -242,6 +243,9 @@ impl Store {
         }
         if touched.project {
             rows::write_project(&tx, project)?;
+        }
+        if touched.baseline {
+            rows::write_baseline(&tx, project.baseline.as_ref())?;
         }
         for id in &touched.resources {
             match project.resources.get(id) {

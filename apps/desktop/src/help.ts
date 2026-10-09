@@ -34,6 +34,10 @@ export const GLOSSARY = {
     term: "Work breakdown structure (WBS)",
     text: "The project broken down into phases and the work inside them, drawn as a tree. The codes (1, 1.2, 1.2.3) show where each task sits. Build it in the WBS view with Return (new task) and Tab (subtask), or drag boxes to reorganise.",
   },
+  baseline: {
+    term: "Baseline",
+    text: "A saved copy of the plan (Project > Set Baseline). Grey bars under the tasks show where the baseline had them; Finish Var. shows how many working days later (+) or earlier (−) each task now finishes.",
+  },
   cost: {
     term: "Cost",
     text: "What a task costs: its resources' work times their rates (Rate in the Resource Sheet), plus any fixed cost (Task Info). Summaries add up the tasks inside them. Set the currency in Project Info.",

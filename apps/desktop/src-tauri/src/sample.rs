@@ -80,6 +80,7 @@ pub fn office_move(start: Moment) -> Project {
         resources: Default::default(),
         assignments: Default::default(),
         currency: String::new(),
+        baseline: None,
     }
 }
 
@@ -164,6 +165,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
         resources: Default::default(),
         assignments: Default::default(),
         currency: String::new(),
+        baseline: None,
     }
 }
 

@@ -244,6 +244,28 @@ pub struct Project {
     /// Currency symbol for costs ("€", "$", "CHF"); empty until the user sets one.
     #[serde(default)]
     pub currency: String,
+    /// The plan as it was when the baseline was saved (Project > Set Baseline).
+    #[serde(default)]
+    pub baseline: Option<Baseline>,
+}
+
+/// A saved copy of the plan, to compare progress against.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Baseline {
+    /// When it was saved, as given by the caller (RFC 3339); the core has no clock.
+    pub saved_at: String,
+    pub tasks: BTreeMap<TaskId, BaselineTask>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BaselineTask {
+    pub start: Moment,
+    pub finish: Moment,
+    /// Working minutes.
+    pub duration: i64,
+    /// Working minutes of resource work.
+    pub work: i64,
+    pub cost: Money,
 }
 
 #[cfg(test)]

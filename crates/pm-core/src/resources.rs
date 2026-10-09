@@ -131,6 +131,26 @@ pub fn loads(p: &Project, s: &Schedule) -> Loads {
     out
 }
 
+/// Today's plan as a baseline: dates from the schedule, work and cost from the loads.
+pub fn capture_baseline(p: &Project, s: &Schedule, l: &Loads, saved_at: &str) -> crate::model::Baseline {
+    let tasks = s
+        .tasks
+        .iter()
+        .map(|(id, t)| {
+            let work = p.assignments.values().filter(|a| a.task == *id).filter_map(|a| l.work.get(&a.id)).sum();
+            let entry = crate::model::BaselineTask {
+                start: t.early_start,
+                finish: t.early_finish,
+                duration: p.calendar.working_between(t.early_start, t.early_finish),
+                work,
+                cost: crate::model::Money(l.task_cost.get(id).copied().unwrap_or(0)),
+            };
+            (*id, entry)
+        })
+        .collect();
+    crate::model::Baseline { saved_at: saved_at.to_owned(), tasks }
+}
+
 fn costs(p: &Project, out: &mut Loads) {
     for a in p.assignments.values() {
         let Some(r) = p.resources.get(&a.resource) else { continue };
@@ -209,6 +229,7 @@ mod tests {
                     resources: Default::default(),
                     assignments: Default::default(),
                     currency: String::new(),
+                    baseline: None,
                 },
                 900,
             )
@@ -358,6 +379,17 @@ mod tests {
         let l = p.loads();
         assert_eq!(l.task_cost[&tid(10)], 205);
         assert_eq!(l.project_cost, 205);
+    }
+
+    #[test]
+    fn a_baseline_records_dates_work_and_cost() {
+        let mut p = P::new().task(1, 2 * DAY).resource(1, Work, 100).assign(1, 1, 50);
+        p.0.resources.get_mut(&rid(1)).unwrap().rate = Money(6_000);
+        let s = schedule(&p.0).unwrap();
+        let b = capture_baseline(&p.0, &s, &loads(&p.0, &s), "2026-10-09T10:00:00Z");
+        let t = b.tasks[&tid(1)];
+        assert_eq!((t.start, t.finish, t.duration, t.work, t.cost), (at(5, 8), at(6, 17), 2 * DAY, DAY, Money(48_000)));
+        assert_eq!(b.saved_at, "2026-10-09T10:00:00Z");
     }
 
     #[test]

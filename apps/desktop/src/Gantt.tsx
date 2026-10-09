@@ -254,6 +254,15 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
     if (drag && rows[drag.row] === r && drag.kind !== "link") {
       ctx.globalAlpha = 0.35; // the original stays faint while the ghost shows the result
     }
+    // The baseline: a thin grey bar under the task, where the plan had it when saved.
+    if (r.baselineStart && r.baselineFinish && !r.isSummary) {
+      const bx1 = x(r.baselineStart);
+      const bx2 = Math.max(x(r.baselineFinish), bx1 + 2);
+      ctx.fillStyle = c.link;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(bx1, cy + BAR_HEIGHT / 2 + 1, bx2 - bx1, 3);
+      ctx.globalAlpha = 1;
+    }
     if (r.isMilestone) {
       const s = 6;
       ctx.beginPath();
