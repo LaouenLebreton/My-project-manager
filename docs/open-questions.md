@@ -14,3 +14,9 @@ Raised by Claude Code on 2026-10-08 while reading the iteration 1 spec. Nothing 
 7. **[Done 2026-10-09]** **Outdent works like Microsoft Project:** outdenting a task makes the tasks below it in the same summary its subtasks.
 8. **Iteration 2 starts with resources and assignments.** Baselines, progress tracking and the other views move to later iterations.
 9. **.mpp files:** the owner has `.mpp` files rather than XML. Options: export XML from Microsoft Project (File > Save As > XML Format), or bring forward `.mpp` reading through MPXJ (needs Java). Not decided yet.
+
+## Team server sign-in token storage (iteration 3)
+
+The team server session token is saved in the app's settings folder (`team.json`, readable
+only by the user). Moving it to the macOS Keychain (and Windows Credential Manager) is planned
+before the cloud step; it needs a keychain crate and a signing identity for the app.

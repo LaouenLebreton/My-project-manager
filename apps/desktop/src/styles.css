@@ -1189,3 +1189,72 @@ table.stats td {
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
+
+/* Team server: sync indicator and shared project list. */
+.sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-right: 12px;
+  white-space: nowrap;
+}
+.sync-pill .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+.sync-pill.online .dot {
+  background: #30d158;
+}
+.sync-pill.connecting .dot {
+  background: var(--gantt-warning);
+}
+.sync-pill.offline .dot,
+.sync-pill.stopped .dot {
+  background: var(--gantt-critical);
+}
+label.block {
+  display: block;
+  margin: 2px 0;
+}
+.shared-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 380px;
+}
+.shared-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--gantt-grid);
+}
+
+input.wide {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Narrow windows: the title shrinks (with an ellipsis) before the view tabs wrap. */
+.toolbar > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.toolbar > div:first-child h1,
+.toolbar > div:first-child p {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.segmented,
+.sync-pill {
+  flex-shrink: 0;
+}
+.segmented button {
+  white-space: nowrap;
+}

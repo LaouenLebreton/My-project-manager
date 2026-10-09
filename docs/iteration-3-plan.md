@@ -74,14 +74,16 @@ revert a change (applied as a new change, so the log stays complete).
 
 ## Steps
 
-1. **Server skeleton:** `crates/pm-server` (axum 0.8, tokio 1.53), Storage trait with SQLite,
+1. **[Done]** **Server skeleton:** `crates/pm-server` (axum 0.8, tokio 1.53), Storage trait with SQLite,
    accounts, sign-in, tokens. Integration tests over HTTP. `super-pm-server` binary with a
    config file.
-2. **Sharing a project:** upload a local project to the server, list and download shared
+2. **[Done]** **Sharing a project:** upload a local project to the server, list and download shared
    projects, members and roles.
-3. **Live sync:** WebSocket per open project, server ordering, client rebase, outbox, reconnect.
+3. **[Done]** **Live sync:** WebSocket per open project, server ordering, client rebase, outbox, reconnect.
    Property test: any interleaving of edits from several clients ends with every client equal
-   to the server.
+   to the server. In the app: Team menu (Sign In, Open Shared Project, Share Project with
+   Team, Sign Out), a sync indicator in the header, notices when an edit is refused or no
+   longer fits. Shared projects are kept in the app's Shared folder.
 4. **Change log view** and owner revert.
 5. **Permissions** per member, enforced on the server, reflected in the app.
 6. **Teams, channels, posts:** server API and storage, then the Chat pane.

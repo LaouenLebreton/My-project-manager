@@ -51,6 +51,10 @@ pub mod id {
         ("task.percent_75", "75% Complete"),
         ("task.percent_100", "100% Complete"),
     ];
+    pub const TEAM_SIGN_IN: &str = "team.sign_in";
+    pub const TEAM_OPEN: &str = "team.open";
+    pub const TEAM_SHARE: &str = "team.share";
+    pub const TEAM_SIGN_OUT: &str = "team.sign_out";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
 }
@@ -227,6 +231,16 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .close_window()
         .build()?;
 
+    // Team: the team server (iteration 3). Signing in and opening work without a project.
+    let team_share = item(app, id::TEAM_SHARE, "Share Project with Team…", None)?;
+    let team = SubmenuBuilder::new(app, "Team")
+        .item(&enabled(id::TEAM_SIGN_IN, "Sign In to Team Server…", None)?)
+        .item(&enabled(id::TEAM_OPEN, "Open Shared Project…", None)?)
+        .item(&team_share)
+        .separator()
+        .item(&enabled(id::TEAM_SIGN_OUT, "Sign Out", None)?)
+        .build()?;
+
     let mut help = SubmenuBuilder::new(app, "Help")
         .item(&enabled(id::HELP, "Super PM Help", Some("CmdOrCtrl+Shift+Slash"))?)
         .item(&enabled(id::TOUR, "Show Tour", None)?);
@@ -244,11 +258,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     if let Some(app_menu) = platform::app_menu(app)? {
         menu.append(&app_menu)?;
     }
-    for sub in [&file, &edit, &view, &task, &project, &window, &help] {
+    for sub in [&file, &edit, &view, &task, &project, &team, &window, &help] {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics];
+    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

@@ -187,7 +187,7 @@ impl From<CallError> for IpcError {
 }
 
 fn signed_in(app: &AppHandle) -> Result<Account, IpcError> {
-    account(app).ok_or_else(|| err("sign in to a team server first (File > Team Server > Sign In)"))
+    account(app).ok_or_else(|| err("sign in to a team server first (Team > Sign In to Team Server)"))
 }
 
 fn status_of(app: &AppHandle) -> TeamStatus {
@@ -441,7 +441,7 @@ async fn take_in(app: &AppHandle, label: &str, a: &Account, project: Uuid, chang
                 }
             }
             Ok(Err(ReceiveError::Diverged(why))) => {
-                emit_status(app, label, "stopped", Some(format!("This copy no longer matches your team's ({why}). Open the project again from File > Team Server > Open Shared Project to get a fresh copy.")));
+                emit_status(app, label, "stopped", Some(format!("This copy no longer matches your team's ({why}). Open the project again from Team > Open Shared Project to get a fresh copy.")));
                 return false;
             }
         }

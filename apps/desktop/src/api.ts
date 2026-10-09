@@ -7,8 +7,12 @@ import type { IpcError } from "./bindings/IpcError";
 import type { RecentFile } from "./bindings/RecentFile";
 import type { ReportView } from "./bindings/ReportView";
 import type { Snapshot } from "./bindings/Snapshot";
+import type { SharedProject } from "./bindings/SharedProject";
+import type { SyncStatus } from "./bindings/SyncStatus";
+import type { TeamStatus } from "./bindings/TeamStatus";
+import type { TeamView } from "./bindings/TeamView";
 
-export type { Edit, EditResult, IpcError, RecentFile, Snapshot };
+export type { Edit, EditResult, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamStatus, TeamView };
 
 /** Rejects with an IpcError whose message can be shown to the user as is. */
 export const api = {
@@ -27,6 +31,21 @@ export const api = {
   takeImportReport: () => invoke<ReportView | null>("take_import_report"),
   recentFiles: () => invoke<RecentFile[]>("recent_files"),
   setTextEditing: (editing: boolean) => invoke<void>("set_text_editing", { editing }),
+};
+
+/** The team server (iteration 3). */
+export const team = {
+  status: () => invoke<TeamStatus>("team_status"),
+  /** With `setupName`, sets up a new server and becomes its administrator. */
+  signIn: (server: string, email: string, password: string, setupName: string | null) =>
+    invoke<TeamStatus>("team_sign_in", { server, email, password, setupName }),
+  signOut: () => invoke<TeamStatus>("team_sign_out"),
+  teams: () => invoke<TeamView[]>("team_teams"),
+  createTeam: (name: string) => invoke<TeamView>("team_create_team", { name }),
+  addMember: (teamId: string, email: string) => invoke<void>("team_add_member", { teamId, email }),
+  projects: () => invoke<SharedProject[]>("team_projects"),
+  share: (teamId: string) => invoke<Snapshot>("team_share", { teamId }),
+  open: (projectId: string) => invoke<Snapshot | null>("team_open", { projectId }),
 };
 
 export function errorMessage(e: unknown): string {

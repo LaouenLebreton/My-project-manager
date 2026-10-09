@@ -149,7 +149,7 @@ export function install() {
     costCents: 182_000,
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
   });
-  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null };
+  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null, team: null as { server: string; pending: number } | null, account: null as { server: string; name: string; email: string } | null };
   if (state.rows[1]) {
     state.rows[1].resourceNames = "Alex";
     state.rows[1].overloaded = true;
@@ -171,6 +171,7 @@ export function install() {
       baselineFinish: state.baselineSavedAt ? (state.rows.at(-1)?.finish ?? null) : null,
       earnedValue: state.baselineSavedAt ? { asOf: state.statusDate ?? "2026-10-09T17:00:00", bcws: 400_000, bcwp: 320_000, acwp: 350_000, spi: 0.8, cpi: 320 / 350 } : null,
       costCents: 1_234_550,
+      team: state.team,
     },
     rows: state.rows.map((r) => ({ ...r })),
     links: state.links.map((l) => ({ ...l })),
@@ -208,7 +209,41 @@ export function install() {
         return id;
       }
       if (cmd.startsWith("plugin:event")) return 1;
+      const teamStatus = () =>
+        state.account
+          ? { server: state.account.server, user: { id: "u1", name: state.account.name, email: state.account.email, isAdmin: true } }
+          : { server: null, user: null };
       switch (cmd) {
+        case "team_status":
+          return teamStatus();
+        case "team_sign_in": {
+          if (String(args.password).length < 10) fail("the email or password is not right");
+          const server = String(args.server).startsWith("http") ? String(args.server) : `https://${args.server}`;
+          state.account = { server, name: (args.setupName as string) || "Laouen", email: String(args.email) };
+          return teamStatus();
+        }
+        case "team_sign_out":
+          state.account = null;
+          return teamStatus();
+        case "team_teams":
+          if (!state.account) fail("sign in to a team server first (Team > Sign In to Team Server)");
+          return [{ id: "team-1", name: "Office move", role: "owner" }];
+        case "team_create_team":
+          return { id: "team-2", name: args.name, role: "owner" };
+        case "team_add_member":
+          if (!String(args.email).includes("@")) fail("there is no account with that email on this server; ask the administrator to create one");
+          return null;
+        case "team_projects":
+          if (!state.account) fail("sign in to a team server first (Team > Sign In to Team Server)");
+          return [{ id: "p-1", teamId: "team-1", name: "Office move", version: 42, updatedAt: "2026-10-09T09:30:00Z" }];
+        case "team_share":
+          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0 };
+          setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
+          return snapshot();
+        case "team_open":
+          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0 };
+          setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
+          return snapshot();
         case "get_snapshot":
           return null;
         case "take_import_report":

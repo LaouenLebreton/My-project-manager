@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { api, errorMessage, type Edit, type IpcError, type RecentFile, type Snapshot } from "./api";
+import { api, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
+import { OpenSharedSheet, ShareSheet, SignInSheet, SyncPill } from "./TeamSheets";
 import { formatDate, formatMoney } from "./format";
 import { CommandBar, type CommandItem } from "./CommandBar";
 import { Gantt, type GanttHandle } from "./Gantt";
@@ -38,6 +39,19 @@ export function App() {
   const [finding, setFinding] = useState(false);
   const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload" | "calendar" | "board">("tasks");
   const [notice, setNotice] = useState<string | null>(null);
+  // The team server account, and this window's sync state (shared projects only).
+  const [teamStatus, setTeamStatus] = useState<TeamStatus | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | null>(null);
+  const signOut = useCallback(() => {
+    team.signOut().then(
+      (s) => {
+        setTeamStatus(s);
+        setNotice("Signed out of the team server. Shared projects stay on this Mac and sync again when you sign in.");
+      },
+      (e) => setError(errorMessage(e)),
+    );
+  }, []);
   const ganttRef = useRef<GanttHandle>(null);
 
   const run = useCallback(async (action: () => Promise<Snapshot | null>) => {
@@ -124,6 +138,7 @@ export function App() {
       }
     }, (e) => setError(errorMessage(e)));
     api.recentFiles().then(setRecent, () => {});
+    team.status().then(setTeamStatus, () => {});
     // A window opened by an import collects its report when it loads.
     api.takeImportReport().then((r) => r && setReport(r), () => {});
     const subscriptions = [
@@ -133,6 +148,8 @@ export function App() {
         setError(null);
       }),
       listen<IpcError>("error", (e) => setError(e.payload.message)),
+      listen<SyncStatus>("team-status", (e) => setSyncStatus(e.payload)),
+      listen<string>("team-notice", (e) => setNotice(e.payload)),
       listen<ReportView>("import-report", (e) => {
         setReport(e.payload);
         void api.takeImportReport(); // shown now, so it is no longer waiting
@@ -164,6 +181,10 @@ export function App() {
         if (e.payload === "project.clear_leveling") void editRef.current({ kind: "ClearLeveling" }).catch((err) => setError(errorMessage(err)));
         if (e.payload === "project.set_baseline") void editRef.current({ kind: "SetBaseline" }).catch((err) => setError(errorMessage(err)));
         if (e.payload === "project.update") setOverlay("update");
+        if (e.payload === "team.sign_in") setTeamSheet("signin");
+        if (e.payload === "team.open") setTeamSheet("open");
+        if (e.payload === "team.share") setTeamSheet("share");
+        if (e.payload === "team.sign_out") signOut();
         if (e.payload === "project.statistics") setOverlay("stats");
         const percent = /^task\.percent_(\d+)$/.exec(e.payload);
         if (percent && selectedRef.current.size)
@@ -183,6 +204,8 @@ export function App() {
     { name: "Import Microsoft Project XML…", shortcut: "⇧⌘I", run: () => run(api.importProject) },
     { name: "Show Help", shortcut: "⌘?", run: () => setOverlay("help") },
     { name: "Show Tour", run: () => setOverlay("tour") },
+    { name: "Sign In to Team Server…", run: () => setTeamSheet("signin") },
+    { name: "Open Shared Project…", run: () => setTeamSheet("open") },
   ];
   if (snapshot) {
     commands.push(
@@ -199,6 +222,7 @@ export function App() {
       { name: "Level Resources", run: () => void edit({ kind: "LevelResources" }).catch((e) => setError(errorMessage(e))) },
       { name: "Set Baseline", run: () => void edit({ kind: "SetBaseline" }).catch((e) => setError(errorMessage(e))) },
       { name: "Clear Baseline", run: () => void edit({ kind: "ClearBaseline" }).catch((e) => setError(errorMessage(e))) },
+      { name: "Share Project with Team…", run: () => setTeamSheet("share") },
       { name: "Project Statistics… (earned value)", run: () => setOverlay("stats") },
       { name: "Update Project… (progress up to a day)", run: () => setOverlay("update") },
       ...[0, 25, 50, 75, 100].map((n) => ({
@@ -223,6 +247,28 @@ export function App() {
       {overlay === "tour" && snapshot && <Tour onDone={() => setOverlay(null)} />}
       {overlay === "commands" && <CommandBar commands={commands} onClose={() => setOverlay(null)} />}
       {overlay === "project" && snapshot && <ProjectInfo snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {teamSheet === "signin" && (
+        <SignInSheet
+          status={teamStatus}
+          onClose={() => setTeamSheet(null)}
+          onSignedIn={(st) => {
+            setTeamStatus(st);
+            setNotice(`Signed in to ${st.server} as ${st.user?.name}.`);
+          }}
+        />
+      )}
+      {teamSheet === "open" && <OpenSharedSheet onClose={() => setTeamSheet(null)} onOpened={(snap) => snap && setSnapshot(snap)} onSignIn={() => setTeamSheet("signin")} />}
+      {teamSheet === "share" && snapshot && (
+        <ShareSheet
+          snapshot={snapshot}
+          onClose={() => setTeamSheet(null)}
+          onShared={(snap) => {
+            setSnapshot(snap);
+            setNotice("Shared. Your team can now open this project from Team > Open Shared Project, and changes sync as everyone works.");
+          }}
+          onSignIn={() => setTeamSheet("signin")}
+        />
+      )}
       {question && (
         <ConfirmSheet
           title={question.title}
@@ -254,6 +300,7 @@ export function App() {
           </button>
           <button onClick={() => run(api.openProject)}>Open…</button>
           <button onClick={() => run(api.openSample)}>Open Sample Project</button>
+          <button onClick={() => setTeamSheet("open")}>Open Shared Project…</button>
         </div>
         {recent.length > 0 && (
           <nav className="recent" aria-label="Recent projects">
@@ -288,6 +335,7 @@ export function App() {
             {snapshot.project.costCents !== 0 && ` · ${formatMoney(snapshot.project.costCents, snapshot.project.currency)}`}
           </p>
         </div>
+        {snapshot.project.team && <SyncPill status={syncStatus} pending={snapshot.project.team.pending} />}
         <div className="segmented" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "tasks"} className={view === "tasks" ? "on" : undefined} onClick={() => setView("tasks")}>
             Tasks
