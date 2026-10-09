@@ -4,6 +4,8 @@
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
+
+use crate::access::{Limits, Role};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -11,6 +13,10 @@ use uuid::Uuid;
 pub enum StorageError {
     #[error("there is already an account for {0}")]
     EmailTaken(String),
+    #[error("this project is already on the server")]
+    ProjectExists,
+    #[error("stored data is damaged: {0}")]
+    Damaged(String),
     #[error("database: {0}")]
     Database(#[from] rusqlite::Error),
 }
@@ -30,6 +36,36 @@ pub struct User {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Team {
+    pub id: Uuid,
+    pub name: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TeamRole {
+    /// Adds and removes members, creates channels.
+    Owner,
+    Member,
+}
+
+/// A shared project, without its contents.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRecord {
+    pub id: Uuid,
+    pub team_id: Uuid,
+    pub name: String,
+    pub owner_id: Uuid,
+    /// Number of changes applied since it was shared.
+    pub version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// Everything the handlers need from storage. Calls are blocking; handlers run them on
 /// Tokio's blocking pool.
 pub trait Storage: Send + Sync + 'static {
@@ -43,6 +79,28 @@ pub trait Storage: Send + Sync + 'static {
     fn create_session(&self, token_hash: &str, user: Uuid, created_at: &str) -> Result<()>;
     fn session_user(&self, token_hash: &str) -> Result<Option<User>>;
     fn delete_session(&self, token_hash: &str) -> Result<()>;
+    fn user(&self, id: Uuid) -> Result<Option<User>>;
+
+    /// Creates a team with its first owner.
+    fn create_team(&self, team: &Team, owner: Uuid) -> Result<()>;
+    fn teams_of(&self, user: Uuid) -> Result<Vec<(Team, TeamRole)>>;
+    fn team(&self, id: Uuid) -> Result<Option<Team>>;
+    fn team_role(&self, team: Uuid, user: Uuid) -> Result<Option<TeamRole>>;
+    /// Adds or changes a member.
+    fn set_team_member(&self, team: Uuid, user: Uuid, role: TeamRole) -> Result<()>;
+    fn team_members(&self, team: Uuid) -> Result<Vec<(User, TeamRole)>>;
+
+    /// Stores a newly shared project (`project` is `pm_core::Project` as JSON). Its owner gets
+    /// the Owner role. Fails with `ProjectExists` if the id is taken.
+    fn create_project(&self, record: &ProjectRecord, project: &str) -> Result<()>;
+    /// Projects of every team the user belongs to.
+    fn projects_of(&self, user: Uuid) -> Result<Vec<ProjectRecord>>;
+    /// The record and the contents as JSON.
+    fn project(&self, id: Uuid) -> Result<Option<(ProjectRecord, String)>>;
+    fn project_record(&self, id: Uuid) -> Result<Option<ProjectRecord>>;
+    /// A member's role and limits when the owner has set them.
+    fn project_member(&self, project: Uuid, user: Uuid) -> Result<Option<(Role, Limits)>>;
+    fn set_project_member(&self, project: Uuid, user: Uuid, role: Role, limits: &Limits) -> Result<()>;
 }
 
 /// Forward-only migrations; `PRAGMA user_version` holds the version.
@@ -61,6 +119,46 @@ const MIGRATIONS: &[&str] = &[
         token_hash TEXT PRIMARY KEY,
         user_id    TEXT NOT NULL REFERENCES user (id) ON DELETE CASCADE,
         created_at TEXT NOT NULL
+    );
+    "#,
+    // 1 -> 2: teams and shared projects. `change` is filled by live sync (step 3).
+    r#"
+    CREATE TABLE team (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE team_member (
+        team_id TEXT NOT NULL REFERENCES team (id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES user (id) ON DELETE CASCADE,
+        role    TEXT NOT NULL CHECK (role IN ('owner', 'member')),
+        PRIMARY KEY (team_id, user_id)
+    );
+    CREATE TABLE project (
+        id         TEXT PRIMARY KEY,
+        team_id    TEXT NOT NULL REFERENCES team (id),
+        name       TEXT NOT NULL,
+        owner_id   TEXT NOT NULL REFERENCES user (id),
+        version    INTEGER NOT NULL,
+        data       TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE project_member (
+        project_id TEXT NOT NULL REFERENCES project (id) ON DELETE CASCADE,
+        user_id    TEXT NOT NULL REFERENCES user (id) ON DELETE CASCADE,
+        role       TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+        limits     TEXT NOT NULL,
+        PRIMARY KEY (project_id, user_id)
+    );
+    CREATE TABLE change (
+        project_id TEXT NOT NULL REFERENCES project (id) ON DELETE CASCADE,
+        version    INTEGER NOT NULL,
+        author_id  TEXT NOT NULL REFERENCES user (id),
+        at         TEXT NOT NULL,
+        label      TEXT NOT NULL,
+        command    TEXT NOT NULL,
+        PRIMARY KEY (project_id, version)
     );
     "#,
 ];
@@ -103,6 +201,37 @@ fn user_from_row(r: &rusqlite::Row) -> rusqlite::Result<User> {
         email: r.get(2)?,
         is_admin: r.get(3)?,
         created_at: r.get(4)?,
+    })
+}
+
+fn uuid_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<Uuid> {
+    let s: String = r.get(i)?;
+    Uuid::parse_str(&s).map_err(|e| rusqlite::Error::FromSqlConversionFailure(i, rusqlite::types::Type::Text, Box::new(e)))
+}
+
+fn team_role_code(r: TeamRole) -> &'static str {
+    match r {
+        TeamRole::Owner => "owner",
+        TeamRole::Member => "member",
+    }
+}
+
+fn team_role_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<TeamRole> {
+    let s: String = r.get(i)?;
+    Ok(if s == "owner" { TeamRole::Owner } else { TeamRole::Member })
+}
+
+const PROJECT_COLUMNS: &str = "p.id, p.team_id, p.name, p.owner_id, p.version, p.created_at, p.updated_at";
+
+fn project_from_row(r: &rusqlite::Row) -> rusqlite::Result<ProjectRecord> {
+    Ok(ProjectRecord {
+        id: uuid_at(r, 0)?,
+        team_id: uuid_at(r, 1)?,
+        name: r.get(2)?,
+        owner_id: uuid_at(r, 3)?,
+        version: r.get(4)?,
+        created_at: r.get(5)?,
+        updated_at: r.get(6)?,
     })
 }
 
@@ -157,6 +286,122 @@ impl Storage for SqliteStorage {
 
     fn delete_session(&self, token_hash: &str) -> Result<()> {
         self.conn().execute("DELETE FROM session WHERE token_hash = ?1", [token_hash])?;
+        Ok(())
+    }
+
+    fn user(&self, id: Uuid) -> Result<Option<User>> {
+        Ok(self.conn().query_row("SELECT id, name, email, is_admin, created_at FROM user WHERE id = ?1", [id.to_string()], user_from_row).optional()?)
+    }
+
+    fn create_team(&self, team: &Team, owner: Uuid) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("INSERT INTO team (id, name, created_at) VALUES (?1, ?2, ?3)", params![team.id.to_string(), team.name, team.created_at])?;
+        tx.execute("INSERT INTO team_member (team_id, user_id, role) VALUES (?1, ?2, 'owner')", params![team.id.to_string(), owner.to_string()])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn teams_of(&self, user: Uuid) -> Result<Vec<(Team, TeamRole)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT t.id, t.name, t.created_at, m.role FROM team t JOIN team_member m ON m.team_id = t.id WHERE m.user_id = ?1 ORDER BY t.name COLLATE NOCASE")?;
+        let rows = stmt.query_map([user.to_string()], |r| Ok((Team { id: uuid_at(r, 0)?, name: r.get(1)?, created_at: r.get(2)? }, team_role_at(r, 3)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn team(&self, id: Uuid) -> Result<Option<Team>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT id, name, created_at FROM team WHERE id = ?1", [id.to_string()], |r| Ok(Team { id: uuid_at(r, 0)?, name: r.get(1)?, created_at: r.get(2)? }))
+            .optional()?)
+    }
+
+    fn team_role(&self, team: Uuid, user: Uuid) -> Result<Option<TeamRole>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT role FROM team_member WHERE team_id = ?1 AND user_id = ?2", [team.to_string(), user.to_string()], |r| team_role_at(r, 0))
+            .optional()?)
+    }
+
+    fn set_team_member(&self, team: Uuid, user: Uuid, role: TeamRole) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO team_member (team_id, user_id, role) VALUES (?1, ?2, ?3) ON CONFLICT (team_id, user_id) DO UPDATE SET role = ?3",
+            params![team.to_string(), user.to_string(), team_role_code(role)],
+        )?;
+        Ok(())
+    }
+
+    fn team_members(&self, team: Uuid) -> Result<Vec<(User, TeamRole)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT u.id, u.name, u.email, u.is_admin, u.created_at, m.role FROM team_member m JOIN user u ON u.id = m.user_id WHERE m.team_id = ?1 ORDER BY u.name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([team.to_string()], |r| Ok((user_from_row(r)?, team_role_at(r, 5)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn create_project(&self, p: &ProjectRecord, data: &str) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let result = tx.execute(
+            "INSERT INTO project (id, team_id, name, owner_id, version, data, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![p.id.to_string(), p.team_id.to_string(), p.name, p.owner_id.to_string(), p.version, data, p.created_at, p.updated_at],
+        );
+        if let Err(rusqlite::Error::SqliteFailure(e, _)) = &result
+            && e.code == rusqlite::ErrorCode::ConstraintViolation
+        {
+            return Err(StorageError::ProjectExists);
+        }
+        result?;
+        let limits = serde_json::to_string(&Limits::default()).expect("limits serialize");
+        tx.execute(
+            "INSERT INTO project_member (project_id, user_id, role, limits) VALUES (?1, ?2, 'owner', ?3)",
+            params![p.id.to_string(), p.owner_id.to_string(), limits],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn projects_of(&self, user: Uuid) -> Result<Vec<ProjectRecord>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {PROJECT_COLUMNS} FROM project p JOIN team_member m ON m.team_id = p.team_id WHERE m.user_id = ?1 ORDER BY p.name COLLATE NOCASE"
+        ))?;
+        let rows = stmt.query_map([user.to_string()], project_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn project(&self, id: Uuid) -> Result<Option<(ProjectRecord, String)>> {
+        Ok(self
+            .conn()
+            .query_row(&format!("SELECT {PROJECT_COLUMNS}, p.data FROM project p WHERE p.id = ?1"), [id.to_string()], |r| Ok((project_from_row(r)?, r.get(7)?)))
+            .optional()?)
+    }
+
+    fn project_record(&self, id: Uuid) -> Result<Option<ProjectRecord>> {
+        Ok(self.conn().query_row(&format!("SELECT {PROJECT_COLUMNS} FROM project p WHERE p.id = ?1"), [id.to_string()], project_from_row).optional()?)
+    }
+
+    fn project_member(&self, project: Uuid, user: Uuid) -> Result<Option<(Role, Limits)>> {
+        let row: Option<(String, String)> = self
+            .conn()
+            .query_row("SELECT role, limits FROM project_member WHERE project_id = ?1 AND user_id = ?2", [project.to_string(), user.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        row.map(|(role, limits)| {
+            let role = Role::from_code(&role).ok_or_else(|| StorageError::Damaged(format!("role {role}")))?;
+            let limits = serde_json::from_str(&limits).map_err(|e| StorageError::Damaged(e.to_string()))?;
+            Ok((role, limits))
+        })
+        .transpose()
+    }
+
+    fn set_project_member(&self, project: Uuid, user: Uuid, role: Role, limits: &Limits) -> Result<()> {
+        let limits = serde_json::to_string(limits).expect("limits serialize");
+        self.conn().execute(
+            "INSERT INTO project_member (project_id, user_id, role, limits) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (project_id, user_id) DO UPDATE SET role = ?3, limits = ?4",
+            params![project.to_string(), user.to_string(), role.code(), limits],
+        )?;
         Ok(())
     }
 }

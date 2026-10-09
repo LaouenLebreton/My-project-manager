@@ -3,7 +3,9 @@
 //! Step 1: accounts and sessions. The first account, created through `POST /api/setup`, is the
 //! server administrator; administrators create the other accounts.
 
+pub mod access;
 pub mod auth;
+pub mod sharing;
 pub mod storage;
 
 use std::sync::Arc;
@@ -32,7 +34,7 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    fn new(status: StatusCode, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: StatusCode, message: impl Into<String>) -> Self {
         ApiError { status, message: message.into() }
     }
 }
@@ -40,7 +42,8 @@ impl ApiError {
 impl From<StorageError> for ApiError {
     fn from(e: StorageError) -> Self {
         match e {
-            StorageError::EmailTaken(_) => ApiError::new(StatusCode::CONFLICT, e.to_string()),
+            StorageError::EmailTaken(_) | StorageError::ProjectExists => ApiError::new(StatusCode::CONFLICT, e.to_string()),
+            StorageError::Damaged(_) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             StorageError::Database(_) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the server could not reach its database"),
         }
     }
@@ -52,10 +55,10 @@ impl IntoResponse for ApiError {
     }
 }
 
-type ApiResult<T> = Result<Json<T>, ApiError>;
+pub(crate) type ApiResult<T> = Result<Json<T>, ApiError>;
 
 /// Runs blocking storage calls off the async threads.
-async fn db<T: Send + 'static>(state: &AppState, f: impl FnOnce(&dyn Storage) -> Result<T, StorageError> + Send + 'static) -> Result<T, ApiError> {
+pub(crate) async fn db<T: Send + 'static>(state: &AppState, f: impl FnOnce(&dyn Storage) -> Result<T, StorageError> + Send + 'static) -> Result<T, ApiError> {
     let storage = state.storage.clone();
     tokio::task::spawn_blocking(move || f(&*storage))
         .await
@@ -91,6 +94,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions", post(sign_in).delete(sign_out))
         .route("/api/me", get(me))
         .route("/api/users", post(create_user))
+        .merge(sharing::routes())
         .with_state(state)
 }
 
@@ -116,7 +120,7 @@ pub struct Session {
     pub user: User,
 }
 
-fn now() -> String {
+pub(crate) fn now() -> String {
     jiff::Timestamp::now().to_string()
 }
 

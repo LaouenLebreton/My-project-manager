@@ -95,3 +95,105 @@ async fn new_accounts_are_checked() {
     let (status, _) = call(&app, "GET", "/api/me", None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+fn sample_project(name: &str) -> Value {
+    use pm_core::*;
+    let id = uuid::Uuid::now_v7();
+    let mut p = Project {
+        id: ProjectId(id),
+        name: name.into(),
+        start: Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0)),
+        calendar_id: CalendarId(uuid::Uuid::now_v7()),
+        calendar: Calendar::standard(),
+        tasks: Default::default(),
+        dependencies: Default::default(),
+        resources: Default::default(),
+        assignments: Default::default(),
+        currency: "€".into(),
+        baseline: None,
+        status_date: None,
+    };
+    let t = Task {
+        id: TaskId(uuid::Uuid::now_v7()),
+        parent: None,
+        sort_key: SortKey("V".into()),
+        name: "Survey".into(),
+        duration: Duration::minutes(960).unwrap(),
+        is_milestone: false,
+        constraint: Constraint::AsSoonAsPossible,
+        percent_complete: Percent::default(),
+        leveling_delay: Duration::ZERO,
+        fixed_cost: Money(0),
+        manual_start: None,
+        actual: Actual::default(),
+        notes: String::new(),
+    };
+    p.tasks.insert(t.id, t);
+    serde_json::to_value(&p).unwrap()
+}
+
+/// An administrator and two more accounts, each signed in: (admin, alex, sam) tokens and ids.
+async fn people(app: &Router) -> [(String, String); 3] {
+    let (_, admin) = call(app, "POST", "/api/setup", None, Some(account("Laouen", "laouen@example.com"))).await;
+    let admin_token = admin["token"].as_str().unwrap().to_owned();
+    let mut out = vec![(admin_token.clone(), admin["user"]["id"].as_str().unwrap().to_owned())];
+    for (name, email) in [("Alex", "alex@example.com"), ("Sam", "sam@example.com")] {
+        call(app, "POST", "/api/users", Some(&admin_token), Some(account(name, email))).await;
+        let (_, s) = call(app, "POST", "/api/sessions", None, Some(json!({ "email": email, "password": "a long enough password" }))).await;
+        out.push((s["token"].as_str().unwrap().to_owned(), s["user"]["id"].as_str().unwrap().to_owned()));
+    }
+    out.try_into().unwrap()
+}
+
+#[tokio::test]
+async fn a_project_shared_with_a_team_opens_for_its_members() {
+    let app = server();
+    let [(laouen, _), (alex, alex_id), (sam, _)] = people(&app).await;
+
+    let (status, team) = call(&app, "POST", "/api/teams", Some(&laouen), Some(json!({ "name": "Office move" }))).await;
+    assert_eq!((status, team["role"].as_str()), (StatusCode::OK, Some("owner")));
+    let team_id = team["team"]["id"].as_str().unwrap().to_owned();
+
+    // Members are added by email; only owners add them.
+    let (status, _) = call(&app, "POST", &format!("/api/teams/{team_id}/members"), Some(&laouen), Some(json!({ "email": "Alex@example.com" }))).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(&app, "POST", &format!("/api/teams/{team_id}/members"), Some(&alex), Some(json!({ "email": "sam@example.com" }))).await;
+    assert_eq!((status, body["message"].as_str()), (StatusCode::FORBIDDEN, Some("only the team's owners can add people")));
+    let (status, _) = call(&app, "POST", &format!("/api/teams/{team_id}/members"), Some(&laouen), Some(json!({ "email": "nobody@example.com" }))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let project = sample_project("Office move");
+    let (status, record) = call(&app, "POST", "/api/projects", Some(&laouen), Some(json!({ "teamId": team_id, "project": project }))).await;
+    assert_eq!((status, record["version"].as_i64()), (StatusCode::OK, Some(0)));
+    let id = record["id"].as_str().unwrap().to_owned();
+    let (status, _) = call(&app, "POST", "/api/projects", Some(&laouen), Some(json!({ "teamId": team_id, "project": project }))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "shared once");
+
+    // Alex (in the team) sees and opens it as an Editor; Sam (not in the team) cannot.
+    let (_, list) = call(&app, "GET", "/api/projects", Some(&alex), None).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    let (status, opened) = call(&app, "GET", &format!("/api/projects/{id}"), Some(&alex), None).await;
+    assert_eq!((status, opened["role"].as_str()), (StatusCode::OK, Some("editor")));
+    assert_eq!(opened["project"], project, "the project comes back exactly as shared");
+    let (status, _) = call(&app, "GET", &format!("/api/projects/{id}"), Some(&sam), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, list) = call(&app, "GET", "/api/projects", Some(&sam), None).await;
+    assert_eq!(list, json!([]));
+
+    // The owner limits Alex to progress updates on tasks assigned to him.
+    let limits = json!({ "schedule": false, "progress": true, "resources": false, "costs": false, "project": false, "tasks": { "kind": "assigned" } });
+    let (status, member) = call(&app, "PUT", &format!("/api/projects/{id}/members/{alex_id}"), Some(&laouen), Some(json!({ "role": "editor", "limits": limits }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(member["limits"], limits);
+    let (_, opened) = call(&app, "GET", &format!("/api/projects/{id}"), Some(&alex), None).await;
+    assert_eq!(opened["limits"], limits);
+    let (_, members) = call(&app, "GET", &format!("/api/projects/{id}/members"), Some(&alex), None).await;
+    let roles: Vec<(&str, &str)> = members.as_array().unwrap().iter().map(|m| (m["user"]["name"].as_str().unwrap(), m["role"].as_str().unwrap())).collect();
+    assert_eq!(roles, [("Alex", "editor"), ("Laouen", "owner")]);
+
+    // Only the owner changes members, and the owner stays the owner.
+    let (status, _) = call(&app, "PUT", &format!("/api/projects/{id}/members/{alex_id}"), Some(&alex), Some(json!({ "role": "viewer" }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call(&app, "PUT", &format!("/api/projects/{id}/members/{alex_id}"), Some(&laouen), Some(json!({ "role": "owner" }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
