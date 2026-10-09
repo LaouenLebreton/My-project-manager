@@ -231,6 +231,13 @@ pub async fn team_sign_out(app: AppHandle) -> Result<TeamStatus, IpcError> {
     Ok(status_of(&app))
 }
 
+/// Administrators only: creates an account for someone else on the server.
+#[tauri::command]
+pub async fn team_create_account(app: AppHandle, name: String, email: String, password: String) -> Result<TeamUser, IpcError> {
+    let a = signed_in(&app)?;
+    Ok(call(reqwest::Method::POST, &a.server, "/api/users", Some(&a.token), Some(serde_json::json!({ "name": name, "email": email, "password": password }))).await?)
+}
+
 #[tauri::command]
 pub async fn team_teams(app: AppHandle) -> Result<Vec<TeamView>, IpcError> {
     let a = signed_in(&app)?;

@@ -54,6 +54,45 @@ export function SignInSheet({ status, onClose, onSignedIn }: { status: TeamStatu
   );
 }
 
+/** Team > Add Account to Server (administrators): someone else's sign-in. */
+export function AddAccountSheet({ status, onClose, onAdded }: { status: TeamStatus | null; onClose: () => void; onAdded: (message: string) => void }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  if (!status?.user?.isAdmin) {
+    return (
+      <Sheet title="Add Account to Server" onClose={onClose}>
+        <p>{status?.user ? `Only the administrator of ${status.server} can add accounts. Ask them to add the person.` : "Sign in to the team server as its administrator first."}</p>
+      </Sheet>
+    );
+  }
+  const save = async () => {
+    try {
+      const user = await team.createAccount(name, email, password);
+      onAdded(`${user.name} (${user.email}) can now sign in to ${status.server}. Give them the server address and the password you chose; they can be added to teams by email.`);
+      return null;
+    } catch (e) {
+      return errorMessage(e);
+    }
+  };
+  return (
+    <Sheet title="Add Account to Server" onClose={onClose} onSave={save}>
+      <p className="secondary small">A new person who can sign in to {status.server}. Then add them to a team when you share a project.</p>
+      <div className="form">
+        <label htmlFor="aa-name">Name</label>
+        <input id="aa-name" className="wide" value={name} onChange={(e) => setName(e.target.value)} autoFocus required />
+        <label htmlFor="aa-email">Email</label>
+        <input id="aa-email" className="wide" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <label htmlFor="aa-password">Password</label>
+        <div>
+          <input id="aa-password" className="wide" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
+          <p className="secondary small">At least 10 characters. Tell them, so they can sign in.</p>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
 /** Team > Share Project with Team: pick or create a team, optionally add people, share. */
 export function ShareSheet({ snapshot, onClose, onShared, onSignIn }: { snapshot: Snapshot; onClose: () => void; onShared: (s: Snapshot) => void; onSignIn: () => void }) {
   const [teams, setTeams] = useState<TeamView[] | null>(null);

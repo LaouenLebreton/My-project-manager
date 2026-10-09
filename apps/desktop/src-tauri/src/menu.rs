@@ -55,6 +55,7 @@ pub mod id {
     pub const TEAM_OPEN: &str = "team.open";
     pub const TEAM_SHARE: &str = "team.share";
     pub const TEAM_SIGN_OUT: &str = "team.sign_out";
+    pub const TEAM_ADD_ACCOUNT: &str = "team.add_account";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
 }
@@ -238,6 +239,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&enabled(id::TEAM_OPEN, "Open Shared Project…", None)?)
         .item(&team_share)
         .separator()
+        .item(&enabled(id::TEAM_ADD_ACCOUNT, "Add Account to Server…", None)?)
         .item(&enabled(id::TEAM_SIGN_OUT, "Sign Out", None)?)
         .build()?;
 

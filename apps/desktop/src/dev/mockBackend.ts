@@ -222,6 +222,9 @@ export function install() {
           state.account = { server, name: (args.setupName as string) || "Laouen", email: String(args.email) };
           return teamStatus();
         }
+        case "team_create_account":
+          if (String(args.password).length < 10) fail("choose a password of at least 10 characters");
+          return { id: "u2", name: args.name, email: args.email, isAdmin: false };
         case "team_sign_out":
           state.account = null;
           return teamStatus();

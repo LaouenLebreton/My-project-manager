@@ -125,6 +125,7 @@ pub fn run() {
             team::team_status,
             team::team_sign_in,
             team::team_sign_out,
+            team::team_create_account,
             team::team_teams,
             team::team_create_team,
             team::team_add_member,

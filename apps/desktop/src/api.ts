@@ -10,6 +10,7 @@ import type { Snapshot } from "./bindings/Snapshot";
 import type { SharedProject } from "./bindings/SharedProject";
 import type { SyncStatus } from "./bindings/SyncStatus";
 import type { TeamStatus } from "./bindings/TeamStatus";
+import type { TeamUser } from "./bindings/TeamUser";
 import type { TeamView } from "./bindings/TeamView";
 
 export type { Edit, EditResult, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamStatus, TeamView };
@@ -40,6 +41,8 @@ export const team = {
   signIn: (server: string, email: string, password: string, setupName: string | null) =>
     invoke<TeamStatus>("team_sign_in", { server, email, password, setupName }),
   signOut: () => invoke<TeamStatus>("team_sign_out"),
+  /** Administrators only. */
+  createAccount: (name: string, email: string, password: string) => invoke<TeamUser>("team_create_account", { name, email, password }),
   teams: () => invoke<TeamView[]>("team_teams"),
   createTeam: (name: string) => invoke<TeamView>("team_create_team", { name }),
   addMember: (teamId: string, email: string) => invoke<void>("team_add_member", { teamId, email }),

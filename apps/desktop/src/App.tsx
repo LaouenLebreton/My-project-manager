@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
-import { OpenSharedSheet, ShareSheet, SignInSheet, SyncPill } from "./TeamSheets";
+import { AddAccountSheet, OpenSharedSheet, ShareSheet, SignInSheet, SyncPill } from "./TeamSheets";
 import { formatDate, formatMoney } from "./format";
 import { CommandBar, type CommandItem } from "./CommandBar";
 import { Gantt, type GanttHandle } from "./Gantt";
@@ -42,7 +42,7 @@ export function App() {
   // The team server account, and this window's sync state (shared projects only).
   const [teamStatus, setTeamStatus] = useState<TeamStatus | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
-  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | null>(null);
+  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | "account" | null>(null);
   const signOut = useCallback(() => {
     team.signOut().then(
       (s) => {
@@ -185,6 +185,7 @@ export function App() {
         if (e.payload === "team.open") setTeamSheet("open");
         if (e.payload === "team.share") setTeamSheet("share");
         if (e.payload === "team.sign_out") signOut();
+        if (e.payload === "team.add_account") setTeamSheet("account");
         if (e.payload === "project.statistics") setOverlay("stats");
         const percent = /^task\.percent_(\d+)$/.exec(e.payload);
         if (percent && selectedRef.current.size)
@@ -206,6 +207,7 @@ export function App() {
     { name: "Show Tour", run: () => setOverlay("tour") },
     { name: "Sign In to Team Server…", run: () => setTeamSheet("signin") },
     { name: "Open Shared Project…", run: () => setTeamSheet("open") },
+    { name: "Add Account to Team Server…", run: () => setTeamSheet("account") },
   ];
   if (snapshot) {
     commands.push(
@@ -257,6 +259,7 @@ export function App() {
           }}
         />
       )}
+      {teamSheet === "account" && <AddAccountSheet status={teamStatus} onClose={() => setTeamSheet(null)} onAdded={setNotice} />}
       {teamSheet === "open" && <OpenSharedSheet onClose={() => setTeamSheet(null)} onOpened={(snap) => snap && setSnapshot(snap)} onSignIn={() => setTeamSheet("signin")} />}
       {teamSheet === "share" && snapshot && (
         <ShareSheet
