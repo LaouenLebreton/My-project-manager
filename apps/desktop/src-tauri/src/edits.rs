@@ -460,6 +460,8 @@ mod tests {
             calendar: pm_core::Calendar::standard(),
             tasks: Default::default(),
             dependencies: Default::default(),
+            resources: Default::default(),
+            assignments: Default::default(),
         };
         let mut ids = Vec::new();
         let mut stack: Vec<TaskId> = Vec::new();

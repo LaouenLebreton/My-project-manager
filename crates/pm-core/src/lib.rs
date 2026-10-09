@@ -13,7 +13,7 @@ pub mod text;
 pub mod time;
 
 pub use calendar::{Calendar, CalendarError, DayPattern, WorkRange};
-pub use command::{apply, Command, CommandError, LinkChange, ProjectChange, TaskChange, Touched};
+pub use command::{apply, Command, CommandError, LinkChange, ProjectChange, ResourceChange, TaskChange, Touched};
 pub use model::*;
 pub use outline::{outline, OutlineRow};
 pub use text::{PredecessorEntry, TextError, Units};

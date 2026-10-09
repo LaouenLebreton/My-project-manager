@@ -90,6 +90,8 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         calendar,
         tasks: BTreeMap::new(),
         dependencies: BTreeMap::new(),
+        resources: Default::default(),
+        assignments: Default::default(),
     };
 
     // Tasks, in file order (ID). The outline comes from OutlineLevel.

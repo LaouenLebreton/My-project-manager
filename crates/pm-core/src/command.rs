@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::Calendar;
 use crate::schedule::ScheduleError;
 use crate::model::{
-    Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, SortKey, Task, TaskId,
+    Assignment, AssignmentId, Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, Resource,
+    ResourceId, ResourceKind, ResourceUnits, SortKey, Task, TaskId,
 };
 use crate::time::Moment;
 
@@ -27,6 +28,14 @@ pub enum Command {
     DeleteLink { id: DependencyId },
     SetLink { id: DependencyId, change: LinkChange },
     SetProject { change: ProjectChange },
+    /// Adds resources to the pool, then assignments (iteration 2).
+    InsertResources { resources: Vec<Resource>, assignments: Vec<Assignment> },
+    /// Removes resources and every assignment of theirs.
+    DeleteResources { ids: Vec<ResourceId> },
+    SetResource { id: ResourceId, change: ResourceChange },
+    InsertAssignment { assignment: Assignment },
+    DeleteAssignment { id: AssignmentId },
+    SetAssignmentUnits { id: AssignmentId, units: ResourceUnits },
     /// Several commands as one undo step, e.g. indenting a selection or a drag.
     Batch { label: String, commands: Vec<Command> },
 }
@@ -49,6 +58,18 @@ pub enum TaskChange {
 pub enum LinkChange {
     Kind(LinkType),
     Lag(i64),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "field", content = "value")]
+pub enum ResourceChange {
+    Name(String),
+    Initials(String),
+    Kind(ResourceKind),
+    MaxUnits(ResourceUnits),
+    MaterialLabel(String),
+    Notes(String),
+    Position(SortKey),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +104,20 @@ pub enum CommandError {
     LinkInsideSummary,
     #[error("this change would leave a project that cannot be scheduled: {reason}")]
     Unschedulable { reason: String },
+    #[error("this resource no longer exists")]
+    NoSuchResource { id: ResourceId },
+    #[error("a resource with this id already exists")]
+    ResourceExists { id: ResourceId },
+    #[error("this assignment no longer exists")]
+    NoSuchAssignment { id: AssignmentId },
+    #[error("an assignment with this id already exists")]
+    AssignmentExists { id: AssignmentId },
+    #[error("this resource is already assigned to the task; change its units instead")]
+    AlreadyAssigned { existing: AssignmentId },
+    #[error("resources work on the tasks inside a summary, not on the summary itself")]
+    AssignmentOnSummary { task: TaskId },
+    #[error("an assignment needs more than 0%")]
+    ZeroUnits,
     #[error("a task cannot be moved inside itself")]
     OutlineLoop { id: TaskId },
 }
@@ -93,6 +128,8 @@ pub struct Touched {
     pub tasks: BTreeSet<TaskId>,
     pub links: BTreeSet<DependencyId>,
     pub project: bool,
+    pub resources: BTreeSet<ResourceId>,
+    pub assignments: BTreeSet<AssignmentId>,
 }
 
 impl Command {
@@ -124,6 +161,23 @@ impl Command {
                 ProjectChange::Calendar(_) => "Change Calendar",
             }
             .into(),
+            Command::InsertResources { resources, .. } if resources.len() == 1 => "Add Resource".into(),
+            Command::InsertResources { .. } => "Add Resources".into(),
+            Command::DeleteResources { ids } if ids.len() == 1 => "Delete Resource".into(),
+            Command::DeleteResources { .. } => "Delete Resources".into(),
+            Command::SetResource { change, .. } => match change {
+                ResourceChange::Name(_) => "Rename Resource",
+                ResourceChange::Initials(_) => "Change Initials",
+                ResourceChange::Kind(_) => "Change Resource Type",
+                ResourceChange::MaxUnits(_) => "Change Max Units",
+                ResourceChange::MaterialLabel(_) => "Change Material Label",
+                ResourceChange::Notes(_) => "Edit Resource Notes",
+                ResourceChange::Position(_) => "Move Resource",
+            }
+            .into(),
+            Command::InsertAssignment { .. } => "Assign Resource".into(),
+            Command::DeleteAssignment { .. } => "Remove Resource".into(),
+            Command::SetAssignmentUnits { .. } => "Change Assignment Units".into(),
             Command::Batch { label, .. } => label.clone(),
         }
     }
@@ -147,6 +201,20 @@ impl Command {
                 t.links.insert(*id);
             }
             Command::SetProject { .. } => t.project = true,
+            Command::InsertResources { resources, assignments } => {
+                t.resources.extend(resources.iter().map(|r| r.id));
+                t.assignments.extend(assignments.iter().map(|a| a.id));
+            }
+            Command::DeleteResources { ids } => t.resources.extend(ids),
+            Command::SetResource { id, .. } => {
+                t.resources.insert(*id);
+            }
+            Command::InsertAssignment { assignment } => {
+                t.assignments.insert(assignment.id);
+            }
+            Command::DeleteAssignment { id } | Command::SetAssignmentUnits { id, .. } => {
+                t.assignments.insert(*id);
+            }
             Command::Batch { commands, .. } => commands.iter().for_each(|c| c.touched(t)),
         }
     }
@@ -191,6 +259,38 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
             };
             Ok(Command::SetProject { change: old })
         }
+        Command::InsertResources { resources, assignments } => insert_resources(p, resources, assignments),
+        Command::DeleteResources { ids } => delete_resources(p, ids),
+        Command::SetResource { id, change } => {
+            let r = p.resources.get_mut(id).ok_or(CommandError::NoSuchResource { id: *id })?;
+            let old = match change {
+                ResourceChange::Name(v) => ResourceChange::Name(std::mem::replace(&mut r.name, v.clone())),
+                ResourceChange::Initials(v) => ResourceChange::Initials(std::mem::replace(&mut r.initials, v.clone())),
+                ResourceChange::Kind(v) => ResourceChange::Kind(std::mem::replace(&mut r.kind, *v)),
+                ResourceChange::MaxUnits(v) => ResourceChange::MaxUnits(std::mem::replace(&mut r.max_units, *v)),
+                ResourceChange::MaterialLabel(v) => ResourceChange::MaterialLabel(std::mem::replace(&mut r.material_label, v.clone())),
+                ResourceChange::Notes(v) => ResourceChange::Notes(std::mem::replace(&mut r.notes, v.clone())),
+                ResourceChange::Position(v) => ResourceChange::Position(std::mem::replace(&mut r.sort_key, v.clone())),
+            };
+            Ok(Command::SetResource { id: *id, change: old })
+        }
+        Command::InsertAssignment { assignment } => {
+            check_assignment(p, assignment)?;
+            p.assignments.insert(assignment.id, assignment.clone());
+            Ok(Command::DeleteAssignment { id: assignment.id })
+        }
+        Command::DeleteAssignment { id } => {
+            let assignment = p.assignments.remove(id).ok_or(CommandError::NoSuchAssignment { id: *id })?;
+            Ok(Command::InsertAssignment { assignment })
+        }
+        Command::SetAssignmentUnits { id, units } => {
+            if units.0 == 0 {
+                return Err(CommandError::ZeroUnits);
+            }
+            let a = p.assignments.get_mut(id).ok_or(CommandError::NoSuchAssignment { id: *id })?;
+            let old = std::mem::replace(&mut a.units, *units);
+            Ok(Command::SetAssignmentUnits { id: *id, units: old })
+        }
         Command::Batch { label, commands } => {
             let mut inverses = Vec::with_capacity(commands.len());
             for c in commands {
@@ -214,6 +314,9 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
 /// (R25: no link between a summary and a task inside it, no finish link into a summary, no
 /// loops through links or summaries). The engine's own check decides, so the two agree.
 fn validate(p: &Project) -> Result<(), CommandError> {
+    if let Some(a) = p.assignments.values().find(|a| p.tasks.values().any(|t| t.parent == Some(a.task))) {
+        return Err(CommandError::AssignmentOnSummary { task: a.task });
+    }
     if p.dependencies.values().any(|d| is_inside(p, d.successor, d.predecessor) || is_inside(p, d.predecessor, d.successor)) {
         return Err(CommandError::LinkInsideSummary);
     }
@@ -314,13 +417,83 @@ fn delete_tasks(p: &mut Project, ids: &[TaskId]) -> Result<Command, CommandError
         .filter(|d| doomed_ids.contains(&d.predecessor) || doomed_ids.contains(&d.successor))
         .cloned()
         .collect();
+    let assignments: Vec<Assignment> = p.assignments.values().filter(|a| doomed_ids.contains(&a.task)).cloned().collect();
     for d in &links {
         p.dependencies.remove(&d.id);
+    }
+    for a in &assignments {
+        p.assignments.remove(&a.id);
     }
     for id in &doomed_ids {
         p.tasks.remove(id);
     }
-    Ok(Command::InsertTasks { tasks: doomed, dependencies: links })
+    let restore = Command::InsertTasks { tasks: doomed, dependencies: links };
+    if assignments.is_empty() {
+        return Ok(restore);
+    }
+    // Put the tasks back, then who was working on them.
+    let mut commands = vec![restore];
+    commands.extend(assignments.into_iter().map(|assignment| Command::InsertAssignment { assignment }));
+    Ok(Command::Batch { label: "Restore Tasks".into(), commands })
+}
+
+fn check_assignment(p: &Project, a: &Assignment) -> Result<(), CommandError> {
+    if p.assignments.contains_key(&a.id) {
+        return Err(CommandError::AssignmentExists { id: a.id });
+    }
+    if !p.tasks.contains_key(&a.task) {
+        return Err(CommandError::NoSuchTask { id: a.task });
+    }
+    if !p.resources.contains_key(&a.resource) {
+        return Err(CommandError::NoSuchResource { id: a.resource });
+    }
+    if p.tasks.values().any(|t| t.parent == Some(a.task)) {
+        return Err(CommandError::AssignmentOnSummary { task: a.task });
+    }
+    if a.units.0 == 0 {
+        return Err(CommandError::ZeroUnits);
+    }
+    if let Some(existing) = p.assignments.values().find(|x| x.task == a.task && x.resource == a.resource) {
+        return Err(CommandError::AlreadyAssigned { existing: existing.id });
+    }
+    Ok(())
+}
+
+fn insert_resources(p: &mut Project, resources: &[Resource], assignments: &[Assignment]) -> Result<Command, CommandError> {
+    let mut new_ids = BTreeSet::new();
+    for r in resources {
+        if p.resources.contains_key(&r.id) || !new_ids.insert(r.id) {
+            return Err(CommandError::ResourceExists { id: r.id });
+        }
+    }
+    for r in resources {
+        p.resources.insert(r.id, r.clone());
+    }
+    for (k, a) in assignments.iter().enumerate() {
+        if let Err(e) = check_assignment(p, a) {
+            for a in &assignments[..k] {
+                p.assignments.remove(&a.id);
+            }
+            for r in resources {
+                p.resources.remove(&r.id);
+            }
+            return Err(e);
+        }
+        p.assignments.insert(a.id, a.clone());
+    }
+    Ok(Command::DeleteResources { ids: resources.iter().map(|r| r.id).collect() })
+}
+
+fn delete_resources(p: &mut Project, ids: &[ResourceId]) -> Result<Command, CommandError> {
+    if let Some(&id) = ids.iter().find(|id| !p.resources.contains_key(id)) {
+        return Err(CommandError::NoSuchResource { id });
+    }
+    let assignments: Vec<Assignment> = p.assignments.values().filter(|a| ids.contains(&a.resource)).cloned().collect();
+    for a in &assignments {
+        p.assignments.remove(&a.id);
+    }
+    let resources: Vec<Resource> = ids.iter().filter_map(|id| p.resources.remove(id)).collect();
+    Ok(Command::InsertResources { resources, assignments })
 }
 
 fn depth(p: &Project, id: TaskId) -> usize {
@@ -405,6 +578,8 @@ mod tests {
             calendar: Calendar::standard(),
             tasks: BTreeMap::new(),
             dependencies: BTreeMap::new(),
+            resources: Default::default(),
+            assignments: Default::default(),
         }
     }
 
@@ -529,6 +704,91 @@ mod tests {
         let before = p.clone();
         let cmd = Command::InsertTasks { tasks: vec![task(8, None)], dependencies: vec![link(7, 8, 8)] };
         assert_eq!(apply(&mut p, &cmd), Err(CommandError::SelfLink));
+        assert_eq!(p, before);
+    }
+
+    fn rid(n: u128) -> ResourceId {
+        ResourceId(Uuid::from_u128(5000 + n))
+    }
+
+    fn aid(n: u128) -> AssignmentId {
+        AssignmentId(Uuid::from_u128(6000 + n))
+    }
+
+    fn person(n: u128) -> Resource {
+        Resource {
+            id: rid(n),
+            sort_key: SortKey(format!("{n:04}")),
+            name: format!("Person {n}"),
+            initials: format!("P{n}"),
+            kind: ResourceKind::Work,
+            max_units: ResourceUnits::FULL_TIME,
+            material_label: String::new(),
+            notes: String::new(),
+        }
+    }
+
+    fn assign(n: u128, task: u128, resource: u128, units: u32) -> Assignment {
+        Assignment { id: aid(n), task: tid(task), resource: rid(resource), units: ResourceUnits(units) }
+    }
+
+    fn staffed() -> Project {
+        let mut p = sample();
+        apply(&mut p, &Command::InsertResources { resources: vec![person(1), person(2)], assignments: vec![assign(1, 2, 1, 100), assign(2, 3, 1, 50)] })
+            .unwrap();
+        p
+    }
+
+    #[test]
+    fn resources_and_assignments_roundtrip() {
+        let mut p = staffed();
+        let start = p.clone();
+        for cmd in [
+            Command::InsertAssignment { assignment: assign(3, 4, 2, 25) },
+            Command::SetAssignmentUnits { id: aid(1), units: ResourceUnits(80) },
+            Command::DeleteAssignment { id: aid(2) },
+            Command::SetResource { id: rid(2), change: ResourceChange::MaxUnits(ResourceUnits(300)) },
+            Command::SetResource { id: rid(1), change: ResourceChange::Name("Alex".into()) },
+        ] {
+            let before = p.clone();
+            let inv = apply(&mut p, &cmd).unwrap();
+            let after = p.clone();
+            let redo = apply(&mut p, &inv).unwrap();
+            assert_eq!(p, before, "undo of {cmd:?}");
+            apply(&mut p, &redo).unwrap();
+            assert_eq!(p, after, "redo of {cmd:?}");
+        }
+        assert_ne!(p, start);
+    }
+
+    #[test]
+    fn deleting_a_resource_or_task_takes_its_assignments_and_undo_brings_them_back() {
+        let mut p = staffed();
+        let before = p.clone();
+        let inv = apply(&mut p, &Command::DeleteResources { ids: vec![rid(1)] }).unwrap();
+        assert!(p.assignments.is_empty());
+        apply(&mut p, &inv).unwrap();
+        assert_eq!(p, before);
+
+        let inv = apply(&mut p, &Command::DeleteTasks { ids: vec![tid(1)] }).unwrap();
+        assert!(p.assignments.is_empty(), "tasks 2 and 3 were inside 1");
+        apply(&mut p, &inv).unwrap();
+        assert_eq!(p, before);
+    }
+
+    #[test]
+    fn assignment_rules() {
+        let mut p = staffed();
+        let before = p.clone();
+        let try_assign = |p: &mut Project, a| apply(p, &Command::InsertAssignment { assignment: a });
+        assert_eq!(try_assign(&mut p, assign(9, 1, 2, 100)), Err(CommandError::AssignmentOnSummary { task: tid(1) }));
+        assert_eq!(try_assign(&mut p, assign(9, 2, 1, 100)), Err(CommandError::AlreadyAssigned { existing: aid(1) }));
+        assert_eq!(try_assign(&mut p, assign(9, 2, 2, 0)), Err(CommandError::ZeroUnits));
+        assert_eq!(try_assign(&mut p, assign(9, 2, 7, 100)), Err(CommandError::NoSuchResource { id: rid(7) }));
+        assert_eq!(p, before);
+        // An assigned task cannot become a summary.
+        let cmd = Command::InsertTasks { tasks: vec![task(7, Some(2))], dependencies: vec![] };
+        assert_eq!(apply(&mut p, &cmd), Err(CommandError::AssignmentOnSummary { task: tid(2) }));
         assert_eq!(p, before);
     }
 

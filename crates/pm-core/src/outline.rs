@@ -190,6 +190,8 @@ mod tests {
             calendar: Calendar::standard(),
             tasks: tasks.into_iter().map(|t| (t.id, t)).collect(),
             dependencies: Default::default(),
+            resources: Default::default(),
+            assignments: Default::default(),
         }
     }
 

@@ -64,6 +64,27 @@ pub const MIGRATIONS: &[&str] = &[
         value  TEXT NOT NULL
     );
     "#,
+    // 1 -> 2: resources and assignments (iteration 2).
+    r#"
+    CREATE TABLE resource (
+        id              TEXT PRIMARY KEY,
+        sort_key        TEXT NOT NULL,
+        name            TEXT NOT NULL,
+        initials        TEXT NOT NULL,
+        kind            TEXT NOT NULL CHECK (kind IN ('work', 'material')),
+        max_units       INTEGER NOT NULL CHECK (max_units >= 0),
+        material_label  TEXT NOT NULL,
+        notes           TEXT NOT NULL
+    );
+    CREATE TABLE assignment (
+        id           TEXT PRIMARY KEY,
+        task_id      TEXT NOT NULL,
+        resource_id  TEXT NOT NULL,
+        units        INTEGER NOT NULL CHECK (units > 0)
+    );
+    CREATE INDEX assignment_task ON assignment (task_id);
+    CREATE INDEX assignment_resource ON assignment (resource_id);
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

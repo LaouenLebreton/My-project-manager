@@ -76,6 +76,8 @@ fn generate(n: usize) -> Project {
         calendar,
         tasks,
         dependencies,
+        resources: Default::default(),
+        assignments: Default::default(),
     }
 }
 

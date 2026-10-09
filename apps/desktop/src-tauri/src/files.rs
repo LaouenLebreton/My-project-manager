@@ -41,6 +41,8 @@ pub fn empty_project(path: &Path) -> Project {
         calendar: Calendar::standard(),
         tasks: Default::default(),
         dependencies: Default::default(),
+        resources: Default::default(),
+        assignments: Default::default(),
     }
 }
 

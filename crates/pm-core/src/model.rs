@@ -23,6 +23,8 @@ id_type!(ProjectId);
 id_type!(TaskId);
 id_type!(DependencyId);
 id_type!(CalendarId);
+id_type!(ResourceId);
+id_type!(AssignmentId);
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ModelError {
@@ -137,6 +139,49 @@ pub struct Dependency {
     pub lag: i64,
 }
 
+/// People and machines work for a share of their time; materials are used up by quantity.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ResourceKind {
+    #[default]
+    Work,
+    Material,
+}
+
+/// Hundredths: 100 is 100% of a work resource's time, or 1.00 of a material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ResourceUnits(pub u32);
+
+impl ResourceUnits {
+    pub const FULL_TIME: ResourceUnits = ResourceUnits(100);
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Resource {
+    pub id: ResourceId,
+    pub sort_key: SortKey,
+    pub name: String,
+    pub initials: String,
+    pub kind: ResourceKind,
+    /// Most a work resource can give at once: 100 = one full-time person, 300 = a team of
+    /// three. Ignored for materials.
+    pub max_units: ResourceUnits,
+    /// What a material is counted in ("tons", "licences"). Empty for work resources.
+    pub material_label: String,
+    pub notes: String,
+}
+
+/// A resource working on (or used by) a task.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Assignment {
+    pub id: AssignmentId,
+    pub task: TaskId,
+    pub resource: ResourceId,
+    /// Share of the resource's time for work resources (100 = full time), quantity for
+    /// materials (250 = 2.5 tons).
+    pub units: ResourceUnits,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
@@ -147,6 +192,11 @@ pub struct Project {
     /// Ordered maps keep every iteration deterministic (R29).
     pub tasks: BTreeMap<TaskId, Task>,
     pub dependencies: BTreeMap<DependencyId, Dependency>,
+    /// The resource pool (iteration 2).
+    #[serde(default)]
+    pub resources: BTreeMap<ResourceId, Resource>,
+    #[serde(default)]
+    pub assignments: BTreeMap<AssignmentId, Assignment>,
 }
 
 #[cfg(test)]

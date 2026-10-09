@@ -94,6 +94,12 @@ impl Store {
         for d in project.dependencies.values() {
             rows::upsert_dependency(&tx, d)?;
         }
+        for r in project.resources.values() {
+            rows::upsert_resource(&tx, r)?;
+        }
+        for a in project.assignments.values() {
+            rows::upsert_assignment(&tx, a)?;
+        }
         tx.commit()?;
         Ok(Store { conn })
     }
@@ -236,6 +242,18 @@ impl Store {
         }
         if touched.project {
             rows::write_project(&tx, project)?;
+        }
+        for id in &touched.resources {
+            match project.resources.get(id) {
+                Some(r) => rows::upsert_resource(&tx, r)?,
+                None => rows::delete_resource(&tx, *id)?,
+            }
+        }
+        for id in &touched.assignments {
+            match project.assignments.get(id) {
+                Some(a) => rows::upsert_assignment(&tx, a)?,
+                None => rows::delete_assignment(&tx, *id)?,
+            }
         }
         tx.execute(
             "INSERT INTO change_log (entry_id, at, origin, target_seq, label, payload, inverse)

@@ -53,6 +53,8 @@ fn rich_project() -> Project {
         calendar,
         tasks: BTreeMap::new(),
         dependencies: BTreeMap::new(),
+        resources: Default::default(),
+        assignments: Default::default(),
     };
     let mut summary = task(1);
     summary.name = "Phase 1 – Planning ✓".into();
@@ -71,6 +73,78 @@ fn rich_project() -> Project {
     let d = Dependency { id: DependencyId(Uuid::from_u128(50)), predecessor: tid(2), successor: tid(3), kind: LinkType::StartToFinish, lag: -240 };
     p.dependencies.insert(d.id, d);
     p
+}
+
+fn staff(p: &mut Project) {
+    let r = Resource {
+        id: ResourceId(Uuid::from_u128(70)),
+        sort_key: SortKey("V".into()),
+        name: "Alex Müller".into(),
+        initials: "AM".into(),
+        kind: ResourceKind::Work,
+        max_units: ResourceUnits(150),
+        material_label: String::new(),
+        notes: "Part-time Fridays".into(),
+    };
+    let m = Resource {
+        id: ResourceId(Uuid::from_u128(71)),
+        sort_key: SortKey("W".into()),
+        name: "Concrete".into(),
+        initials: "C".into(),
+        kind: ResourceKind::Material,
+        max_units: ResourceUnits(0),
+        material_label: "tons".into(),
+        notes: String::new(),
+    };
+    let a = Assignment { id: AssignmentId(Uuid::from_u128(80)), task: tid(4), resource: r.id, units: ResourceUnits(50) };
+    let b = Assignment { id: AssignmentId(Uuid::from_u128(81)), task: tid(4), resource: m.id, units: ResourceUnits(250) };
+    pm_core::apply(p, &Command::InsertResources { resources: vec![r, m], assignments: vec![a, b] }).unwrap();
+}
+
+#[test]
+fn resources_and_assignments_are_saved_and_restored() {
+    let path = temp_dir().join("a.pmproj");
+    let mut p = rich_project();
+    staff(&mut p);
+    drop(Store::create(&path, &p).unwrap());
+    let (mut s, mut loaded) = Store::open(&path).unwrap();
+    assert_eq!(loaded, p);
+    s.apply(&mut loaded, &Command::SetAssignmentUnits { id: AssignmentId(Uuid::from_u128(80)), units: ResourceUnits(75) }, &meta(1)).unwrap();
+    s.apply(&mut loaded, &Command::DeleteResources { ids: vec![ResourceId(Uuid::from_u128(71))] }, &meta(2)).unwrap();
+    drop(s);
+    let (mut s, mut again) = Store::open(&path).unwrap();
+    assert_eq!(again, loaded);
+    assert_eq!(again.assignments.len(), 1);
+    s.undo(&mut again, &meta(3)).unwrap();
+    assert_eq!(again.resources.len(), 2, "undo brings back the material and its assignment");
+    assert_eq!(again.assignments.len(), 2);
+}
+
+#[test]
+fn version_1_files_are_upgraded() {
+    let path = temp_dir().join("old.pmproj");
+    let p = rich_project();
+    drop(Store::create(&path, &p).unwrap());
+    // Turn it back into a version 1 file, as an iteration 1 build would have written it.
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; PRAGMA user_version = 1;").unwrap();
+    drop(conn);
+    let (mut s, mut loaded) = Store::open(&path).unwrap();
+    assert_eq!(loaded, p, "everything from version 1 is still there");
+    let v: i64 = s.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+    assert_eq!(v, CURRENT_VERSION);
+    staff(&mut loaded.clone()); // the new tables accept data
+    let r = Resource {
+        id: ResourceId(Uuid::from_u128(90)),
+        sort_key: SortKey("V".into()),
+        name: "New".into(),
+        initials: "N".into(),
+        kind: ResourceKind::Work,
+        max_units: ResourceUnits::FULL_TIME,
+        material_label: String::new(),
+        notes: String::new(),
+    };
+    s.apply(&mut loaded, &Command::InsertResources { resources: vec![r], assignments: vec![] }, &meta(1)).unwrap();
 }
 
 #[test]

@@ -74,6 +74,8 @@ pub fn office_move(start: Moment) -> Project {
         calendar: Calendar::standard(),
         tasks,
         dependencies,
+        resources: Default::default(),
+        assignments: Default::default(),
     }
 }
 
@@ -152,6 +154,8 @@ pub fn generated(n: usize, start: Moment) -> Project {
         calendar: Calendar::standard(),
         tasks,
         dependencies,
+        resources: Default::default(),
+        assignments: Default::default(),
     }
 }
 

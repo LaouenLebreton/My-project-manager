@@ -417,6 +417,8 @@ mod tests {
                 calendar: Calendar::standard(),
                 tasks: BTreeMap::new(),
                 dependencies: BTreeMap::new(),
+                resources: Default::default(),
+                assignments: Default::default(),
             })
         }
 

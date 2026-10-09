@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use pm_core::{
-    Calendar, CalendarId, Constraint, Dependency, DependencyId, Duration, LinkType, Moment, Percent, Project,
-    ProjectId, SortKey, Task, TaskId,
+    Assignment, AssignmentId, Calendar, CalendarId, Constraint, Dependency, DependencyId, Duration, LinkType, Moment,
+    Percent, Project, ProjectId, Resource, ResourceId, ResourceKind, ResourceUnits, SortKey, Task, TaskId,
 };
 use rusqlite::{params, Connection, Row};
 use uuid::Uuid;
@@ -92,6 +92,37 @@ pub fn delete_dependency(conn: &Connection, id: DependencyId) -> Result<(), Stor
     Ok(())
 }
 
+pub fn upsert_resource(conn: &Connection, r: &Resource) -> Result<(), StoreError> {
+    let kind = match r.kind {
+        ResourceKind::Work => "work",
+        ResourceKind::Material => "material",
+    };
+    conn.execute(
+        "INSERT OR REPLACE INTO resource (id, sort_key, name, initials, kind, max_units, material_label, notes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![r.id.0.to_string(), r.sort_key.0, r.name, r.initials, kind, r.max_units.0, r.material_label, r.notes],
+    )?;
+    Ok(())
+}
+
+pub fn delete_resource(conn: &Connection, id: ResourceId) -> Result<(), StoreError> {
+    conn.execute("DELETE FROM resource WHERE id = ?1", [id.0.to_string()])?;
+    Ok(())
+}
+
+pub fn upsert_assignment(conn: &Connection, a: &Assignment) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO assignment (id, task_id, resource_id, units) VALUES (?1, ?2, ?3, ?4)",
+        params![a.id.0.to_string(), a.task.0.to_string(), a.resource.0.to_string(), a.units.0],
+    )?;
+    Ok(())
+}
+
+pub fn delete_assignment(conn: &Connection, id: AssignmentId) -> Result<(), StoreError> {
+    conn.execute("DELETE FROM assignment WHERE id = ?1", [id.0.to_string()])?;
+    Ok(())
+}
+
 fn task_from_row(r: &Row) -> Result<Task, StoreError> {
     let constraint = match (r.get::<_, String>(6)?.as_str(), r.get::<_, Option<i64>>(7)?) {
         ("ASAP", None) => Constraint::AsSoonAsPossible,
@@ -148,6 +179,40 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
         dependencies.insert(d.id, d);
     }
 
+    let mut resources = BTreeMap::new();
+    let mut stmt = conn.prepare("SELECT id, sort_key, name, initials, kind, max_units, material_label, notes FROM resource")?;
+    let mut q = stmt.query([])?;
+    while let Some(r) = q.next()? {
+        let kind = match r.get::<_, String>(4)?.as_str() {
+            "work" => ResourceKind::Work,
+            "material" => ResourceKind::Material,
+            other => return Err(StoreError::Damaged(format!("unknown resource type {other:?}"))),
+        };
+        let res = Resource {
+            id: ResourceId(uuid(r.get(0)?)?),
+            sort_key: SortKey(r.get(1)?),
+            name: r.get(2)?,
+            initials: r.get(3)?,
+            kind,
+            max_units: ResourceUnits(r.get(5)?),
+            material_label: r.get(6)?,
+            notes: r.get(7)?,
+        };
+        resources.insert(res.id, res);
+    }
+    let mut assignments = BTreeMap::new();
+    let mut stmt = conn.prepare("SELECT id, task_id, resource_id, units FROM assignment")?;
+    let mut q = stmt.query([])?;
+    while let Some(r) = q.next()? {
+        let a = Assignment {
+            id: AssignmentId(uuid(r.get(0)?)?),
+            task: TaskId(uuid(r.get(1)?)?),
+            resource: ResourceId(uuid(r.get(2)?)?),
+            units: ResourceUnits(r.get(3)?),
+        };
+        assignments.insert(a.id, a);
+    }
+
     let calendar: Calendar = serde_json::from_str(&data)?;
     Ok(Project {
         id: ProjectId(uuid(id)?),
@@ -157,5 +222,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
         calendar,
         tasks,
         dependencies,
+        resources,
+        assignments,
     })
 }

@@ -170,6 +170,8 @@ fn random_project() -> impl Strategy<Value = Project> {
             calendar: Calendar::standard(),
             tasks: BTreeMap::new(),
             dependencies: BTreeMap::new(),
+            resources: Default::default(),
+            assignments: Default::default(),
         };
         for (offset, working) in holidays {
             let date = jiff::civil::date(2026, 10, 5).checked_add(jiff::Span::new().days(offset)).unwrap();
