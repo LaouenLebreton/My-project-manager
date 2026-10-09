@@ -63,6 +63,7 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
   const [date, setDate] = useState(row.constraint.date ?? row.start?.slice(0, 10) ?? "");
   const [percent, setPercent] = useState(String(row.percentComplete));
   const [notes, setNotes] = useState(row.notes);
+  const [resources, setResources] = useState(row.resourceNames);
   return (
     <Sheet
       title="Task Info"
@@ -77,6 +78,7 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           constraint: { kind, date: kind === "ASAP" ? null : date },
           percentComplete: Math.max(0, Math.min(100, Math.round(Number(percent) || 0))),
           notes,
+          resources: row.isSummary ? null : resources,
         })
       }
     >
@@ -112,6 +114,16 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
                 : "The task starts as soon as its predecessors allow."}
           </p>
         </div>
+
+        {!row.isSummary && (
+          <>
+            <label htmlFor="ti-resources">Resources</label>
+            <div>
+              <input id="ti-resources" value={resources} onChange={(e) => setResources(e.target.value)} placeholder="Alex, Sam[50%]" />
+              <p className="secondary small">{GLOSSARY.resources.text}</p>
+            </div>
+          </>
+        )}
 
         <label htmlFor="ti-percent">% complete</label>
         <input id="ti-percent" type="number" min={0} max={100} value={percent} onChange={(e) => setPercent(e.target.value)} />

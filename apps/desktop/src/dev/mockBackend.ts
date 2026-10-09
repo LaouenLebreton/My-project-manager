@@ -5,13 +5,14 @@
 
 import type { Edit } from "../bindings/Edit";
 import type { Link } from "../bindings/Link";
+import type { ResourceRow } from "../bindings/ResourceRow";
 import type { Row } from "../bindings/Row";
 import type { Snapshot } from "../bindings/Snapshot";
 
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
-    __mock?: { edits: Edit[]; textEditing: boolean[]; rows: Row[]; links: Link[] };
+    __mock?: { edits: Edit[]; textEditing: boolean[]; rows: Row[]; links: Link[]; resources: ResourceRow[] };
     /** Test hook: send an event as the Rust side would, e.g. a menu item id. */
     __mockEmit?: (event: string, payload: unknown) => void;
   }
@@ -38,6 +39,8 @@ function row(name: string, depth = 0): Row {
     predecessors: "",
     constraint: { kind: "ASAP", date: null },
     notes: "",
+    resourceNames: "",
+    overloaded: false,
   };
 }
 
@@ -102,7 +105,23 @@ function sampleReport() {
 export function install() {
   const n = Number(new URLSearchParams(location.search).get("n") ?? 0);
   const generated = n > 0 ? generate(n) : { rows: [row("Alpha"), row("Beta"), row("Gamma")], links: [] };
-  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated };
+  const person = (name: string, overloaded: boolean): ResourceRow => ({
+    id: `r-${name}`,
+    name,
+    initials: name[0],
+    resourceType: "Work",
+    maxUnitsText: "100%",
+    materialLabel: "",
+    totalText: "40h",
+    peakPercent: overloaded ? 200 : 100,
+    taskCount: 2,
+    overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
+  });
+  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)] };
+  if (state.rows[1]) {
+    state.rows[1].resourceNames = "Alex";
+    state.rows[1].overloaded = true;
+  }
   window.__mock = state;
   const snapshot = (): Snapshot => ({
     project: {
@@ -121,6 +140,7 @@ export function install() {
     conflicts: [],
     undoLabel: state.edits.length ? "Edit" : null,
     redoLabel: null,
+    resources: state.resources.map((r) => ({ ...r })),
   });
   const at = (id: string) => state.rows.findIndex((r) => r.id === id);
   const fail = (message: string) => {
@@ -220,6 +240,24 @@ export function install() {
               if (e.milestone !== null) r.isMilestone = e.milestone;
               break;
             }
+            case "AddResource":
+              if (state.resources.some((r) => r.name.toLowerCase() === e.name.toLowerCase())) fail(`there is already a resource called “${e.name}”`);
+              state.resources.push(person(e.name, false));
+              break;
+            case "UpdateResource": {
+              const r = state.resources.find((x) => x.id === e.id)!;
+              if (e.name !== null) r.name = e.name;
+              if (e.initials !== null) r.initials = e.initials;
+              if (e.resourceType !== null) r.resourceType = e.resourceType;
+              if (e.maxUnits !== null) r.maxUnitsText = /%$/.test(e.maxUnits) ? e.maxUnits : `${Number(e.maxUnits) * 100}%`;
+              break;
+            }
+            case "DeleteResources":
+              state.resources = state.resources.filter((r) => !e.ids.includes(r.id));
+              break;
+            case "SetTaskResources":
+              state.rows[at(e.id)].resourceNames = e.text;
+              break;
             case "SetCalendar":
               if (e.week.every((d) => d.length === 0)) fail("the working week has no working time, so no task could ever be scheduled");
               break;

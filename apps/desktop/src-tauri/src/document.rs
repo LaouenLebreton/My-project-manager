@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pm_core::{schedule, Command, Moment, Project, Schedule, ScheduleError};
+use pm_core::{loads, schedule, Command, Loads, Moment, Project, Schedule, ScheduleError};
 use pm_store::{Applied, EntryMeta, Store, StoreError};
 use uuid::Uuid;
 
@@ -29,6 +29,8 @@ pub struct Document {
     store: Store,
     pub project: Project,
     pub schedule: Result<Schedule, ScheduleError>,
+    /// Resource loads for the current schedule (empty while it cannot be scheduled).
+    pub loads: Loads,
     /// Change-log position of the last backup, so unchanged projects are not copied again.
     pub backed_up_seq: Option<i64>,
 }
@@ -46,7 +48,8 @@ impl Document {
 
     fn new(path: &Path, store: Store, project: Project) -> Document {
         let schedule = schedule(&project);
-        Document { path: path.to_owned(), store, project, schedule, backed_up_seq: None }
+        let loads = schedule.as_ref().map(|s| loads(&project, s)).unwrap_or_default();
+        Document { path: path.to_owned(), store, project, schedule, loads, backed_up_seq: None }
     }
 
     pub fn apply(&mut self, cmd: &Command) -> Result<Applied, StoreError> {
@@ -85,5 +88,6 @@ impl Document {
 
     fn reschedule(&mut self) {
         self.schedule = schedule(&self.project);
+        self.loads = self.schedule.as_ref().map(|s| loads(&self.project, s)).unwrap_or_default();
     }
 }

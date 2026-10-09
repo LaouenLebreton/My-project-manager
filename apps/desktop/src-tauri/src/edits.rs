@@ -4,8 +4,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pm_core::{
-    outline, Calendar, Command, Constraint, DayPattern, Dependency, DependencyId, Duration, LinkChange, LinkType, Moment,
-    Percent, Project, ProjectChange, Schedule, SortKey, Task, TaskChange, TaskId, Units, WorkRange, MINUTES_PER_DAY,
+    outline, parse_resource_list, Assignment, AssignmentId, Calendar, Command, Constraint, DayPattern, Dependency,
+    DependencyId, Duration, LinkChange, LinkType, Moment, Percent, Project, ProjectChange, Resource, ResourceChange,
+    ResourceId, ResourceKind, ResourceUnits, Schedule, SortKey, Task, TaskChange, TaskId, Units, WorkRange,
+    MINUTES_PER_DAY,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -42,11 +44,36 @@ pub enum Edit {
         constraint: Option<ConstraintEdit>,
         percent_complete: Option<u8>,
         notes: Option<String>,
+        /// Typed resources, as in the Resources column.
+        resources: Option<String>,
     },
     /// Project Info: the day the project starts (`YYYY-MM-DD`).
     SetProjectStart { date: String },
     /// Working Time: the whole project calendar.
     SetCalendar { week: Vec<Vec<TimeRange>>, exceptions: Vec<DayException> },
+    /// Typed in the Resources column: `Alex, Sam[50%]`. Unknown names become new resources,
+    /// as in Microsoft Project.
+    SetTaskResources { id: String, text: String },
+    /// A new resource after `afterId` in the Resource Sheet, or at the end.
+    AddResource { after_id: Option<String>, name: String },
+    /// Resource Sheet edits: only the fields given change, as one undo step.
+    UpdateResource {
+        id: String,
+        name: Option<String>,
+        initials: Option<String>,
+        resource_type: Option<ResourceKindEdit>,
+        /// Typed maximum: `100%`, `300%` or `3` (people).
+        max_units: Option<String>,
+        material_label: Option<String>,
+    },
+    DeleteResources { ids: Vec<String> },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub enum ResourceKindEdit {
+    Work,
+    Material,
 }
 
 /// Microsoft Project's abbreviations, which are also the values the UI sends.
@@ -167,7 +194,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None })),
         Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None })),
-        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes } => {
+        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
             let set = |change| Command::SetTask { id, change };
@@ -211,6 +238,11 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             if let Some(n) = notes.filter(|n| *n != t.notes) {
                 commands.push(set(TaskChange::Notes(n)));
             }
+            if let Some(text) = resources
+                && let Some(planned) = set_task_resources(p, id, &text)?
+            {
+                commands.push(planned.command);
+            }
             Ok(batch("Change Task Info", commands).map(|command| Planned { command, created: None }))
         }
         Edit::SetProjectStart { date } => {
@@ -241,6 +273,59 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             }
             plain(Command::SetProject { change: ProjectChange::Calendar(calendar) })
         }
+        Edit::SetTaskResources { id, text } => set_task_resources(p, task_id(&id)?, &text),
+        Edit::AddResource { after_id, name } => {
+            check_resource_name(p, &name, None)?;
+            let after = after_id.as_deref().map(resource_id).transpose()?.and_then(|a| p.resources.get(&a));
+            let mut keys: Vec<&SortKey> = p.resources.values().map(|r| &r.sort_key).collect();
+            keys.sort();
+            let (before, next) = match after {
+                Some(a) => (Some(&a.sort_key), keys.iter().copied().find(|k| **k > a.sort_key)),
+                None => (keys.last().copied(), None),
+            };
+            let resource = new_resource(&name, SortKey::between(before, next));
+            let command = Command::InsertResources { resources: vec![resource], assignments: vec![] };
+            Ok(Some(Planned { command, created: None }))
+        }
+        Edit::UpdateResource { id, name, initials, resource_type, max_units, material_label } => {
+            let id = resource_id(&id)?;
+            let r = p.resources.get(&id).ok_or_else(|| err("this resource no longer exists"))?;
+            let set = |change| Command::SetResource { id, change };
+            let mut commands = Vec::new();
+            if let Some(n) = name.map(|n| n.trim().to_owned()).filter(|n| *n != r.name) {
+                check_resource_name(p, &n, Some(id))?;
+                commands.push(set(ResourceChange::Name(n)));
+            }
+            if let Some(i) = initials.filter(|i| *i != r.initials) {
+                commands.push(set(ResourceChange::Initials(i)));
+            }
+            if let Some(k) = resource_type {
+                let k = match k {
+                    ResourceKindEdit::Work => ResourceKind::Work,
+                    ResourceKindEdit::Material => ResourceKind::Material,
+                };
+                if k != r.kind {
+                    commands.push(set(ResourceChange::Kind(k)));
+                }
+            }
+            if let Some(text) = max_units {
+                let units = parse_max_units(&text)?;
+                if units != r.max_units {
+                    commands.push(set(ResourceChange::MaxUnits(units)));
+                }
+            }
+            if let Some(l) = material_label.filter(|l| *l != r.material_label) {
+                commands.push(set(ResourceChange::MaterialLabel(l)));
+            }
+            Ok(batch("Change Resource", commands).map(|command| Planned { command, created: None }))
+        }
+        Edit::DeleteResources { ids } => {
+            let ids = ids.iter().map(|s| resource_id(s)).collect::<Result<Vec<_>, _>>()?;
+            if ids.is_empty() {
+                return Ok(None);
+            }
+            plain(Command::DeleteResources { ids })
+        }
         Edit::MoveTask { id, start_date } => {
             let id = task_id(&id)?;
             task(p, id)?;
@@ -270,6 +355,114 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             plain(Command::SetTask { id, change: TaskChange::Duration(Duration::minutes(minutes)?) })
         }
     }
+}
+
+pub fn resource_id(s: &str) -> Result<ResourceId, IpcError> {
+    Uuid::parse_str(s).map(ResourceId).map_err(|_| err("this resource no longer exists"))
+}
+
+/// Resource names are how people type assignments, so they must be usable in that list.
+fn check_resource_name(p: &Project, name: &str, except: Option<ResourceId>) -> Result<(), IpcError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(err("a resource needs a name"));
+    }
+    if name.contains([',', '[', ']']) {
+        return Err(err("resource names cannot contain commas or square brackets, because they separate names in the Resources column"));
+    }
+    if p.resources.values().any(|r| Some(r.id) != except && r.name.eq_ignore_ascii_case(name)) {
+        return Err(err(format!("there is already a resource called “{name}”")));
+    }
+    Ok(())
+}
+
+/// Initials from a name: "Ana María Ortiz" → "AMO".
+fn initials(name: &str) -> String {
+    name.split_whitespace().filter_map(|w| w.chars().next()).flat_map(char::to_uppercase).take(3).collect()
+}
+
+fn new_resource(name: &str, sort_key: SortKey) -> Resource {
+    Resource {
+        id: ResourceId(new_id()),
+        sort_key,
+        name: name.trim().to_owned(),
+        initials: initials(name),
+        kind: ResourceKind::Work,
+        max_units: ResourceUnits::FULL_TIME,
+        material_label: String::new(),
+        notes: String::new(),
+    }
+}
+
+/// `100%`, `300%`, `3` (people) or `1.5` → hundredths.
+fn parse_max_units(text: &str) -> Result<ResourceUnits, IpcError> {
+    let t = text.trim();
+    let (number, percent) = match t.strip_suffix('%') {
+        Some(n) => (n.trim(), true),
+        None => (t, false),
+    };
+    let value: f64 = number.replace(',', ".").parse().map_err(|_| err("type maximum units like 100% or 3"))?;
+    let hundredths = if percent { value } else { value * 100.0 };
+    if !(hundredths.is_finite() && (0.0..1e7).contains(&hundredths)) {
+        return Err(err("type maximum units like 100% or 3"));
+    }
+    Ok(ResourceUnits(hundredths.round() as u32))
+}
+
+/// Replaces a task's assignments with the typed list, changing only what differs; unknown
+/// names become new work resources, added at the end of the Resource Sheet.
+fn set_task_resources(p: &Project, task: TaskId, text: &str) -> Result<Option<Planned>, IpcError> {
+    let t = p.tasks.get(&task).ok_or_else(|| err("this task no longer exists"))?;
+    let entries = parse_resource_list(text)?;
+    if !entries.is_empty() && is_summary(p, task) {
+        return Err(err(format!("resources work on the tasks inside “{}”, not on the summary itself", t.name)));
+    }
+    let mut commands = Vec::new();
+    let mut last_key = p.resources.values().map(|r| r.sort_key.clone()).max();
+    let mut wanted: Vec<(ResourceId, u32)> = Vec::new();
+    let mut created: Vec<Resource> = Vec::new();
+    for e in &entries {
+        let existing = p.resources.values().chain(created.iter()).find(|r| r.name.eq_ignore_ascii_case(&e.name)).map(|r| r.id);
+        let id = match existing {
+            Some(id) => id,
+            None => {
+                check_resource_name(p, &e.name, None)?;
+                let key = SortKey::between(last_key.as_ref(), None);
+                last_key = Some(key.clone());
+                let r = new_resource(&e.name, key);
+                let id = r.id;
+                created.push(r);
+                id
+            }
+        };
+        if wanted.iter().any(|(w, _)| *w == id) {
+            return Err(err(format!("“{}” is listed twice", e.name)));
+        }
+        wanted.push((id, e.units.unwrap_or(100)));
+    }
+    if !created.is_empty() {
+        commands.push(Command::InsertResources { resources: created, assignments: vec![] });
+    }
+    let existing: Vec<&Assignment> = p.assignments.values().filter(|a| a.task == task).collect();
+    for a in &existing {
+        if !wanted.iter().any(|(r, _)| *r == a.resource) {
+            commands.push(Command::DeleteAssignment { id: a.id });
+        }
+    }
+    for (resource, units) in wanted {
+        match existing.iter().find(|a| a.resource == resource) {
+            Some(a) if a.units.0 != units => commands.push(Command::SetAssignmentUnits { id: a.id, units: ResourceUnits(units) }),
+            Some(_) => {}
+            None => commands.push(Command::InsertAssignment {
+                assignment: Assignment { id: AssignmentId(new_id()), task, resource, units: ResourceUnits(units) },
+            }),
+        }
+    }
+    Ok(match commands.len() {
+        0 => None,
+        1 => commands.pop().map(|command| Planned { command, created: None }),
+        _ => Some(Planned { command: Command::Batch { label: "Change Resources".into(), commands }, created: None }),
+    })
 }
 
 /// Midnight at the start of a `YYYY-MM-DD` date.
@@ -640,6 +833,7 @@ mod tests {
             constraint: Some(ConstraintEdit { kind: ConstraintKind::MSO, date: Some("2026-10-10".into()) }),
             percent_complete: Some(25),
             notes: Some("Bring the drone".into()),
+            resources: Some("Robin[50%]".into()),
         };
         let planned = plan(&p, None, &Units::default(), edit).unwrap().unwrap();
         assert_eq!(planned.command.label(), "Change Task Info");
@@ -650,7 +844,8 @@ mod tests {
         let monday = Moment::from_datetime(jiff::civil::date(2026, 10, 12).at(8, 0, 0, 0));
         assert_eq!(t.constraint, Constraint::MustStartOn(monday));
 
-        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None };
+        assert_eq!(p.assignments.values().next().map(|a| a.units.0), Some(50), "resources set in the same step");
+        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()) };
         assert!(plan(&p, None, &Units::default(), unchanged).unwrap().is_none(), "nothing to undo when nothing changed");
         let no_date = Edit::UpdateTask {
             id: id[0].0.to_string(),
@@ -660,6 +855,7 @@ mod tests {
             constraint: Some(ConstraintEdit { kind: ConstraintKind::SNET, date: None }),
             percent_complete: None,
             notes: None,
+            resources: None,
         };
         assert_eq!(plan(&p, None, &Units::default(), no_date).err().unwrap().message, "choose a date for “Start no earlier than”");
     }
@@ -680,6 +876,44 @@ mod tests {
         assert_eq!(e.message, "the working week has no working time, so no task could ever be scheduled");
         let overlap = Edit::SetCalendar { week: vec![vec![TimeRange { start: 480, end: 720 }, TimeRange { start: 700, end: 800 }]; 7], exceptions: vec![] };
         assert_eq!(plan(&p, None, &Units::default(), overlap).err().unwrap().message, "working time ranges on the same day overlap");
+    }
+
+    #[test]
+    fn typing_resources_assigns_and_creates_them() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0)]);
+        let a = id[0].0.to_string();
+        run(&mut p, Edit::SetTaskResources { id: a.clone(), text: "Alex, Sam[50%]".into() });
+        assert_eq!(p.resources.len(), 2, "unknown names became resources");
+        let units = |p: &Project, name: &str| {
+            let r = p.resources.values().find(|r| r.name == name).unwrap().id;
+            p.assignments.values().find(|x| x.resource == r && x.task == id[0]).map(|x| x.units.0)
+        };
+        assert_eq!((units(&p, "Alex"), units(&p, "Sam")), (Some(100), Some(50)));
+        assert_eq!(p.resources.values().find(|r| r.name == "Sam").unwrap().initials, "S");
+        // Change Sam, drop Alex, add nobody new; names match regardless of case.
+        let sam_assignment = p.assignments.values().find(|x| units(&p, "Sam") == Some(x.units.0)).unwrap().id;
+        run(&mut p, Edit::SetTaskResources { id: a.clone(), text: "sam[75%]".into() });
+        assert_eq!(p.resources.len(), 2);
+        assert_eq!(p.assignments.len(), 1);
+        assert_eq!(p.assignments[&sam_assignment].units.0, 75, "kept and changed, not replaced");
+        run(&mut p, Edit::SetTaskResources { id: a, text: "".into() });
+        assert!(p.assignments.is_empty());
+    }
+
+    #[test]
+    fn resource_mistakes_are_explained() {
+        let (mut p, id) = project(&[("Phase", 0), ("A", 1)]);
+        let u = Units::default();
+        let msg = |p: &Project, e: Edit| plan(p, None, &u, e).err().map(|e| e.message).unwrap_or_default();
+        assert_eq!(msg(&p, Edit::SetTaskResources { id: id[0].0.to_string(), text: "Alex".into() }), "resources work on the tasks inside “Phase”, not on the summary itself");
+        assert_eq!(msg(&p, Edit::SetTaskResources { id: id[1].0.to_string(), text: "Alex, alex".into() }), "“alex” is listed twice");
+        run(&mut p, Edit::AddResource { after_id: None, name: "Alex".into() });
+        assert_eq!(msg(&p, Edit::AddResource { after_id: None, name: "ALEX".into() }), "there is already a resource called “ALEX”");
+        let r = p.resources.values().next().unwrap().id.0.to_string();
+        let upd = |max: &str| Edit::UpdateResource { id: r.clone(), name: None, initials: None, resource_type: None, max_units: Some(max.into()), material_label: None };
+        assert_eq!(msg(&p, upd("lots")), "type maximum units like 100% or 3");
+        run(&mut p, upd("3"));
+        assert_eq!(p.resources.values().next().unwrap().max_units.0, 300);
     }
 
     #[test]

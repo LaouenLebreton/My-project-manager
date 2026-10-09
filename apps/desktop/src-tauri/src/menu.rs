@@ -24,6 +24,8 @@ pub mod id {
     pub const REDO: &str = "edit.redo";
     pub const FIND: &str = "edit.find";
     pub const COMMAND_BAR: &str = "view.command_bar";
+    pub const VIEW_TASKS: &str = "view.tasks";
+    pub const VIEW_RESOURCES: &str = "view.resources";
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
     pub const TASK_INFO: &str = "task.info";
@@ -149,7 +151,12 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&find)
         .build()?;
 
+    let view_tasks = item(app, id::VIEW_TASKS, "Tasks", Some("CmdOrCtrl+1"))?;
+    let view_resources = item(app, id::VIEW_RESOURCES, "Resource Sheet", Some("CmdOrCtrl+2"))?;
     let view = SubmenuBuilder::new(app, "View")
+        .item(&view_tasks)
+        .item(&view_resources)
+        .separator()
         .item(&enabled(id::COMMAND_BAR, "Show Command Bar", Some("CmdOrCtrl+K"))?)
         .separator()
         .fullscreen()
@@ -193,6 +200,6 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, indent, outdent, project_info, working_time];
+    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources];
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

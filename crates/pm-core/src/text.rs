@@ -24,6 +24,61 @@ pub enum TextError {
     NegativeDuration,
     #[error("type predecessors as task numbers, like 2, 5SS or 7FF+2d")]
     BadPredecessor,
+    #[error("type resources as names, like Alex, Sam[50%], Concrete[2.5 tons]")]
+    BadResource,
+}
+
+/// One entry of a typed resource list: a name and, if given, units in hundredths (50% = 50,
+/// 2.5 tons = 250).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceEntry {
+    pub name: String,
+    pub units: Option<u32>,
+}
+
+/// Reads `Alex, Sam[50%], Concrete[2.5 tons]`, as in Microsoft Project's Resource Names.
+pub fn parse_resource_list(text: &str) -> Result<Vec<ResourceEntry>, TextError> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|entry| {
+            let (name, units) = match entry.split_once('[') {
+                None => (entry, None),
+                Some((name, rest)) => {
+                    let inner = rest.strip_suffix(']').ok_or(TextError::BadResource)?.trim();
+                    // "50%", "0.5", "2.5 tons": the number, then an optional % or unit word.
+                    let end = inner.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ',')).unwrap_or(inner.len());
+                    let value: f64 = inner[..end].replace(',', ".").parse().map_err(|_| TextError::BadResource)?;
+                    let hundredths = if inner[end..].trim_start().starts_with('%') { value } else { value * 100.0 };
+                    if !(hundredths.is_finite() && hundredths >= 1.0 && hundredths < 1e7) {
+                        return Err(TextError::BadResource);
+                    }
+                    (name, Some(hundredths.round() as u32))
+                }
+            };
+            let name = name.trim();
+            if name.is_empty() || name.contains(']') {
+                return Err(TextError::BadResource);
+            }
+            Ok(ResourceEntry { name: name.to_owned(), units })
+        })
+        .collect()
+}
+
+/// `Alex`, `Sam[50%]`, `Concrete[2.5 tons]`: full-time work and one unit of a material are
+/// written without brackets.
+pub fn format_resource(name: &str, material: Option<&str>, units: u32) -> String {
+    let number = || {
+        let s = format!("{:.2}", f64::from(units) / 100.0);
+        s.trim_end_matches('0').trim_end_matches('.').to_owned()
+    };
+    match material {
+        None if units == 100 => name.to_owned(),
+        None => format!("{name}[{units}%]"),
+        Some(_) if units == 100 => name.to_owned(),
+        Some("") => format!("{name}[{}]", number()),
+        Some(label) => format!("{name}[{} {label}]", number()),
+    }
 }
 
 impl Units {
@@ -197,7 +252,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn resource_lists() {
+        let e = |name: &str, units: Option<u32>| ResourceEntry { name: name.into(), units };
+        assert_eq!(parse_resource_list(""), Ok(vec![]));
+        assert_eq!(
+            parse_resource_list("Alex, Sam[50%], Concrete[2.5 tons],Licence[3], Pat [0.5]"),
+            Ok(vec![e("Alex", None), e("Sam", Some(50)), e("Concrete", Some(250)), e("Licence", Some(300)), e("Pat", Some(50))])
+        );
+        assert_eq!(parse_resource_list("Ana María Ortiz[150 %]"), Ok(vec![e("Ana María Ortiz", Some(150))]));
+        for bad in ["[50%]", "Sam[", "Sam[x]", "Sam[0%]", "Sam]"] {
+            assert_eq!(parse_resource_list(bad), Err(TextError::BadResource), "{bad:?}");
+        }
+        assert_eq!(format_resource("Alex", None, 100), "Alex");
+        assert_eq!(format_resource("Sam", None, 50), "Sam[50%]");
+        assert_eq!(format_resource("Concrete", Some("tons"), 250), "Concrete[2.5 tons]");
+        assert_eq!(format_resource("Licence", Some(""), 300), "Licence[3]");
+        assert_eq!(format_resource("Licence", Some("seats"), 100), "Licence");
+    }
+
     proptest! {
+        #[test]
+        fn resource_text_roundtrips(name in "[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'-]{0,20}[A-Za-zÀ-ÿ]", units in 1u32..100_000, material in any::<bool>()) {
+            let label = if material { Some("tons") } else { None };
+            let text = format_resource(&name, label, units);
+            let parsed = parse_resource_list(&text).unwrap();
+            prop_assert_eq!(parsed.len(), 1);
+            prop_assert_eq!(&parsed[0].name, &name);
+            prop_assert_eq!(parsed[0].units.unwrap_or(100), units);
+        }
+
         #[test]
         fn predecessor_text_roundtrips(row in 1usize..10_000, k in 0usize..4, lag_minutes in -100_000i64..100_000) {
             let u = Units::default();

@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use pm_core::{outline, LinkType, Moment, PredecessorEntry, ScheduleError, TaskId, Units};
+use pm_core::{format_resource, outline, LinkType, Moment, PredecessorEntry, ResourceKind, ScheduleError, TaskId, Units};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use ts_rs::TS;
@@ -59,6 +59,37 @@ pub struct Snapshot {
     pub conflicts: Vec<Conflict>,
     pub undo_label: Option<String>,
     pub redo_label: Option<String>,
+    /// The resource pool, in Resource Sheet order.
+    pub resources: Vec<ResourceRow>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceRow {
+    pub id: String,
+    pub name: String,
+    pub initials: String,
+    pub resource_type: crate::edits::ResourceKindEdit,
+    /// Maximum units as typed: "100%", "300%"; empty for materials.
+    pub max_units_text: String,
+    pub material_label: String,
+    /// Total work ("32h") or quantity ("2.5 tons").
+    pub total_text: String,
+    /// Highest load as a percentage of full time (work resources).
+    pub peak_percent: u32,
+    pub task_count: u32,
+    pub overloads: Vec<OverloadView>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct OverloadView {
+    pub start: String,
+    pub finish: String,
+    pub peak_percent: u32,
+    pub tasks: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -115,6 +146,10 @@ pub struct Row {
     pub predecessors: String,
     pub constraint: crate::edits::ConstraintEdit,
     pub notes: String,
+    /// Assignments as typed: "Alex, Sam[50%]".
+    pub resource_names: String,
+    /// One of the task's resources is over-allocated while it runs.
+    pub overloaded: bool,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -184,6 +219,68 @@ fn constraint_view(c: pm_core::Constraint) -> crate::edits::ConstraintEdit {
     }
 }
 
+/// "32h", "1.5h": work is shown in hours, as Microsoft Project does.
+fn hours(minutes: i64) -> String {
+    let s = format!("{:.2}", minutes as f64 / 60.0);
+    format!("{}h", s.trim_end_matches('0').trim_end_matches('.'))
+}
+
+fn resource_rows(doc: &Document) -> Vec<ResourceRow> {
+    let p = &doc.project;
+    let mut list: Vec<&pm_core::Resource> = p.resources.values().collect();
+    list.sort_by(|a, b| a.sort_key.cmp(&b.sort_key).then(a.id.cmp(&b.id)));
+    list.into_iter()
+        .map(|r| {
+            let load = doc.loads.resources.get(&r.id);
+            let material = r.kind == ResourceKind::Material;
+            let total = load.map_or(0, |l| l.total);
+            let number = |h: i64| {
+                let s = format!("{:.2}", h as f64 / 100.0);
+                s.trim_end_matches('0').trim_end_matches('.').to_owned()
+            };
+            ResourceRow {
+                id: r.id.0.to_string(),
+                name: r.name.clone(),
+                initials: r.initials.clone(),
+                resource_type: if material { crate::edits::ResourceKindEdit::Material } else { crate::edits::ResourceKindEdit::Work },
+                max_units_text: if material { String::new() } else { format!("{}%", r.max_units.0) },
+                material_label: r.material_label.clone(),
+                total_text: if material { format!("{} {}", number(total), r.material_label).trim().to_owned() } else { hours(total) },
+                peak_percent: load.map_or(0, |l| l.peak.0),
+                task_count: p.assignments.values().filter(|a| a.resource == r.id).count() as u32,
+                overloads: load
+                    .map(|l| {
+                        l.overloads
+                            .iter()
+                            .map(|o| OverloadView {
+                                start: iso(o.start),
+                                finish: iso(o.finish),
+                                peak_percent: o.peak.0,
+                                tasks: o.tasks.iter().filter_map(|t| p.tasks.get(t)).map(|t| t.name.clone()).collect(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// "Alex, Sam[50%]" for one task, in Resource Sheet order.
+fn resource_names(p: &pm_core::Project, task: TaskId) -> String {
+    let mut list: Vec<(&pm_core::Resource, u32)> = p
+        .assignments
+        .values()
+        .filter(|a| a.task == task)
+        .filter_map(|a| p.resources.get(&a.resource).map(|r| (r, a.units.0)))
+        .collect();
+    list.sort_by(|(a, _), (b, _)| a.sort_key.cmp(&b.sort_key));
+    list.iter()
+        .map(|(r, units)| format_resource(&r.name, (r.kind == ResourceKind::Material).then_some(r.material_label.as_str()), *units))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub fn snapshot(doc: &Document) -> Snapshot {
     let p = &doc.project;
     let sched = doc.schedule.as_ref().ok();
@@ -230,6 +327,8 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                     .unwrap_or_default(),
                 constraint: constraint_view(t.constraint),
                 notes: t.notes.clone(),
+                resource_names: resource_names(p, r.id),
+                overloaded: doc.loads.overloaded_tasks.contains(&r.id),
             }
         })
         .collect();
@@ -298,6 +397,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
         conflicts,
         undo_label: doc.undo_label(),
         redo_label: doc.redo_label(),
+        resources: resource_rows(doc),
     }
 }
 
@@ -610,6 +710,34 @@ mod tests {
                 bytes as f64 / 1e6
             );
         }
+    }
+
+    #[test]
+    fn assigning_one_person_to_parallel_tasks_shows_the_overload() {
+        let mut doc = sample_doc();
+        let s = snapshot(&doc);
+        // "Book movers" and "Order furniture" both start right after the lease is signed.
+        let movers = row(&s, "Book movers").id.clone();
+        let furniture = row(&s, "Order furniture").id.clone();
+        for (id, text) in [(movers, "Alex"), (furniture, "Alex, Sam[50%]")] {
+            let planned = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::SetTaskResources { id, text: text.into() }).unwrap().unwrap();
+            doc.apply(&planned.command).unwrap();
+        }
+        let s = snapshot(&doc);
+        assert_eq!(row(&s, "Order furniture").resource_names, "Alex, Sam[50%]");
+        assert!(row(&s, "Book movers").overloaded && row(&s, "Order furniture").overloaded);
+        assert!(!row(&s, "Pack offices").overloaded);
+        let alex = s.resources.iter().find(|r| r.name == "Alex").unwrap();
+        assert_eq!(alex.peak_percent, 200);
+        assert_eq!(alex.task_count, 2);
+        assert_eq!(alex.overloads.len(), 1);
+        let mut names = alex.overloads[0].tasks.clone();
+        names.sort();
+        assert_eq!(names, ["Book movers", "Order furniture"]);
+        assert_eq!(alex.total_text, "48h", "1 day + 5 days, full time");
+        let sam = s.resources.iter().find(|r| r.name == "Sam").unwrap();
+        assert!(sam.overloads.is_empty());
+        assert_eq!(sam.total_text, "20h");
     }
 
     #[test]

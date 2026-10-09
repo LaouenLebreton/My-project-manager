@@ -26,6 +26,14 @@ export const GLOSSARY = {
     term: "Milestone",
     text: "A moment rather than a piece of work, such as “Lease signed”. Shown as ◆. Type 0 as the duration to make one.",
   },
+  resources: {
+    term: "Resources",
+    text: "Who (or what) works on a task. Type names separated by commas: Alex, Sam. Add a share of their time in brackets, Sam[50%], or a quantity for materials, Concrete[2.5 tons]. A new name adds that resource to the Resource Sheet.",
+  },
+  overallocated: {
+    term: "Over-allocated",
+    text: "A resource asked for more than it has at the same time, such as one person on two full-time tasks at once. Marked ⚠. Move a task, share the work, or lower the units to fix it.",
+  },
   constraint: {
     term: "Start no earlier than",
     text: "Set when you drag a bar: the task will not start before that date, even if its predecessors finish sooner. Links can still push it later.",
@@ -44,6 +52,7 @@ export const SHORTCUTS: [string, string][] = [
   ["⌘Z / ⇧⌘Z", "Undo / redo any change"],
   ["⌘I", "Task Info: constraint, % complete, notes"],
   ["⌘F", "Find a task by name; Return for the next match"],
+  ["⌘1 / ⌘2", "Tasks / Resource Sheet"],
   ["⌘K", "Command bar: run any command by name"],
   ["⌘N / ⌘O", "New project / open a project"],
   ["⌘-scroll or pinch", "Zoom the chart"],

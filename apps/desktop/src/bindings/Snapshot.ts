@@ -3,6 +3,7 @@ import type { Conflict } from "./Conflict";
 import type { Link } from "./Link";
 import type { Problem } from "./Problem";
 import type { ProjectInfo } from "./ProjectInfo";
+import type { ResourceRow } from "./ResourceRow";
 import type { Row } from "./Row";
 
 export type Snapshot = { project: ProjectInfo, 
@@ -13,4 +14,8 @@ rows: Array<Row>, links: Array<Link>,
 /**
  * Set when the project cannot be scheduled (for example a loop in an imported file).
  */
-problem: Problem | null, conflicts: Array<Conflict>, undoLabel: string | null, redoLabel: string | null, };
+problem: Problem | null, conflicts: Array<Conflict>, undoLabel: string | null, redoLabel: string | null, 
+/**
+ * The resource pool, in Resource Sheet order.
+ */
+resources: Array<ResourceRow>, };

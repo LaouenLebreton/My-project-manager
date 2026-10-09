@@ -26,7 +26,7 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { label: "#", width: "44px", align: "right", text: () => "" },
-  { label: "", width: "30px", text: () => "" },
+  { label: "", width: "40px", text: () => "" },
   {
     label: "Task Name",
     width: "minmax(160px, 1fr)",
@@ -51,6 +51,13 @@ const COLUMNS: Column[] = [
     tour: "predecessors",
     text: (r) => r.predecessors,
     edit: { initial: (r) => r.predecessors, make: (r, text) => ({ kind: "SetPredecessors", id: r.id, text }) },
+  },
+  {
+    label: "Resources",
+    width: "140px",
+    help: "resources",
+    text: (r) => r.resourceNames,
+    edit: { initial: (r) => r.resourceNames, make: (r, text) => ({ kind: "SetTaskResources", id: r.id, text }) },
   },
   { label: "Slack", width: "76px", align: "right", help: "slack", text: (r, perDay) => formatDays(r.totalSlackMinutes, perDay) },
 ];
@@ -465,6 +472,16 @@ function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDa
         {constraint && (
           <span className="constraint" role="img" aria-label={constraint} title={constraint}>
             ⌖
+          </span>
+        )}
+        {r.overloaded && (
+          <span
+            className="overload"
+            role="img"
+            aria-label="A resource on this task is over-allocated"
+            title="A resource on this task has more work than time while it runs. See the Resource Sheet (⌘2)."
+          >
+            ⚠
           </span>
         )}
       </>

@@ -632,3 +632,56 @@ label.inline {
   -webkit-user-select: text;
   user-select: text;
 }
+
+.segmented {
+  display: inline-flex;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+}
+
+.segmented button {
+  border: none;
+  border-radius: 0;
+  padding: 3px 14px;
+  background: transparent;
+}
+
+.segmented button.on {
+  background: color-mix(in srgb, CanvasText 14%, transparent);
+  font-weight: 600;
+}
+
+.overload {
+  color: #d70015;
+  margin-left: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .overload {
+    color: #ff6961;
+  }
+}
+
+.resource-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.grid-row.static {
+  position: relative;
+}
+
+.resource-details {
+  padding: 10px 16px;
+  border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  max-height: 30%;
+  overflow: auto;
+}
+
+.resource-details ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}

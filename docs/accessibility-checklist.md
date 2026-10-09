@@ -17,6 +17,8 @@ Run before each release (spec sections 5.1.9 and 6). Turn on VoiceOver (⌘F5) f
 - [ ] Each "?" in the column headers is reachable with Tab and opens with Space or Return; its text closes when focus moves on.
 - [ ] Command bar: ⌘K opens with focus in the field; ↑↓ choose; Return runs; Escape closes.
 - [ ] Help (⌘?) and the import report close with Escape and return focus.
+- [ ] ⌘1 and ⌘2 switch between Tasks and the Resource Sheet; the Resource Sheet works from the keyboard like the task grid (arrows, Return, typing, Delete, blank row adds).
+- [ ] Over-allocation is announced in words (the ⚠ markers have labels; the details under the Resource Sheet are read out).
 - [ ] Task Info (⌘I), Project Info and Working Time: every field has a label, Tab moves through them in order, Return saves, Escape cancels, errors are announced.
 - [ ] Tour: Escape skips; buttons reachable with Tab.
 

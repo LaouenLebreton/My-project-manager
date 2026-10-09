@@ -301,8 +301,9 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
     }
     ctx.globalAlpha = 1;
     if (!r.isSummary) {
-      ctx.fillStyle = c.text;
-      ctx.fillText(r.name, x2 + 6, cy);
+      // Resource names next to the bar, as in Microsoft Project; the task name if none.
+      ctx.fillStyle = r.overloaded ? c.critical : c.text;
+      ctx.fillText(r.resourceNames || r.name, x2 + 6, cy);
     }
   }
 

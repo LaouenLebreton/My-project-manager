@@ -13,4 +13,12 @@ durationText: string,
 /**
  * Incoming links as typed, e.g. "2, 5SS+1d" (row numbers).
  */
-predecessors: string, constraint: ConstraintEdit, notes: string, };
+predecessors: string, constraint: ConstraintEdit, notes: string, 
+/**
+ * Assignments as typed: "Alex, Sam[50%]".
+ */
+resourceNames: string, 
+/**
+ * One of the task's resources is over-allocated while it runs.
+ */
+overloaded: boolean, };

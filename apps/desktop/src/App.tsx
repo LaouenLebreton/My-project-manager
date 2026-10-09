@@ -6,6 +6,7 @@ import { CommandBar, type CommandItem } from "./CommandBar";
 import { Gantt, type GanttHandle } from "./Gantt";
 import { FindBar } from "./FindBar";
 import { HelpSheet } from "./HelpSheet";
+import { ResourceSheet } from "./ResourceSheet";
 import { ProjectInfo, TaskInfo, WorkingTime } from "./Sheets";
 import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
@@ -28,6 +29,7 @@ export function App() {
   const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
+  const [view, setView] = useState<"tasks" | "resources">("tasks");
   const ganttRef = useRef<GanttHandle>(null);
 
   const run = useCallback(async (action: () => Promise<Snapshot | null>) => {
@@ -115,6 +117,8 @@ export function App() {
         if (e.payload === "help.tour") setOverlay("tour");
         if (e.payload === "view.command_bar") setOverlay((o) => (o === "commands" ? null : "commands"));
         if (e.payload === "edit.find") setFinding(true);
+        if (e.payload === "view.tasks") setView("tasks");
+        if (e.payload === "view.resources") setView("resources");
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
@@ -137,6 +141,8 @@ export function App() {
   ];
   if (snapshot) {
     commands.push(
+      { name: "Show Tasks", shortcut: "⌘1", run: () => setView("tasks") },
+      { name: "Show Resource Sheet", shortcut: "⌘2", run: () => setView("resources") },
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
@@ -209,7 +215,19 @@ export function App() {
             {formatDate(snapshot.project.start)} – {formatDate(snapshot.project.finish)} · {snapshot.rows.length} tasks
           </p>
         </div>
-        <p className="secondary hint">Return to edit · Tab to indent · Drag bars to move, their ends to stretch, onto another bar to link</p>
+        <div className="segmented" role="tablist" aria-label="View">
+          <button role="tab" aria-selected={view === "tasks"} className={view === "tasks" ? "on" : undefined} onClick={() => setView("tasks")}>
+            Tasks
+          </button>
+          <button role="tab" aria-selected={view === "resources"} className={view === "resources" ? "on" : undefined} onClick={() => setView("resources")}>
+            Resources
+            {snapshot.resources.some((r) => r.overloads.length > 0) && (
+              <span className="overload" aria-label="(some over-allocated)">
+                {" "}⚠
+              </span>
+            )}
+          </button>
+        </div>
       </header>
       {error && (
         <p role="alert" className="banner error">
@@ -226,36 +244,42 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
+      {view === "resources" ? (
+        <ResourceSheet snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
+      ) : (
+        <>
       {finding && <FindBar onFind={(t, fromCurrent) => gridRef.current?.findNext(t, fromCurrent) ?? false} onClose={() => setFinding(false)} />}
-      <div className="workspace">
-        <div className="pane" style={{ width: gridWidth }}>
-          <Grid
-            ref={gridRef}
+        <div className="workspace">
+          <div className="pane" style={{ width: gridWidth }}>
+            <Grid
+              ref={gridRef}
+              snapshot={snapshot}
+              onEdit={edit}
+              onTextEditing={textEditing}
+              onScrollTop={setScrollTop}
+              onSelectionChange={setSelectedIds}
+            />
+          </div>
+          <div
+            className="splitter"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize task list"
+            onPointerDown={startSplitDrag}
+          />
+          <Gantt
             snapshot={snapshot}
+            scrollTop={scrollTop}
+            selectedIds={selectedIds}
             onEdit={edit}
-            onTextEditing={textEditing}
-            onScrollTop={setScrollTop}
-            onSelectionChange={setSelectedIds}
+            onSelectRow={(r) => gridRef.current?.selectRow(r)}
+            onScrollBy={(dy) => gridRef.current?.scrollBy(dy)}
+            onMessage={setMessage}
+            ref={ganttRef}
           />
         </div>
-        <div
-          className="splitter"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize task list"
-          onPointerDown={startSplitDrag}
-        />
-        <Gantt
-          snapshot={snapshot}
-          scrollTop={scrollTop}
-          selectedIds={selectedIds}
-          onEdit={edit}
-          onSelectRow={(r) => gridRef.current?.selectRow(r)}
-          onScrollBy={(dy) => gridRef.current?.scrollBy(dy)}
-          onMessage={setMessage}
-          ref={ganttRef}
-        />
-      </div>
+        </>
+      )}
       {report && <ImportReport report={report} onClose={() => setReport(null)} />}
       {overlays}
       <footer className="status" role="status" aria-live="polite" data-tour="status">
