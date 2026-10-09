@@ -1180,3 +1180,12 @@ table.stats td {
   justify-self: start;
   margin-left: 6px;
 }
+
+/* "critical" next to a task name where colour alone is not used (Workload). */
+.critical-tag {
+  color: var(--gantt-critical);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}

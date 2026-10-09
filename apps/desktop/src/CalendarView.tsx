@@ -114,7 +114,7 @@ export function CalendarView({ snapshot, onShowTask }: { snapshot: Snapshot; onS
                   className={["calendar-bar", b.row.critical ? "critical" : "", b.row.percentComplete >= 100 ? "done" : "", b.row.isMilestone ? "milestone" : "", b.first < w ? "cont-left" : "", b.last > w + 6 ? "cont-right" : ""].filter(Boolean).join(" ")}
                   style={{ gridColumn: `${b.from - w + 1} / ${b.to - w + 2}`, gridRow: b.lane + 2 }}
                   onClick={() => onShowTask(b.number)}
-                  title={`${b.number}. ${b.row.name}${b.row.resourceNames ? ` (${b.row.resourceNames})` : ""}`}
+                  title={`${b.number}. ${b.row.name}${b.row.resourceNames ? ` (${b.row.resourceNames})` : ""}${b.row.critical ? ", on the critical path" : ""}`}
                 >
                   {b.row.isMilestone ? "◆ " : ""}
                   {b.row.name}

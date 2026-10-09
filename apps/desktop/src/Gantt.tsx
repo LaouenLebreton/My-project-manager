@@ -69,6 +69,8 @@ export interface GanttProps {
   onSelectRow: (row: number) => void;
   onScrollBy: (dy: number) => void;
   onMessage: (message: string | null) => void;
+  /** Asks before a drag changes the critical path; resolves true to go ahead. */
+  onConfirm: (title: string, message: string, action: string) => Promise<boolean>;
 }
 
 /**
@@ -81,7 +83,7 @@ export interface GanttHandle {
 }
 
 export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
-  { snapshot, scrollTop, selectedIds, onEdit, onSelectRow, onScrollBy, onMessage },
+  { snapshot, scrollTop, selectedIds, onEdit, onSelectRow, onScrollBy, onMessage, onConfirm },
   handle,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -532,6 +534,17 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
       if (target && h.row !== d.row) edit = { kind: "AddLink", predecessorId: r.id, successorId: target.id };
     }
     if (!edit) return;
+    // The critical path is protected from accidental drags: typed edits still go straight in.
+    if ((edit.kind === "MoveTask" || edit.kind === "SetFinish") && r.critical) {
+      const what = edit.kind === "MoveTask" ? "Moving it" : "Changing its length";
+      if (!(await onConfirm(`“${r.name}” is on the critical path`, `${what} changes when the project finishes.`, edit.kind === "MoveTask" ? "Move Anyway" : "Change Anyway"))) return;
+    } else if (edit.kind === "AddLink") {
+      const target = rows.find((x) => x.id === (edit as { successorId: string }).successorId);
+      if (target?.critical || r.critical) {
+        const name = target?.critical ? target.name : r.name;
+        if (!(await onConfirm(`“${name}” is on the critical path`, "This link can delay the critical path and so the project finish.", "Link Anyway"))) return;
+      }
+    }
     try {
       const result = await onEdit(edit);
       // A drag cannot pull a task earlier than its links allow; say so instead of silently

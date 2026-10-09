@@ -490,3 +490,30 @@ export function ProjectStatistics({ snapshot, onClose }: { snapshot: Snapshot; o
     </Sheet>
   );
 }
+
+/** Asks before an action that may have consequences the user did not intend. */
+export function ConfirmSheet({ title, message, action, onAnswer }: { title: string; message: string; action: string; onAnswer: (yes: boolean) => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const answered = useRef(false);
+  useEffect(() => ref.current?.showModal(), []);
+  const answer = (yes: boolean) => {
+    if (answered.current) return;
+    answered.current = true;
+    ref.current?.close();
+    onAnswer(yes);
+  };
+  return (
+    <dialog ref={ref} className="report sheet" onClose={() => answer(false)} aria-labelledby="confirm-title">
+      <h2 id="confirm-title">{title}</h2>
+      <p>{message}</p>
+      <div className="report-actions">
+        <button type="button" onClick={() => answer(false)} autoFocus>
+          Cancel
+        </button>
+        <button type="button" className="primary" onClick={() => answer(true)}>
+          {action}
+        </button>
+      </div>
+    </dialog>
+  );
+}

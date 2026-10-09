@@ -159,6 +159,7 @@ export function Board({ snapshot, onEdit, onShowTask }: { snapshot: Snapshot; on
                         {r.isMilestone && "◆ "}
                         {r.name}
                       </button>
+                      {r.critical && col.key !== "done" && <span className="critical-tag"> critical</span>}
                       <div className="secondary small">
                         {rowNumber.get(r.id)}
                         {ph && !phase ? ` · ${ph.name}` : ""} · {formatDate(r.start)} – {formatDate(r.finish)}

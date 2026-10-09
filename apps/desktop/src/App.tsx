@@ -7,7 +7,7 @@ import { Gantt, type GanttHandle } from "./Gantt";
 import { FindBar } from "./FindBar";
 import { HelpSheet } from "./HelpSheet";
 import { ResourceSheet } from "./ResourceSheet";
-import { ProjectInfo, ProjectStatistics, TaskInfo, UpdateProject, WorkingTime } from "./Sheets";
+import { ConfirmSheet, ProjectInfo, ProjectStatistics, TaskInfo, UpdateProject, WorkingTime } from "./Sheets";
 import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { WbsChart } from "./WbsChart";
@@ -87,6 +87,12 @@ export function App() {
   editRef.current = edit;
 
   /** From another view: back to the task list with that row (1-based) selected. */
+  // One question at a time, answered by ConfirmSheet.
+  const [question, setQuestion] = useState<{ title: string; message: string; action: string; answer: (yes: boolean) => void } | null>(null);
+  const confirm = useCallback(
+    (title: string, message: string, action: string) => new Promise<boolean>((answer) => setQuestion({ title, message, action, answer })),
+    [],
+  );
   const pendingRow = useRef<number | null>(null);
   const showTask = useCallback((row: number) => {
     pendingRow.current = row - 1;
@@ -217,6 +223,17 @@ export function App() {
       {overlay === "tour" && snapshot && <Tour onDone={() => setOverlay(null)} />}
       {overlay === "commands" && <CommandBar commands={commands} onClose={() => setOverlay(null)} />}
       {overlay === "project" && snapshot && <ProjectInfo snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {question && (
+        <ConfirmSheet
+          title={question.title}
+          message={question.message}
+          action={question.action}
+          onAnswer={(yes) => {
+            setQuestion(null);
+            question.answer(yes);
+          }}
+        />
+      )}
       {overlay === "stats" && snapshot && <ProjectStatistics snapshot={snapshot} onClose={() => setOverlay(null)} />}
       {overlay === "update" && snapshot && <UpdateProject snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
       {overlay === "working" && snapshot && <WorkingTime snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
@@ -352,6 +369,7 @@ export function App() {
             onPointerDown={startSplitDrag}
           />
           <Gantt
+            onConfirm={confirm}
             snapshot={snapshot}
             scrollTop={scrollTop}
             selectedIds={selectedIds}

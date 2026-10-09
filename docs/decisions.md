@@ -112,3 +112,10 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **Work breakdown structure view** (View > Work Breakdown Structure, ⌘3; owner request): the project on top, top-level tasks side by side, everything inside them stacked and indented, with WBS codes (from the outline, also sent with every row), duration, cost, and critical / over-allocated markers. HTML boxes (not canvas) so VoiceOver reads it as a tree and names can be edited in place. Built with mind-map keys (Return: sibling, Tab: subtask, Space: rename, Delete, arrows) and drag-onto-a-box to move a branch. Large projects open showing two levels; any branch can be opened or closed.
 - **Constraints and manual scheduling** (rules R32 to R34): all eight Microsoft Project constraint types, honoured and reported when they clash with links; manually scheduled tasks keep their start, their successors follow them, and broken links are reported. File format versions 5 and 6.
 - **Baseline:** one saved baseline (Microsoft Project's Baseline 0) with start, finish, duration, work and cost per task, taken from the current schedule (Project > Set Baseline, one undo step; Clear Baseline). Grey bars under the tasks, and a Finish Var. column that appears only once a baseline exists. Microsoft Project's baselines 1 to 10 are reported on import, not kept. File format version 7 (a `baseline_task` table, rewritten only by baseline commands).
+
+## Critical path in every view (owner, 2026-10-09: "show + protect")
+
+Critical tasks look the same in every view (red, with a "critical" label where colour alone
+would be the only cue). Dragging that would change a critical task's dates (moving or
+stretching its bar, or linking it) asks first; Cancel is the default. Typed edits (grid, Task
+Info) are deliberate and go straight in.

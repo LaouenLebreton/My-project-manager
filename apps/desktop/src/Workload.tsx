@@ -157,6 +157,11 @@ export function Workload({ snapshot, onShowTask }: { snapshot: Snapshot; onShowT
                           <button className="link" onClick={() => onShowTask(a.row)} title="Show in the task list">
                             {a.row}. {a.taskName}
                           </button>
+                          {snapshot.rows[a.row - 1]?.critical && (
+                            <span className="critical-tag" title="On the critical path">
+                              {" "}critical
+                            </span>
+                          )}
                           {a.unitsText !== "100%" && <span className="secondary"> {a.unitsText}</span>}
                         </th>
                         {bucket(a.days).map((b, i) => (
