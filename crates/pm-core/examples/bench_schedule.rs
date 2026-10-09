@@ -44,6 +44,7 @@ fn generate(n: usize) -> Project {
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
                 manual_start: None,
+                actual: Actual::default(),
                 notes: String::new(),
             },
         );
@@ -83,6 +84,7 @@ fn generate(n: usize) -> Project {
         assignments: Default::default(),
         currency: String::new(),
         baseline: None,
+        status_date: None,
     }
 }
 

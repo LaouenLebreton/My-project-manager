@@ -18,4 +18,8 @@ currency: string,
 /**
  * When the baseline was saved (RFC 3339), if there is one.
  */
-baselineSavedAt: string | null, costCents: number, };
+baselineSavedAt: string | null, 
+/**
+ * The "as of" date for progress, drawn as a line in the chart.
+ */
+statusDate: string | null, costCents: number, };

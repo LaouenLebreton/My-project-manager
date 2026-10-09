@@ -37,6 +37,8 @@ struct Canon {
     baseline: Option<Vec<CanonBaseline>>,
     /// Fixed cost per task row, and rate per resource name.
     costs: (Vec<i64>, Vec<(String, i64)>),
+    /// Actuals per work-task row, and the status date.
+    progress: (Vec<Actual>, Option<Moment>),
 }
 
 fn canon(p: &Project) -> Canon {
@@ -89,6 +91,7 @@ fn canon(p: &Project) -> Canon {
                 v
             },
         ),
+        progress: (rows.iter().map(|r| if r.has_children { Actual::NotStarted } else { p.tasks[&r.id].actual }).collect(), p.status_date),
     }
 }
 
@@ -165,7 +168,6 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
         "Elapsed lags",
         "Links to tasks in other projects",
         "Blank rows",
-        "Actual start and finish dates",
         "Custom fields",
         "Deadlines",
         "Task calendars",
@@ -176,12 +178,15 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
         "Other calendars",
         "Recurring calendar exceptions",
         "Alternative work weeks",
-        "Status date",
         "Project options Super PM does not use",
     ] {
         assert!(reported.contains(expected), "report should mention {expected:?}; it says:\n{reported}");
     }
     assert!(report.imported.iter().any(|l| l.what.starts_with("Resources") && l.count == 3));
+    assert!(report.imported.iter().any(|l| l.what.starts_with("Actual start") && l.count == 1));
+    assert_eq!(p.status_date, Some(Moment::from_datetime(jiff::civil::date(2026, 10, 16).at(17, 0, 0, 0))));
+    let wire = p.tasks.values().find(|t| t.name == "Wireframes & sitemap").unwrap();
+    assert_eq!(wire.actual, Actual::Started { start: Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0)) });
     assert!(report.imported.iter().any(|l| l.what.starts_with("Assignments") && l.count == 2));
     let options = report.ignored.iter().find(|l| l.what.starts_with("Project options")).unwrap();
     assert!(options.examples.contains(&"HonorConstraints".to_owned()));
@@ -235,6 +240,7 @@ fn random_project() -> impl Strategy<Value = Project> {
             assignments: Default::default(),
             currency: String::new(),
             baseline: None,
+            status_date: None,
         };
         for (offset, working) in holidays {
             let date = jiff::civil::date(2026, 10, 5).checked_add(jiff::Span::new().days(offset)).unwrap();
@@ -272,6 +278,7 @@ fn random_project() -> impl Strategy<Value = Project> {
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
                 manual_start: None,
+                actual: Actual::default(),
                 notes: if k % 3 == 0 { format!("Note {k}: <b>&amp;</b>\nline two") } else { String::new() },
             };
             // Through the command layer, so the project is one the app could hold.
@@ -309,11 +316,18 @@ fn random_project() -> impl Strategy<Value = Project> {
             r.rate = Money(*rate);
         }
         p.currency = currency.to_owned();
+        p.status_date = (currency == "€").then(|| Moment::from_datetime(jiff::civil::date(2026, 10, 8).at(17, 0, 0, 0)));
         for (k, (t, cost)) in p.tasks.values_mut().zip(&fixed).enumerate() {
             t.fixed_cost = Money(*cost);
             if k % 4 == 1 {
                 t.manual_start = Some(Moment::from_datetime(jiff::civil::date(2026, 10, 6).at(8, 0, 0, 0)));
             }
+            let day = |d| Moment::from_datetime(jiff::civil::date(2026, 10, d).at(8, 0, 0, 0));
+            t.actual = match k % 5 {
+                2 => Actual::Started { start: day(5) },
+                3 => Actual::Finished { start: day(5), finish: day(7) },
+                _ => Actual::NotStarted,
+            };
         }
         if currency == "€" {
             // Some projects carry a baseline: one entry per task, with odd values.

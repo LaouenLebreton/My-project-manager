@@ -195,6 +195,17 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
     ctx.moveTo(Math.round(todayX) + 0.5, HEADER_HEIGHT);
     ctx.lineTo(Math.round(todayX) + 0.5, height);
     ctx.stroke();
+    // The status date: progress is reported up to here.
+    if (snapshot.project.statusDate) {
+      const sx = Math.round(x(snapshot.project.statusDate)) + 0.5;
+      ctx.strokeStyle = c.text;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(sx, HEADER_HEIGHT);
+      ctx.lineTo(sx, height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     drawLinks(ctx, c, first, last);
     const hatch = hatchPattern(ctx, c.critical);

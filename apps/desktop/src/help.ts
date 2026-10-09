@@ -42,6 +42,10 @@ export const GLOSSARY = {
     term: "Cost",
     text: "What a task costs: its resources' work times their rates (Rate in the Resource Sheet), plus any fixed cost (Task Info). Summaries add up the tasks inside them. Set the currency in Project Info.",
   },
+  progress: {
+    term: "% Done",
+    text: "How much of a task is finished. Typing a percentage records the actual start (and, at 100%, the actual finish) from the schedule; those dates then stay fixed whatever happens to the links. Project > Update Project fills this in for every task up to a day.",
+  },
   overallocated: {
     term: "Over-allocated",
     text: "A resource asked for more than it has at the same time, such as one person on two full-time tasks at once. Marked ⚠. Move a task, share the work, or lower the units to fix it.",

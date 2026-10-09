@@ -137,6 +137,12 @@ pub const MIGRATIONS: &[&str] = &[
         cost_cents    INTEGER NOT NULL
     );
     "#,
+    // 7 -> 8: progress tracking.
+    r#"
+    ALTER TABLE task ADD COLUMN actual_start_min INTEGER;
+    ALTER TABLE task ADD COLUMN actual_finish_min INTEGER;
+    ALTER TABLE project ADD COLUMN status_date_min INTEGER;
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

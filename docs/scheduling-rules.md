@@ -42,6 +42,7 @@ Rules marked *verify* must be checked against the owner's Microsoft Project refe
 - R33. As Late As Possible: after the forward pass, latest tasks first, each moves as late as it can without moving its successors (at their early dates) or the project's finish. Successors therefore never move. *verify* against Microsoft Project, which may also move ALAP chains as a group.
 
 - R34. Manually scheduled tasks keep their start (and duration) whatever their links, constraints and leveling say; their successors are scheduled from their real dates. If a predecessor finishes after the manual start, a conflict is reported ("manual"). Their late dates are fixed like Must Start On. Leveling never moves them.
+- R35. Actual dates are facts. A started task starts on its actual start, and a finished one ends on its actual finish, whatever its links, constraints, leveling or manual start say; an unfinished one finishes its duration after the actual start. Their late dates are fixed like Must Start On. Finished tasks are never critical. Only work tasks hold actuals; summaries take theirs from their tasks. Typing % complete fills the actual start (above 0%) and finish (at 100%) from the schedule, as Microsoft Project does; Update Project does this for every task due by a date and makes it the status date. *verify*: Project also splits in-progress tasks at the status date ("reschedule uncompleted work"); Super PM does not yet.
 
 ## Backward pass, slack, critical path
 

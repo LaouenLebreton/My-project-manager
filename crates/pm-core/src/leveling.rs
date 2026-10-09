@@ -138,6 +138,7 @@ mod tests {
                     assignments: Default::default(),
                     currency: String::new(),
                     baseline: None,
+                    status_date: None,
                 },
                 900,
             )
@@ -157,6 +158,7 @@ mod tests {
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
                 manual_start: None,
+                actual: Actual::default(),
             };
             apply(&mut self.0, &Command::InsertTasks { tasks: vec![t], dependencies: vec![] }).unwrap();
             self

@@ -119,6 +119,8 @@ pub struct ProjectInfo {
     pub currency: String,
     /// When the baseline was saved (RFC 3339), if there is one.
     pub baseline_saved_at: Option<String>,
+    /// The "as of" date for progress, drawn as a line in the chart.
+    pub status_date: Option<String>,
     #[ts(type = "number")]
     pub cost_cents: i64,
 }
@@ -186,6 +188,9 @@ pub struct Row {
     pub cost_cents: i64,
     #[ts(type = "number")]
     pub fixed_cost_cents: i64,
+    /// Progress: when work really started and finished.
+    pub actual_start: Option<String>,
+    pub actual_finish: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -388,6 +393,8 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 baseline_cost_cents: base.map(|b| b.cost.0),
                 cost_cents: doc.loads.task_cost.get(&r.id).copied().unwrap_or(0),
                 fixed_cost_cents: t.fixed_cost.0,
+                actual_start: t.actual.start().map(iso),
+                actual_finish: t.actual.finish().map(iso),
                 leveled_from: s
                     .filter(|_| t.leveling_delay.get() > 0)
                     .map(|s| iso(p.calendar.add_working(s.early_start, -t.leveling_delay.get()))),
@@ -462,6 +469,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             working_week: p.calendar.week().iter().map(ranges).collect(),
             currency: p.currency.clone(),
             baseline_saved_at: p.baseline.as_ref().map(|b| b.saved_at.clone()),
+            status_date: p.status_date.map(iso),
             cost_cents: doc.loads.project_cost,
         },
         rows,

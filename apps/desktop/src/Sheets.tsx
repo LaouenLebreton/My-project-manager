@@ -90,6 +90,10 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
   const [resources, setResources] = useState(row.resourceNames);
   const [manual, setManual] = useState(row.manual);
   const [fixedCost, setFixedCost] = useState(row.fixedCostCents ? (row.fixedCostCents / 100).toFixed(2) : "");
+  const initialStart = row.actualStart?.slice(0, 10) ?? "";
+  const initialFinish = row.actualFinish?.slice(0, 10) ?? "";
+  const [actualStart, setActualStart] = useState(initialStart);
+  const [actualFinish, setActualFinish] = useState(initialFinish);
   return (
     <Sheet
       title="Task Info"
@@ -107,6 +111,9 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           resources: row.isSummary ? null : resources,
           fixedCost,
           manual: row.isSummary ? null : manual,
+          // Only typed dates are sent, so a changed % complete can fill them in from the schedule.
+          actualStart: row.isSummary || actualStart === initialStart ? null : actualStart,
+          actualFinish: row.isSummary || actualFinish === initialFinish ? null : actualFinish,
         })
       }
     >
@@ -193,7 +200,19 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
         )}
 
         <label htmlFor="ti-percent">% complete</label>
-        <input id="ti-percent" type="number" min={0} max={100} value={percent} onChange={(e) => setPercent(e.target.value)} />
+        <div>
+          <input id="ti-percent" type="number" min={0} max={100} value={percent} onChange={(e) => setPercent(e.target.value)} />
+          {!row.isSummary && <p className="secondary small">{GLOSSARY.progress.text}</p>}
+        </div>
+
+        {!row.isSummary && (
+          <>
+            <label htmlFor="ti-actual-start">Actual start</label>
+            <input id="ti-actual-start" type="date" value={actualStart} onChange={(e) => setActualStart(e.target.value)} />
+            <label htmlFor="ti-actual-finish">Actual finish</label>
+            <input id="ti-actual-finish" type="date" value={actualFinish} onChange={(e) => setActualFinish(e.target.value)} />
+          </>
+        )}
 
         <label htmlFor="ti-notes">Notes</label>
         <textarea id="ti-notes" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -205,10 +224,13 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
 export function ProjectInfo({ snapshot, send, onClose }: { snapshot: Snapshot; send: Send; onClose: () => void }) {
   const [start, setStart] = useState(snapshot.project.start.slice(0, 10));
   const [currency, setCurrency] = useState(snapshot.project.currency);
+  const initialStatus = snapshot.project.statusDate?.slice(0, 10) ?? "";
+  const [statusDate, setStatusDate] = useState(initialStatus);
   const save = async () => {
-    const problem = await attempt(send, { kind: "SetProjectStart", date: start });
-    if (problem || currency.trim() === snapshot.project.currency) return problem;
-    return attempt(send, { kind: "SetCurrency", symbol: currency });
+    let problem = await attempt(send, { kind: "SetProjectStart", date: start });
+    if (!problem && currency.trim() !== snapshot.project.currency) problem = await attempt(send, { kind: "SetCurrency", symbol: currency });
+    if (!problem && statusDate !== initialStatus) problem = await attempt(send, { kind: "SetStatusDate", date: statusDate || null });
+    return problem;
   };
   return (
     <Sheet title="Project Info" onClose={onClose} onSave={save}>
@@ -222,6 +244,32 @@ export function ProjectInfo({ snapshot, send, onClose }: { snapshot: Snapshot; s
         <div>
           <input id="pi-currency" value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="€, $, £, CHF" size={6} />
           <p className="secondary small">Shown with every cost in this project.</p>
+        </div>
+        <label htmlFor="pi-status">Status date</label>
+        <div>
+          <input id="pi-status" type="date" value={statusDate} onChange={(e) => setStatusDate(e.target.value)} />
+          <p className="secondary small">The day progress is reported up to, drawn as a dashed line in the chart. Leave empty if you do not track progress.</p>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+/** Project > Update Project: record work as done on schedule up to a day. */
+export function UpdateProject({ snapshot, send, onClose }: { snapshot: Snapshot; send: Send; onClose: () => void }) {
+  const today = new Date();
+  const fallback = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [through, setThrough] = useState(snapshot.project.statusDate?.slice(0, 10) ?? fallback);
+  return (
+    <Sheet title="Update Project" onClose={onClose} onSave={() => attempt(send, { kind: "UpdateProgress", throughDate: through })}>
+      <div className="form">
+        <label htmlFor="up-through">Work done through</label>
+        <div>
+          <input id="up-through" type="date" value={through} onChange={(e) => setThrough(e.target.value)} required autoFocus />
+          <p className="secondary small">
+            Every task scheduled to start by the end of this day is marked as started on its scheduled start, with its % complete as far as the plan says. Tasks
+            due to finish by then become 100% complete. Progress you already entered is never lowered. This day becomes the status date.
+          </p>
         </div>
       </div>
     </Sheet>

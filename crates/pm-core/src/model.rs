@@ -154,6 +154,35 @@ pub struct Task {
     /// `None` means scheduled automatically.
     #[serde(default)]
     pub manual_start: Option<Moment>,
+    /// What really happened (R35): once a task has started, its dates are facts.
+    #[serde(default)]
+    pub actual: Actual,
+}
+
+/// Actual start and finish. A finish without a start is not representable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state")]
+pub enum Actual {
+    #[default]
+    NotStarted,
+    Started { start: Moment },
+    Finished { start: Moment, finish: Moment },
+}
+
+impl Actual {
+    pub fn start(self) -> Option<Moment> {
+        match self {
+            Actual::NotStarted => None,
+            Actual::Started { start } | Actual::Finished { start, .. } => Some(start),
+        }
+    }
+
+    pub fn finish(self) -> Option<Moment> {
+        match self {
+            Actual::Finished { finish, .. } => Some(finish),
+            _ => None,
+        }
+    }
 }
 
 /// An amount in hundredths of the project's currency (cents), so totals never pick up
@@ -247,6 +276,9 @@ pub struct Project {
     /// The plan as it was when the baseline was saved (Project > Set Baseline).
     #[serde(default)]
     pub baseline: Option<Baseline>,
+    /// "As of" date for progress and earned value (Project Info).
+    #[serde(default)]
+    pub status_date: Option<Moment>,
 }
 
 /// A saved copy of the plan, to compare progress against.

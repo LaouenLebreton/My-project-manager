@@ -46,6 +46,15 @@ const COLUMNS: Column[] = [
   { label: "Start", width: "112px", text: (r) => formatDate(r.start), title: (r) => formatDateTime(r.start) },
   { label: "Finish", width: "112px", text: (r) => formatDate(r.finish), title: (r) => formatDateTime(r.finish) },
   {
+    label: "% Done",
+    width: "64px",
+    align: "right",
+    help: "progress",
+    text: (r) => `${r.percentComplete}%`,
+    title: (r) => (r.actualFinish ? `Finished ${formatDateTime(r.actualFinish)}` : r.actualStart ? `Started ${formatDateTime(r.actualStart)}` : "Not started"),
+    edit: { initial: (r) => String(r.percentComplete), make: (r, text) => ({ kind: "SetPercentComplete", ids: [r.id], percent: parsePercent(text) }) },
+  },
+  {
     label: "Predecessors",
     width: "116px",
     help: "predecessors",
@@ -64,6 +73,12 @@ const COLUMNS: Column[] = [
   { label: "Slack", width: "76px", align: "right", help: "slack", text: (r, perDay) => formatDays(r.totalSlackMinutes, perDay) },
 ];
 const NAME_COL = 2;
+
+/** "50", "50%" or " 50 % "; anything else becomes 255, which Rust rejects with a clear message. */
+function parsePercent(text: string): number {
+  const n = Math.round(Number(text.replace("%", "").trim()));
+  return text.trim() !== "" && Number.isFinite(n) && n >= 0 && n <= 100 ? n : 255;
+}
 
 /** Shown only once a baseline exists: how far each finish has moved since it was saved. */
 const VARIANCE_COLUMN: Column = {

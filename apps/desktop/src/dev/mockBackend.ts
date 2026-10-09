@@ -51,6 +51,8 @@ function row(name: string, depth = 0): Row {
     leveledFrom: null,
     costCents: 36_400,
     fixedCostCents: 0,
+    actualStart: null,
+    actualFinish: null,
   };
 }
 
@@ -140,7 +142,7 @@ export function install() {
     costCents: 182_000,
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
   });
-  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null };
+  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null };
   if (state.rows[1]) {
     state.rows[1].resourceNames = "Alex";
     state.rows[1].overloaded = true;
@@ -158,6 +160,7 @@ export function install() {
       workingWeek: [0, 1, 2, 3, 4].map(() => [{ start: 480, end: 720 }, { start: 780, end: 1020 }]).concat([[], []]),
       currency: "€",
       baselineSavedAt: state.baselineSavedAt,
+      statusDate: state.statusDate,
       costCents: 1_234_550,
     },
     rows: state.rows.map((r) => ({ ...r })),
@@ -267,6 +270,28 @@ export function install() {
               if (e.milestone !== null) r.isMilestone = e.milestone;
               break;
             }
+            case "SetPercentComplete":
+              if (e.percent > 100) fail("% complete must be between 0 and 100");
+              for (const id of e.ids) {
+                const r = state.rows[at(id)];
+                r.percentComplete = e.percent;
+                r.actualStart = e.percent > 0 ? (r.actualStart ?? r.start) : null;
+                r.actualFinish = e.percent === 100 ? r.finish : null;
+              }
+              break;
+            case "SetStatusDate":
+              state.statusDate = e.date ? `${e.date}T17:00:00` : null;
+              break;
+            case "UpdateProgress":
+              state.statusDate = `${e.throughDate}T17:00:00`;
+              for (const r of state.rows) {
+                if (r.isSummary || !r.start || r.start.slice(0, 10) > e.throughDate) continue;
+                r.actualStart = r.start;
+                const done = r.finish!.slice(0, 10) <= e.throughDate;
+                r.percentComplete = Math.max(r.percentComplete, done ? 100 : 50);
+                if (done) r.actualFinish = r.finish;
+              }
+              break;
             case "SetBaseline":
               state.baselineSavedAt = "2026-10-09T10:00:00Z";
               for (const r of state.rows) {

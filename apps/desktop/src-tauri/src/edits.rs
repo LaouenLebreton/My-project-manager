@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pm_core::{
-    outline, parse_money, parse_resource_list, Money, Assignment, AssignmentId, Calendar, Command, Constraint, DayPattern, Dependency,
+    outline, parse_money, Actual, parse_resource_list, Money, Assignment, AssignmentId, Calendar, Command, Constraint, DayPattern, Dependency,
     DependencyId, Duration, LinkChange, LinkType, Moment, Percent, Project, ProjectChange, Resource, ResourceChange,
     ResourceId, ResourceKind, ResourceUnits, Schedule, SortKey, Task, TaskChange, TaskId, Units, WorkRange,
     MINUTES_PER_DAY,
@@ -50,6 +50,9 @@ pub enum Edit {
         fixed_cost: Option<String>,
         /// Manually scheduled (keeps its current start) or automatic.
         manual: Option<bool>,
+        /// Actual start and finish (`YYYY-MM-DD`; empty clears).
+        actual_start: Option<String>,
+        actual_finish: Option<String>,
     },
     /// Project Info: the day the project starts (`YYYY-MM-DD`).
     SetProjectStart { date: String },
@@ -87,6 +90,12 @@ pub enum Edit {
     SetBaseline,
     /// Project > Clear Baseline.
     ClearBaseline,
+    /// % Complete column or the Task menu's 0%…100% items, for every selected task.
+    SetPercentComplete { ids: Vec<String>, percent: u8 },
+    /// Project Info: the "as of" date for progress (`YYYY-MM-DD`; None clears).
+    SetStatusDate { date: Option<String> },
+    /// Project > Update Project: work is done as scheduled up to the end of this day.
+    UpdateProgress { through_date: String },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
@@ -202,6 +211,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
                     manual_start: None,
+                    actual: Actual::default(),
                     notes: String::new(),
                 }],
                 dependencies: vec![],
@@ -229,7 +239,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
         Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
-        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost, manual } => {
+        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost, manual, actual_start, actual_finish } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
             let set = |change| Command::SetTask { id, change };
@@ -276,10 +286,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     commands.push(set(TaskChange::Constraint(new)));
                 }
             }
-            if let Some(pc) = percent_complete.filter(|pc| *pc != t.percent_complete.get()) {
-                let pc = Percent::new(pc).ok_or_else(|| err("% complete must be between 0 and 100"))?;
-                commands.push(set(TaskChange::PercentComplete(pc)));
-            }
+            commands.extend(progress(p, schedule, id, percent_complete, actual_start.as_deref(), actual_finish.as_deref())?);
             if let Some(n) = notes.filter(|n| *n != t.notes) {
                 commands.push(set(TaskChange::Notes(n)));
             }
@@ -422,6 +429,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
                     manual_start: None,
+                    actual: Actual::default(),
                 }],
                 dependencies: vec![],
             };
@@ -455,6 +463,22 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             }
             plain(Command::SetProject { change: ProjectChange::Baseline(None) })
         }
+        Edit::SetPercentComplete { ids, percent } => {
+            let ids = parse_ids(&ids)?;
+            let mut commands = Vec::new();
+            for row in outline(p).iter().filter(|r| ids.contains(&r.id)) {
+                commands.extend(progress(p, schedule, row.id, Some(percent), None, None)?);
+            }
+            Ok(batch("Update Progress", commands).map(|command| Planned { command, created: None, message: None }))
+        }
+        Edit::SetStatusDate { date } => {
+            let date = date.filter(|d| !d.trim().is_empty()).map(|d| end_of_day(p, &d)).transpose()?;
+            if date == p.status_date {
+                return Ok(None);
+            }
+            plain(Command::SetProject { change: ProjectChange::StatusDate(date) })
+        }
+        Edit::UpdateProgress { through_date } => update_progress(p, schedule, &through_date),
         Edit::LevelResources => level_resources(p),
         Edit::ClearLeveling => {
             let set = |t: &Task| Command::SetTask { id: t.id, change: TaskChange::LevelingDelay(Duration::ZERO) };
@@ -651,6 +675,125 @@ fn level_resources(p: &Project) -> Result<Option<Planned>, IpcError> {
 }
 
 /// Midnight at the start of a `YYYY-MM-DD` date.
+/// The end of work on a day, as finish dates mean in Microsoft Project.
+fn end_of_day(p: &Project, date: &str) -> Result<Moment, IpcError> {
+    Ok(p.calendar.prev_working_end(Moment(day_start(date)?.0 + MINUTES_PER_DAY)))
+}
+
+/// Progress edits for one task, following Microsoft Project: typing % complete fills in the
+/// actual dates from the schedule, an actual finish makes the task 100% done, and clearing
+/// the actual start makes it not started.
+fn progress(
+    p: &Project,
+    schedule: Option<&Schedule>,
+    id: TaskId,
+    percent: Option<u8>,
+    actual_start: Option<&str>,
+    actual_finish: Option<&str>,
+) -> Result<Vec<Command>, IpcError> {
+    let t = task(p, id)?;
+    if percent.is_some_and(|pc| pc > 100) {
+        return Err(err("% complete must be between 0 and 100"));
+    }
+    let summary = is_summary(p, id);
+    if summary && (actual_start.is_some() || actual_finish.is_some()) {
+        return Err(err("a summary task's progress comes from the tasks inside it"));
+    }
+    let mut pc = percent.unwrap_or(t.percent_complete.get());
+    let mut actual = t.actual;
+    if !summary {
+        let (planned_start, planned_finish) = schedule.and_then(|s| s.tasks.get(&id)).map_or((p.start, p.start), |s| (s.early_start, s.early_finish));
+        if percent.is_some_and(|pc| pc != t.percent_complete.get()) {
+            let start = actual.start().unwrap_or(planned_start);
+            actual = match pc {
+                0 => Actual::NotStarted,
+                100 => Actual::Finished { start, finish: actual.finish().unwrap_or(planned_finish) },
+                _ => Actual::Started { start },
+            };
+        }
+        let typed = |d: &str, finish: bool| -> Result<Option<Moment>, IpcError> {
+            if d.trim().is_empty() {
+                Ok(None)
+            } else if finish {
+                end_of_day(p, d).map(Some)
+            } else {
+                day_start(d).map(|m| Some(p.calendar.next_working(m)))
+            }
+        };
+        if let Some(d) = actual_start {
+            actual = match (typed(d, false)?, actual) {
+                (None, _) => Actual::NotStarted,
+                (Some(start), Actual::Finished { finish, .. }) => Actual::Finished { start, finish },
+                (Some(start), _) => Actual::Started { start },
+            };
+            if actual == Actual::NotStarted {
+                pc = 0;
+            }
+        }
+        if let Some(d) = actual_finish {
+            actual = match (typed(d, true)?, actual) {
+                (None, Actual::Finished { start, .. }) => Actual::Started { start },
+                (None, a) => a,
+                (Some(finish), a) => Actual::Finished { start: a.start().unwrap_or(planned_start), finish },
+            };
+            pc = if actual.finish().is_some() { 100 } else { pc.min(99) };
+        }
+        if let Actual::Finished { start, finish } = actual
+            && finish < start
+        {
+            return Err(err("the actual finish is before the actual start"));
+        }
+    }
+    let mut commands = Vec::new();
+    if pc != t.percent_complete.get() {
+        commands.push(Command::SetTask { id, change: TaskChange::PercentComplete(Percent::new(pc).expect("checked")) });
+    }
+    if actual != t.actual {
+        commands.push(Command::SetTask { id, change: TaskChange::Actual(actual) });
+    }
+    Ok(commands)
+}
+
+/// Project > Update Project: every task scheduled to have started by the end of `through_date`
+/// gets its actual start, and its % complete as far as the schedule says (never less than
+/// already recorded). Tasks due to finish by then are marked 100% complete.
+fn update_progress(p: &Project, schedule: Option<&Schedule>, through_date: &str) -> Result<Option<Planned>, IpcError> {
+    let s = schedule.ok_or_else(|| err("progress cannot be updated while dates cannot be calculated"))?;
+    let through = end_of_day(p, through_date)?;
+    let mut commands = Vec::new();
+    let mut updated = 0;
+    for row in outline(p).iter().filter(|r| !r.has_children) {
+        let (t, ts) = (&p.tasks[&row.id], &s.tasks[&row.id]);
+        let due = if ts.early_finish <= through {
+            100
+        } else if ts.early_start < through {
+            let dur = p.calendar.working_between(ts.early_start, ts.early_finish).max(1);
+            (p.calendar.working_between(ts.early_start, through) * 100 / dur).clamp(1, 99) as u8
+        } else {
+            continue;
+        };
+        if due <= t.percent_complete.get() && t.actual.start().is_some() {
+            continue;
+        }
+        let before = commands.len();
+        commands.extend(progress(p, schedule, row.id, Some(due.max(t.percent_complete.get())), None, None)?);
+        if t.actual.start().is_none() && t.percent_complete.get() >= due {
+            // Already marked with % complete but no dates: just record the start.
+            commands.push(Command::SetTask { id: row.id, change: TaskChange::Actual(Actual::Started { start: ts.early_start }) });
+        }
+        updated += usize::from(commands.len() > before);
+    }
+    if p.status_date != Some(through) {
+        commands.push(Command::SetProject { change: ProjectChange::StatusDate(Some(through)) });
+    }
+    let message = match updated {
+        0 => "No task was due to have started by then; only the status date changed.".to_owned(),
+        1 => "1 task updated as scheduled.".to_owned(),
+        n => format!("{n} tasks updated as scheduled."),
+    };
+    Ok(batch("Update Project", commands).map(|command| Planned { command, created: None, message: Some(message) }))
+}
+
 fn day_start(date: &str) -> Result<Moment, IpcError> {
     let d: jiff::civil::Date = date.parse().map_err(|_| err(format!("{date:?} is not a date")))?;
     Ok(Moment::from_datetime(d.at(0, 0, 0, 0)))
@@ -842,6 +985,7 @@ mod tests {
             assignments: Default::default(),
             currency: String::new(),
             baseline: None,
+            status_date: None,
         };
         let mut ids = Vec::new();
         let mut stack: Vec<TaskId> = Vec::new();
@@ -865,6 +1009,7 @@ mod tests {
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
                     manual_start: None,
+                    actual: Actual::default(),
                     notes: String::new(),
                 },
             );
@@ -1026,6 +1171,8 @@ mod tests {
             resources: Some("Robin[50%]".into()),
             fixed_cost: Some("1.250,00".into()),
             manual: None,
+            actual_start: None,
+            actual_finish: None,
         };
         let planned = plan(&p, None, &Units::default(), edit).unwrap().unwrap();
         assert_eq!(planned.command.label(), "Change Task Info");
@@ -1038,7 +1185,7 @@ mod tests {
 
         assert_eq!(p.assignments.values().next().map(|a| a.units.0), Some(50), "resources set in the same step");
         assert_eq!(p.tasks[&id[0]].fixed_cost, Money(125_000));
-        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()), manual: None };
+        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()), manual: None, actual_start: None, actual_finish: None };
         assert!(plan(&p, None, &Units::default(), unchanged).unwrap().is_none(), "nothing to undo when nothing changed");
         let no_date = Edit::UpdateTask {
             id: id[0].0.to_string(),
@@ -1051,6 +1198,8 @@ mod tests {
             resources: None,
             fixed_cost: None,
             manual: None,
+            actual_start: None,
+            actual_finish: None,
         };
         assert_eq!(plan(&p, None, &Units::default(), no_date).err().unwrap().message, "choose a date for “Start no earlier than”");
     }
@@ -1134,7 +1283,7 @@ mod tests {
         let (mut p, id) = project(&[("A", 0)]);
         p.start = Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0));
         let a = id[0].0.to_string();
-        let manual = |on| Edit::UpdateTask { id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: None, fixed_cost: None, manual: Some(on) };
+        let manual = |on| Edit::UpdateTask { id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: None, fixed_cost: None, manual: Some(on), actual_start: None, actual_finish: None };
         run(&mut p, manual(true));
         assert_eq!(p.tasks[&id[0]].manual_start, Some(p.start));
         run(&mut p, Edit::MoveTask { id: a.clone(), start_date: "2026-10-08".into() });
@@ -1142,6 +1291,59 @@ mod tests {
         assert_eq!(p.tasks[&id[0]].constraint, Constraint::AsSoonAsPossible, "no constraint added");
         run(&mut p, manual(false));
         assert_eq!(p.tasks[&id[0]].manual_start, None);
+    }
+
+    #[test]
+    fn percent_complete_fills_in_actual_dates_like_project() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0)]);
+        p.start = Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0));
+        for t in p.tasks.values_mut() {
+            t.duration = Duration::minutes(4 * 480).unwrap();
+        }
+        let at = |d, h| Moment::from_datetime(jiff::civil::date(2026, 10, d).at(h, 0, 0, 0));
+        let a = id[0].0.to_string();
+        run(&mut p, Edit::SetPercentComplete { ids: vec![a.clone()], percent: 50 });
+        assert_eq!(p.tasks[&id[0]].actual, Actual::Started { start: at(5, 8) });
+        run(&mut p, Edit::SetPercentComplete { ids: vec![a.clone()], percent: 100 });
+        assert_eq!(p.tasks[&id[0]].actual, Actual::Finished { start: at(5, 8), finish: at(8, 17) });
+        run(&mut p, Edit::SetPercentComplete { ids: vec![a.clone()], percent: 0 });
+        assert_eq!(p.tasks[&id[0]].actual, Actual::NotStarted);
+
+        // Typed in Task Info: a finish makes it 100%; clearing the start makes it 0%.
+        let info = |start: Option<&str>, finish: Option<&str>| Edit::UpdateTask {
+            id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None,
+            resources: None, fixed_cost: None, manual: None, actual_start: start.map(Into::into), actual_finish: finish.map(Into::into),
+        };
+        run(&mut p, info(Some("2026-10-06"), Some("2026-10-07")));
+        assert_eq!(p.tasks[&id[0]].actual, Actual::Finished { start: at(6, 8), finish: at(7, 17) });
+        assert_eq!(p.tasks[&id[0]].percent_complete.get(), 100);
+        assert_eq!(pm_core::schedule(&p).unwrap().tasks[&id[0]].early_finish, at(7, 17), "the actual finish wins over the duration");
+        run(&mut p, info(Some(""), None));
+        assert_eq!((p.tasks[&id[0]].actual, p.tasks[&id[0]].percent_complete.get()), (Actual::NotStarted, 0));
+        let e = plan(&p, None, &Units::default(), info(Some("2026-10-07"), Some("2026-10-06"))).err().unwrap();
+        assert_eq!(e.message, "the actual finish is before the actual start");
+    }
+
+    #[test]
+    fn update_project_marks_work_done_as_scheduled() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0), ("C", 0)]);
+        p.start = Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0));
+        let at = |d, h| Moment::from_datetime(jiff::civil::date(2026, 10, d).at(h, 0, 0, 0));
+        let dur = [480, 4 * 480, 480];
+        for (k, i) in id.iter().enumerate() {
+            p.tasks.get_mut(i).unwrap().duration = Duration::minutes(dur[k]).unwrap();
+        }
+        // C waits until Thursday.
+        p.tasks.get_mut(&id[2]).unwrap().constraint = Constraint::StartNoEarlierThan(at(8, 8));
+        run(&mut p, Edit::UpdateProgress { through_date: "2026-10-06".into() });
+        assert_eq!(p.status_date, Some(at(6, 17)));
+        assert_eq!(p.tasks[&id[0]].actual, Actual::Finished { start: at(5, 8), finish: at(5, 17) });
+        assert_eq!(p.tasks[&id[0]].percent_complete.get(), 100);
+        assert_eq!(p.tasks[&id[1]].actual, Actual::Started { start: at(5, 8) });
+        assert_eq!(p.tasks[&id[1]].percent_complete.get(), 50, "2 of 4 days done");
+        assert_eq!(p.tasks[&id[2]].actual, Actual::NotStarted);
+        let s = pm_core::schedule(&p).unwrap();
+        assert!(!s.tasks[&id[0]].critical, "finished work is never critical");
     }
 
     #[test]

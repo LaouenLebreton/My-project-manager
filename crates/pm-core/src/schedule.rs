@@ -116,6 +116,13 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         if dur > 0 {
             es = snap(es);
         }
+        // Actuals are facts (R35): a started task starts when it did, a finished one ends when
+        // it did, whatever its links, constraints or leveling say.
+        if let Some(actual_start) = task.actual.start() {
+            let finish = task.actual.finish().unwrap_or_else(|| cal.add_working(actual_start, dur));
+            early[node] = (actual_start, finish.max(actual_start));
+            continue;
+        }
         // Manually scheduled (R34): the typed start wins; broken links are reported.
         if let Some(m) = task.manual_start {
             let target = if dur > 0 { snap(m) } else { m };
@@ -175,7 +182,9 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         .iter()
         .rev()
         .copied()
-        .filter(|&v| v < n && g.children[v].is_empty() && g.tasks[v].manual_start.is_none() && g.tasks[v].constraint == Constraint::AsLateAsPossible)
+        .filter(|&v| {
+            v < n && g.children[v].is_empty() && g.tasks[v].manual_start.is_none() && g.tasks[v].actual.start().is_none() && g.tasks[v].constraint == Constraint::AsLateAsPossible
+        })
         .collect();
     if !alap.is_empty() {
         for i in alap {
@@ -254,8 +263,8 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
             lf = cal.prev_working_end(lf);
         }
         let finish_on = |d: Moment| if dur > 0 { cal.prev_working_end(d) } else { d };
-        if g.tasks[i].manual_start.is_some() {
-            // A manual task's dates are fixed, like Must Start On.
+        if g.tasks[i].manual_start.is_some() || g.tasks[i].actual.start().is_some() {
+            // Manual tasks and tasks already under way have fixed dates, like Must Start On.
             lf = early[i].1;
         }
         match g.tasks[i].constraint {
@@ -272,13 +281,15 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
     for i in (0..n).filter(|&i| g.children[i].is_empty()) {
         let ((es, ef), (ls, lf)) = (early[i], late[i]);
         let total_slack = cal.working_between(ef, lf);
+        // Finished work cannot delay anything any more, so it is never critical.
+        let done = g.tasks[i].actual.finish().is_some();
         result[i] = Some(TaskSchedule {
             early_start: es,
             early_finish: ef,
             late_start: ls,
             late_finish: lf,
             total_slack,
-            critical: total_slack <= 0,
+            critical: total_slack <= 0 && !done,
         });
     }
 
@@ -510,6 +521,7 @@ mod tests {
                 assignments: Default::default(),
                 currency: String::new(),
                 baseline: None,
+                status_date: None,
             })
         }
 
@@ -528,6 +540,7 @@ mod tests {
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
                     manual_start: None,
+                    actual: Actual::default(),
                     notes: String::new(),
                 },
             );
@@ -794,6 +807,19 @@ mod tests {
         p.0.tasks.get_mut(&tid(2)).unwrap().manual_start = Some(at(12, 8, 0));
         let s = p.run();
         assert_eq!(dates(&s, 2).0, at(12, 8, 0));
+        assert!(s.conflicts.is_empty());
+    }
+
+    #[test]
+    fn r35_actuals_are_facts() {
+        // 1 (2d) -> 2 (2d). Task 2 really started early, on Tuesday, and task 1 finished late.
+        let mut p = P::new().task(1, 2 * DAY).task(2, 2 * DAY).fs(1, 2);
+        p.0.tasks.get_mut(&tid(1)).unwrap().actual = Actual::Finished { start: at(5, 8, 0), finish: at(7, 17, 0) };
+        p.0.tasks.get_mut(&tid(2)).unwrap().actual = Actual::Started { start: at(6, 8, 0) };
+        let s = p.run();
+        assert_eq!(dates(&s, 1), (at(5, 8, 0), at(7, 17, 0)));
+        assert_eq!(dates(&s, 2), (at(6, 8, 0), at(7, 17, 0)), "started is started, links or not");
+        assert!(!s.tasks[&tid(1)].critical, "finished work is never critical");
         assert!(s.conflicts.is_empty());
     }
 

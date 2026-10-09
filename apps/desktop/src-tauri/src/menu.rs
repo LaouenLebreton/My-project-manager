@@ -38,6 +38,15 @@ pub mod id {
     pub const CLEAR_LEVELING: &str = "project.clear_leveling";
     pub const SET_BASELINE: &str = "project.set_baseline";
     pub const CLEAR_BASELINE: &str = "project.clear_baseline";
+    pub const UPDATE_PROJECT: &str = "project.update";
+    /// `task.percent_0` … `task.percent_100`: Microsoft Project's 0%…100% Complete buttons.
+    pub const PERCENT: [(&str, &str); 5] = [
+        ("task.percent_0", "0% Complete"),
+        ("task.percent_25", "25% Complete"),
+        ("task.percent_50", "50% Complete"),
+        ("task.percent_75", "75% Complete"),
+        ("task.percent_100", "100% Complete"),
+    ];
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
 }
@@ -174,13 +183,19 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let task_info = item(app, id::TASK_INFO, "Task Info…", Some("CmdOrCtrl+I"))?;
     let indent = item(app, id::INDENT, "Indent", None)?;
     let outdent = item(app, id::OUTDENT, "Outdent", None)?;
-    let task = SubmenuBuilder::new(app, "Task").item(&task_info).separator().item(&indent).item(&outdent).build()?;
+    let percent = id::PERCENT.iter().map(|(i, label)| item(app, i, label, None)).collect::<Result<Vec<_>, _>>()?;
+    let mut task = SubmenuBuilder::new(app, "Task").item(&task_info).separator().item(&indent).item(&outdent).separator();
+    for p in &percent {
+        task = task.item(p);
+    }
+    let task = task.build()?;
     let project_info = item(app, id::PROJECT_INFO, "Project Info…", None)?;
     let working_time = item(app, id::WORKING_TIME, "Working Time…", None)?;
     let level = item(app, id::LEVEL, "Level Resources", None)?;
     let clear_leveling = item(app, id::CLEAR_LEVELING, "Clear Leveling", None)?;
     let set_baseline = item(app, id::SET_BASELINE, "Set Baseline", None)?;
     let clear_baseline = item(app, id::CLEAR_BASELINE, "Clear Baseline", None)?;
+    let update_project = item(app, id::UPDATE_PROJECT, "Update Project…", None)?;
     let project = SubmenuBuilder::new(app, "Project")
         .item(&project_info)
         .item(&working_time)
@@ -190,6 +205,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .separator()
         .item(&set_baseline)
         .item(&clear_baseline)
+        .item(&update_project)
         .build()?;
 
     let window = SubmenuBuilder::new(app, "Window")
@@ -220,6 +236,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, level, clear_leveling, set_baseline, clear_baseline];
+    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, level, clear_leveling, set_baseline, clear_baseline, update_project];
+    let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

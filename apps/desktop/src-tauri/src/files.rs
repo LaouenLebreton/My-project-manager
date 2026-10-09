@@ -45,6 +45,7 @@ pub fn empty_project(path: &Path) -> Project {
         assignments: Default::default(),
         currency: String::new(),
         baseline: None,
+        status_date: None,
     }
 }
 

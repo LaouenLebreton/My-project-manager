@@ -37,6 +37,7 @@ fn task(n: u128) -> Task {
         leveling_delay: Duration::ZERO,
         fixed_cost: Money(0),
         manual_start: None,
+        actual: Actual::default(),
         notes: String::new(),
     }
 }
@@ -53,6 +54,7 @@ fn rich_project() -> Project {
         name: "Office move".into(),
         currency: "€".into(),
         baseline: None,
+        status_date: Some(Moment(29_001_000)),
         start: Moment(29_000_000),
         calendar_id: CalendarId(Uuid::from_u128(8)),
         calendar,
@@ -78,6 +80,8 @@ fn rich_project() -> Project {
     let mut deadline = task(5);
     deadline.constraint = Constraint::FinishNoLaterThan(Moment(29_003_000));
     deadline.manual_start = Some(Moment(29_000_480));
+    late.actual = Actual::Started { start: Moment(29_002_100) };
+    child.actual = Actual::Finished { start: Moment(29_000_000), finish: Moment(29_000_900) };
     for t in [summary, child, milestone, late, deadline] {
         p.tasks.insert(t.id, t);
     }
@@ -161,7 +165,7 @@ fn version_1_files_are_upgraded() {
     drop(Store::create(&path, &p).unwrap());
     // Turn it back into a version 1 file, as an iteration 1 build would have written it.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; ALTER TABLE task DROP COLUMN actual_start_min; ALTER TABLE task DROP COLUMN actual_finish_min; ALTER TABLE project DROP COLUMN status_date_min; PRAGMA user_version = 1;").unwrap();
     drop(conn);
     let (mut s, mut loaded) = Store::open(&path).unwrap();
     // Version 1 had no leveling delays; they come back as zero.
@@ -170,8 +174,10 @@ fn version_1_files_are_upgraded() {
         t.leveling_delay = Duration::ZERO;
         t.fixed_cost = Money(0);
         t.manual_start = None;
+        t.actual = Actual::NotStarted;
     }
     expected.currency = String::new();
+    expected.status_date = None;
     assert_eq!(loaded, expected, "everything from version 1 is still there");
     let v: i64 = s.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     assert_eq!(v, CURRENT_VERSION);

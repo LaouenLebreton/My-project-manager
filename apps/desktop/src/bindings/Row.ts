@@ -46,4 +46,8 @@ baselineStart: string | null, baselineFinish: string | null, finishVarianceMinut
 /**
  * Total cost in cents (fixed cost plus resources; summaries add up their tasks).
  */
-costCents: number, fixedCostCents: number, };
+costCents: number, fixedCostCents: number, 
+/**
+ * Progress: when work really started and finished.
+ */
+actualStart: string | null, actualFinish: string | null, };

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::Calendar;
 use crate::schedule::ScheduleError;
 use crate::model::{
-    Baseline, Money, Assignment, AssignmentId, Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, Resource,
+    Actual, Baseline, Money, Assignment, AssignmentId, Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, Resource,
     ResourceId, ResourceKind, ResourceUnits, SortKey, Task, TaskId,
 };
 use crate::time::Moment;
@@ -56,6 +56,8 @@ pub enum TaskChange {
     FixedCost(Money),
     /// Manually scheduled from this start, or back to automatic (`None`).
     ManualStart(Option<Moment>),
+    /// Progress: not started, started, or finished, with the real dates.
+    Actual(Actual),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +89,8 @@ pub enum ProjectChange {
     Currency(String),
     /// Project > Set Baseline (Some) or Clear Baseline (None).
     Baseline(Option<Baseline>),
+    /// Project Info: the "as of" date for progress.
+    StatusDate(Option<Moment>),
 }
 
 /// Why a command was refused. Messages are written for the person using the app.
@@ -164,6 +168,7 @@ impl Command {
                 TaskChange::FixedCost(_) => "Change Fixed Cost",
                 TaskChange::ManualStart(Some(_)) => "Schedule Manually",
                 TaskChange::ManualStart(None) => "Schedule Automatically",
+                TaskChange::Actual(_) => "Update Progress",
             }
             .into(),
             Command::InsertLink { .. } => "Add Link".into(),
@@ -177,6 +182,7 @@ impl Command {
                 ProjectChange::Currency(_) => "Change Currency",
                 ProjectChange::Baseline(Some(_)) => "Set Baseline",
                 ProjectChange::Baseline(None) => "Clear Baseline",
+                ProjectChange::StatusDate(_) => "Change Status Date",
             }
             .into(),
             Command::InsertResources { resources, .. } if resources.len() == 1 => "Add Resource".into(),
@@ -278,6 +284,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
                 ProjectChange::Calendar(c) => ProjectChange::Calendar(std::mem::replace(&mut p.calendar, c.clone())),
                 ProjectChange::Currency(c) => ProjectChange::Currency(std::mem::replace(&mut p.currency, c.clone())),
                 ProjectChange::Baseline(b) => ProjectChange::Baseline(std::mem::replace(&mut p.baseline, b.clone())),
+                ProjectChange::StatusDate(d) => ProjectChange::StatusDate(std::mem::replace(&mut p.status_date, *d)),
             };
             Ok(Command::SetProject { change: old })
         }
@@ -546,6 +553,7 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
         TaskChange::LevelingDelay(v) => TaskChange::LevelingDelay(std::mem::replace(&mut t.leveling_delay, *v)),
         TaskChange::FixedCost(v) => TaskChange::FixedCost(std::mem::replace(&mut t.fixed_cost, *v)),
         TaskChange::ManualStart(v) => TaskChange::ManualStart(std::mem::replace(&mut t.manual_start, *v)),
+        TaskChange::Actual(v) => TaskChange::Actual(std::mem::replace(&mut t.actual, *v)),
         TaskChange::Position { parent, sort_key } => TaskChange::Position {
             parent: std::mem::replace(&mut t.parent, *parent),
             sort_key: std::mem::replace(&mut t.sort_key, sort_key.clone()),
@@ -590,6 +598,7 @@ mod tests {
             leveling_delay: Duration::ZERO,
             fixed_cost: Money(0),
             manual_start: None,
+            actual: Actual::default(),
             notes: String::new(),
         }
     }
@@ -611,6 +620,7 @@ mod tests {
             assignments: Default::default(),
             currency: String::new(),
             baseline: None,
+            status_date: None,
         }
     }
 

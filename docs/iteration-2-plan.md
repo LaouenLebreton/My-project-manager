@@ -58,7 +58,7 @@ resolve over-allocation) and **costs** (rates, fixed costs, task and project tot
 11. **[Done]** **Manually scheduled tasks:** dates the user types are kept; the engine does not move them,
     but warns when links are broken.
 12. **[Done]** **Baselines:** save the plan as a baseline; show baseline bars and variances.
-13. **Progress:** status date, actual start and finish, % complete driving remaining work.
+13. **Progress:** status date, actual start and finish, % complete driving remaining work. *Done:* R35, % Done column, Task menu 0–100%, Task Info actual dates, Project > Update Project…, status date line; MSPDI ActualStart/ActualFinish/StatusDate.
 14. **Earned value:** planned value, earned value, actual cost, variances and indices.
 15. **Views:** workload (resource usage over time), calendar, board.
 

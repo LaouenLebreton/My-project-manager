@@ -7,7 +7,7 @@ import { Gantt, type GanttHandle } from "./Gantt";
 import { FindBar } from "./FindBar";
 import { HelpSheet } from "./HelpSheet";
 import { ResourceSheet } from "./ResourceSheet";
-import { ProjectInfo, TaskInfo, WorkingTime } from "./Sheets";
+import { ProjectInfo, TaskInfo, UpdateProject, WorkingTime } from "./Sheets";
 import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { WbsChart } from "./WbsChart";
@@ -20,6 +20,9 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // For menu events, whose listener is registered once.
+  const selectedRef = useRef(selectedIds);
+  selectedRef.current = selectedIds;
   const [message, setMessage] = useState<string | null>(null);
   const [gridWidth, setGridWidth] = useState(720);
   const [timing, setTiming] = useState<string | null>(null);
@@ -27,7 +30,7 @@ export function App() {
 
   const [recent, setRecent] = useState<RecentFile[]>([]);
   const [report, setReport] = useState<ReportView | null>(null);
-  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | null>(null);
+  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
   const [view, setView] = useState<"tasks" | "resources" | "wbs">("tasks");
@@ -135,6 +138,10 @@ export function App() {
         if (e.payload === "project.level") void editRef.current({ kind: "LevelResources" }).catch((err) => setError(errorMessage(err)));
         if (e.payload === "project.clear_leveling") void editRef.current({ kind: "ClearLeveling" }).catch((err) => setError(errorMessage(err)));
         if (e.payload === "project.set_baseline") void editRef.current({ kind: "SetBaseline" }).catch((err) => setError(errorMessage(err)));
+        if (e.payload === "project.update") setOverlay("update");
+        const percent = /^task\.percent_(\d+)$/.exec(e.payload);
+        if (percent && selectedRef.current.size)
+          void editRef.current({ kind: "SetPercentComplete", ids: [...selectedRef.current], percent: Number(percent[1]) }).catch((err) => setError(errorMessage(err)));
         if (e.payload === "project.clear_baseline") void editRef.current({ kind: "ClearBaseline" }).catch((err) => setError(errorMessage(err)));
       }),
     ];
@@ -163,6 +170,11 @@ export function App() {
       { name: "Level Resources", run: () => void edit({ kind: "LevelResources" }).catch((e) => setError(errorMessage(e))) },
       { name: "Set Baseline", run: () => void edit({ kind: "SetBaseline" }).catch((e) => setError(errorMessage(e))) },
       { name: "Clear Baseline", run: () => void edit({ kind: "ClearBaseline" }).catch((e) => setError(errorMessage(e))) },
+      { name: "Update Project… (progress up to a day)", run: () => setOverlay("update") },
+      ...[0, 25, 50, 75, 100].map((n) => ({
+        name: `Mark Selected Tasks ${n}% Complete`,
+        run: () => void edit({ kind: "SetPercentComplete", ids: [...selectedIds], percent: n }).catch((e) => setError(errorMessage(e))),
+      })),
       { name: "Clear Leveling", run: () => void edit({ kind: "ClearLeveling" }).catch((e) => setError(errorMessage(e))) },
       { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },
@@ -181,6 +193,7 @@ export function App() {
       {overlay === "tour" && snapshot && <Tour onDone={() => setOverlay(null)} />}
       {overlay === "commands" && <CommandBar commands={commands} onClose={() => setOverlay(null)} />}
       {overlay === "project" && snapshot && <ProjectInfo snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {overlay === "update" && snapshot && <UpdateProject snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
       {overlay === "working" && snapshot && <WorkingTime snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
       {infoRow && <TaskInfo key={infoRow.id} row={infoRow} send={edit} onClose={() => setInfoRow(null)} />}
     </>

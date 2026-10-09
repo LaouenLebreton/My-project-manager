@@ -87,6 +87,9 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
     if !p.currency.is_empty() {
         leaf(&mut w, "CurrencySymbol", &p.currency);
     }
+    if let Some(d) = p.status_date {
+        leaf(&mut w, "StatusDate", &datetime(d));
+    }
 
     // Calendar: one base calendar.
     open(&mut w, "Calendars");
@@ -173,6 +176,12 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         leaf(&mut w, "Milestone", if t.is_milestone && !row.has_children { "1" } else { "0" });
         leaf(&mut w, "Summary", if row.has_children { "1" } else { "0" });
         leaf(&mut w, "PercentComplete", &t.percent_complete.get().to_string());
+        if let Some(start) = t.actual.start().filter(|_| !row.has_children) {
+            leaf(&mut w, "ActualStart", &datetime(start));
+        }
+        if let Some(finish) = t.actual.finish().filter(|_| !row.has_children) {
+            leaf(&mut w, "ActualFinish", &datetime(finish));
+        }
         let ctype = match t.constraint {
             Constraint::AsSoonAsPossible => "0",
             Constraint::AsLateAsPossible => "1",

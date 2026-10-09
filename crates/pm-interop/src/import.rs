@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use jiff::civil::{Date, DateTime};
-use pm_core::{Money, 
+use pm_core::{Actual, Money, 
     apply, Assignment, AssignmentId, Calendar, CalendarId, Command, Constraint, DayPattern, Dependency, DependencyId,
     Duration, LinkType, Moment, Percent, Project, ProjectId, Resource, ResourceId, ResourceKind, ResourceUnits, SortKey,
     Task, TaskId, WorkRange,
@@ -95,6 +95,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         assignments: Default::default(),
         currency: root.raw_of("CurrencySymbol").unwrap_or("").trim().to_owned(),
         baseline: None,
+        status_date: root.text_of("StatusDate").and_then(parse_datetime),
     };
 
     // Tasks, in file order (ID). The outline comes from OutlineLevel.
@@ -150,6 +151,11 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
             r.approximated("Inactive tasks were imported as active tasks", Some(&label));
         }
         report_task_extras(t, &label, &mut r);
+        let actual = match (t.text_of("ActualStart").and_then(parse_datetime), t.text_of("ActualFinish").and_then(parse_datetime)) {
+            (Some(start), Some(finish)) => Actual::Finished { start, finish: finish.max(start) },
+            (Some(start), None) => Actual::Started { start },
+            _ => Actual::NotStarted,
+        };
 
         project.tasks.insert(
             id,
@@ -165,6 +171,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(money(t.text_of("FixedCost"))),
                 manual_start,
+                actual,
                 notes: t.raw_of("Notes").unwrap_or("").to_owned(),
             },
         );
@@ -195,6 +202,17 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
     r.imported("Baseline dates, work and cost (Baseline 0)", baseline.len());
     if !baseline.is_empty() {
         project.baseline = Some(pm_core::Baseline { saved_at: "imported".into(), tasks: baseline });
+    }
+    // A summary's progress comes from its tasks, so only work tasks keep actual dates.
+    let parents_of: std::collections::BTreeSet<TaskId> = project.tasks.values().filter_map(|t| t.parent).collect();
+    for id in &parents_of {
+        if let Some(t) = project.tasks.get_mut(id) {
+            t.actual = Actual::NotStarted;
+        }
+    }
+    let started = project.tasks.values().filter(|t| t.actual.start().is_some()).count();
+    if started > 0 {
+        r.imported("Actual start and finish dates", started);
     }
 
     // Links, through the same checks as links typed in the app.
@@ -269,8 +287,6 @@ fn import_constraint(t: &Element, label: &str, r: &mut ReportBuilder) -> Constra
 /// Task data Super PM does not hold yet, named in plain words.
 fn report_task_extras(t: &Element, label: &str, r: &mut ReportBuilder) {
     let named: &[(&str, &str)] = &[
-        ("ActualStart", "Actual start and finish dates (progress tracking arrives in iteration 2)"),
-        ("ActualDuration", "Actual durations (progress tracking arrives in iteration 2)"),
         ("Deadline", "Deadlines"),
         ("ExtendedAttribute", "Custom fields"),
         ("Hyperlink", "Hyperlinks"),
@@ -396,9 +412,6 @@ fn report_project_options(root: &Element, r: &mut ReportBuilder) {
         if !HANDLED.contains(&c.name.as_str()) && c.has_content() {
             r.ignored("Project options Super PM does not use", Some(&c.name));
         }
-    }
-    if root.text_of("StatusDate").is_some() {
-        r.ignored("Status date (progress tracking arrives in iteration 2)", None);
     }
     if root.child("ExtendedAttributes").is_some_and(Element::has_content) {
         r.ignored("Custom field definitions", None);

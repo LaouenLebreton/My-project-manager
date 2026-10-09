@@ -16,7 +16,11 @@ fixedCost: string | null,
 /**
  * Manually scheduled (keeps its current start) or automatic.
  */
-manual: boolean | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
+manual: boolean | null, 
+/**
+ * Actual start and finish (`YYYY-MM-DD`; empty clears).
+ */
+actualStart: string | null, actualFinish: string | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
 /**
  * Typed maximum: `100%`, `300%` or `3` (people).
  */
@@ -24,4 +28,4 @@ maxUnits: string | null, materialLabel: string | null,
 /**
  * Typed cost per hour (work) or per unit (material).
  */
-rate: string | null, } | { "kind": "DeleteResources", ids: Array<string>, } | { "kind": "SetCurrency", symbol: string, } | { "kind": "AddSubtask", parentId: string, name: string, } | { "kind": "MoveUnder", id: string, parentId: string | null, } | { "kind": "LevelResources" } | { "kind": "ClearLeveling" } | { "kind": "SetBaseline" } | { "kind": "ClearBaseline" };
+rate: string | null, } | { "kind": "DeleteResources", ids: Array<string>, } | { "kind": "SetCurrency", symbol: string, } | { "kind": "AddSubtask", parentId: string, name: string, } | { "kind": "MoveUnder", id: string, parentId: string | null, } | { "kind": "LevelResources" } | { "kind": "ClearLeveling" } | { "kind": "SetBaseline" } | { "kind": "ClearBaseline" } | { "kind": "SetPercentComplete", ids: Array<string>, percent: number, } | { "kind": "SetStatusDate", date: string | null, } | { "kind": "UpdateProgress", throughDate: string, };

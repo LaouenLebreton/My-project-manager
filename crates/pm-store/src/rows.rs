@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use pm_core::{Baseline, BaselineTask, Money, 
+use pm_core::{Actual, Baseline, BaselineTask, Money, 
     Assignment, AssignmentId, Calendar, CalendarId, Constraint, Dependency, DependencyId, Duration, LinkType, Moment,
     Percent, Project, ProjectId, Resource, ResourceId, ResourceKind, ResourceUnits, SortKey, Task, TaskId,
 };
@@ -36,9 +36,9 @@ fn link_type(s: &str) -> Result<LinkType, StoreError> {
 
 pub fn write_project(conn: &Connection, p: &Project) -> Result<(), StoreError> {
     conn.execute(
-        "INSERT INTO project (singleton, id, name, start_min, calendar_id, currency) VALUES (1, ?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT (singleton) DO UPDATE SET id = ?1, name = ?2, start_min = ?3, calendar_id = ?4, currency = ?5",
-        params![p.id.0.to_string(), p.name, p.start.0, p.calendar_id.0.to_string(), p.currency],
+        "INSERT INTO project (singleton, id, name, start_min, calendar_id, currency, status_date_min) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (singleton) DO UPDATE SET id = ?1, name = ?2, start_min = ?3, calendar_id = ?4, currency = ?5, status_date_min = ?6",
+        params![p.id.0.to_string(), p.name, p.start.0, p.calendar_id.0.to_string(), p.currency, p.status_date.map(|m| m.0)],
     )?;
     conn.execute(
         "INSERT INTO calendar (id, name, data) VALUES (?1, 'Project calendar', ?2)
@@ -92,8 +92,8 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
     let cdate = t.constraint.date().map(|m| m.0);
     conn.execute(
         "INSERT OR REPLACE INTO task
-         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             t.id.0.to_string(),
             t.parent.map(|p| p.0.to_string()),
@@ -108,6 +108,8 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
             t.leveling_delay.get(),
             t.fixed_cost.0,
             t.manual_start.map(|m| m.0),
+            t.actual.start().map(|m| m.0),
+            t.actual.finish().map(|m| m.0),
         ],
     )?;
     Ok(())
@@ -187,14 +189,20 @@ fn task_from_row(r: &Row) -> Result<Task, StoreError> {
         leveling_delay: Duration::minutes(r.get(10)?).map_err(|e| StoreError::Damaged(e.to_string()))?,
         fixed_cost: Money(r.get(11)?),
         manual_start: r.get::<_, Option<i64>>(12)?.map(Moment),
+        actual: match (r.get::<_, Option<i64>>(13)?, r.get::<_, Option<i64>>(14)?) {
+            (None, None) => Actual::NotStarted,
+            (Some(s), None) => Actual::Started { start: Moment(s) },
+            (Some(s), Some(f)) => Actual::Finished { start: Moment(s), finish: Moment(f) },
+            (None, Some(_)) => return Err(StoreError::Damaged("an actual finish without a start".into())),
+        },
         notes: r.get(9)?,
     })
 }
 
 pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
-    let (id, name, start, calendar_id, currency): (String, String, i64, String, String) = conn
-        .query_row("SELECT id, name, start_min, calendar_id, currency FROM project WHERE singleton = 1", [], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+    let (id, name, start, calendar_id, currency, status_date): (String, String, i64, String, String, Option<i64>) = conn
+        .query_row("SELECT id, name, start_min, calendar_id, currency, status_date_min FROM project WHERE singleton = 1", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
         })
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => StoreError::Damaged("the project record is missing".into()),
@@ -204,7 +212,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
 
     let mut tasks = BTreeMap::new();
     let mut stmt = conn.prepare(
-        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min FROM task",
+        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min FROM task",
     )?;
     let mut q = stmt.query([])?;
     while let Some(r) = q.next()? {
@@ -274,5 +282,6 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
         assignments,
         currency,
         baseline: read_baseline(conn)?,
+        status_date: status_date.map(Moment),
     })
 }

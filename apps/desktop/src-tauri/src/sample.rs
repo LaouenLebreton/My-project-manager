@@ -30,6 +30,7 @@ pub fn office_move(start: Moment) -> Project {
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
                 manual_start: None,
+                actual: Actual::default(),
                 notes: String::new(),
             },
         );
@@ -81,6 +82,7 @@ pub fn office_move(start: Moment) -> Project {
         assignments: Default::default(),
         currency: String::new(),
         baseline: None,
+        status_date: None,
     }
 }
 
@@ -129,6 +131,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
                 manual_start: None,
+                actual: Actual::default(),
                 notes: String::new(),
             },
         );
@@ -166,6 +169,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
         assignments: Default::default(),
         currency: String::new(),
         baseline: None,
+        status_date: None,
     }
 }
 
