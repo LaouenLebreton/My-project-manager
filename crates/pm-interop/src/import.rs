@@ -224,28 +224,22 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
 
 fn import_constraint(t: &Element, label: &str, r: &mut ReportBuilder) -> Constraint {
     let date = t.text_of("ConstraintDate").and_then(parse_datetime);
-    match (t.int_of("ConstraintType").unwrap_or(0), date) {
-        (0, _) => Constraint::AsSoonAsPossible,
-        (2, Some(d)) => Constraint::MustStartOn(d),
-        (4, Some(d)) => Constraint::StartNoEarlierThan(d),
-        (1, _) => {
-            r.approximated("“As late as possible” is not supported yet; these tasks are scheduled as soon as possible", Some(label));
-            Constraint::AsSoonAsPossible
-        }
-        (kind, _) => {
-            let name = match kind {
-                2 => "Must start on (without a date)",
-                3 => "Must finish on",
-                4 => "Start no earlier than (without a date)",
-                5 => "Start no later than",
-                6 => "Finish no earlier than",
-                7 => "Finish no later than",
-                _ => "Unknown",
-            };
-            r.approximated(&format!("“{name}” constraints are not supported yet; these tasks are scheduled as soon as possible"), Some(label));
-            Constraint::AsSoonAsPossible
-        }
-    }
+    let kind = t.int_of("ConstraintType").unwrap_or(0);
+    let constraint = match (kind, date) {
+        (0, _) => Some(Constraint::AsSoonAsPossible),
+        (1, _) => Some(Constraint::AsLateAsPossible),
+        (2, Some(d)) => Some(Constraint::MustStartOn(d)),
+        (3, Some(d)) => Some(Constraint::MustFinishOn(d)),
+        (4, Some(d)) => Some(Constraint::StartNoEarlierThan(d)),
+        (5, Some(d)) => Some(Constraint::StartNoLaterThan(d)),
+        (6, Some(d)) => Some(Constraint::FinishNoEarlierThan(d)),
+        (7, Some(d)) => Some(Constraint::FinishNoLaterThan(d)),
+        _ => None,
+    };
+    constraint.unwrap_or_else(|| {
+        r.approximated("Constraints without a date (or of an unknown type) became “as soon as possible”", Some(label));
+        Constraint::AsSoonAsPossible
+    })
 }
 
 /// Task data Super PM does not hold yet, named in plain words.

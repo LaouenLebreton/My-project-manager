@@ -4,6 +4,7 @@ import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
 import { formatDate, formatDateTime, formatDays, formatMoney } from "./format";
 import { GLOSSARY, type Term } from "./help";
+import { CONSTRAINTS } from "./Sheets";
 
 import { HEADER_HEIGHT, ROW_HEIGHT } from "./Gantt";
 
@@ -473,8 +474,7 @@ function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDa
   if (ci === 1) {
     // A marker and a label, not colour alone (spec 5.1.9). A constraint gets its own marker,
     // so a date the user fixed is never hidden.
-    const constraint =
-      r.constraint.kind === "ASAP" ? null : `${r.constraint.kind === "MSO" ? "Must start on" : "Starts no earlier than"} ${formatDate(r.constraint.date)}`;
+    const constraint = r.constraint.kind === "ASAP" ? null : `${CONSTRAINTS[r.constraint.kind].label}${r.constraint.date ? ` ${formatDate(r.constraint.date)}` : ""}`;
     return (
       <>
         {r.critical && (

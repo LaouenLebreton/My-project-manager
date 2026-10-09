@@ -97,10 +97,20 @@ pub enum ResourceKindEdit {
 pub enum ConstraintKind {
     /// As soon as possible.
     ASAP,
+    /// As late as possible.
+    ALAP,
     /// Start no earlier than.
     SNET,
+    /// Start no later than.
+    SNLT,
+    /// Finish no earlier than.
+    FNET,
+    /// Finish no later than.
+    FNLT,
     /// Must start on.
     MSO,
+    /// Must finish on.
+    MFO,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -240,10 +250,20 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     let d = c.date.as_deref().ok_or_else(|| err(format!("choose a date for “{what}”")))?;
                     Ok(p.calendar.next_working(day_start(d)?))
                 };
+                // Finish dates mean the end of work on that day.
+                let finish = |what: &str| -> Result<Moment, IpcError> {
+                    let d = c.date.as_deref().ok_or_else(|| err(format!("choose a date for “{what}”")))?;
+                    Ok(p.calendar.prev_working_end(Moment(day_start(d)?.0 + MINUTES_PER_DAY)))
+                };
                 let new = match c.kind {
                     ConstraintKind::ASAP => Constraint::AsSoonAsPossible,
+                    ConstraintKind::ALAP => Constraint::AsLateAsPossible,
                     ConstraintKind::SNET => Constraint::StartNoEarlierThan(date("Start no earlier than")?),
+                    ConstraintKind::SNLT => Constraint::StartNoLaterThan(date("Start no later than")?),
+                    ConstraintKind::FNET => Constraint::FinishNoEarlierThan(finish("Finish no earlier than")?),
+                    ConstraintKind::FNLT => Constraint::FinishNoLaterThan(finish("Finish no later than")?),
                     ConstraintKind::MSO => Constraint::MustStartOn(date("Must start on")?),
+                    ConstraintKind::MFO => Constraint::MustFinishOn(finish("Must finish on")?),
                 };
                 if new != t.constraint {
                     commands.push(set(TaskChange::Constraint(new)));
@@ -414,6 +434,9 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             task(p, id)?;
             if is_summary(p, id) {
                 return Err(err("a summary task moves with the tasks inside it"));
+            }
+            if p.tasks[&id].constraint.is_fixed() {
+                return Err(err("this task has a fixed date (Task Info > Start); change it there to move the task"));
             }
             let start = p.calendar.next_working(day_start(&start_date)?);
             let change = TaskChange::Constraint(Constraint::StartNoEarlierThan(start));

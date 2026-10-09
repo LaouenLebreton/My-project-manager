@@ -115,7 +115,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         }
         // Leveling waits after everything else that drives the start (R30).
         let delay = task.leveling_delay.get();
-        if delay > 0 && !matches!(task.constraint, Constraint::MustStartOn(_)) {
+        if delay > 0 && !task.constraint.is_fixed() {
             es = cal.add_working(es.max(match task.constraint {
                 Constraint::StartNoEarlierThan(d) => snap(d),
                 _ => es,
@@ -124,21 +124,73 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
                 es = snap(es);
             }
         }
+        // Constraints (R15 to R18, R32). Limits that the links would break are honoured anyway
+        // and reported as conflicts, so the problem is visible (negative slack), never hidden.
+        let finish_on = |d: Moment| if dur > 0 { cal.prev_working_end(d) } else { d };
+        let start_for_finish = |f: Moment| cal.add_working(f, -dur);
+        let mut honour = |target: Moment, es: &mut Moment| {
+            if *es > target {
+                conflicts.push(ConstraintConflict { task: task.id, constraint_start: target, link_driven_start: *es });
+            }
+            *es = target;
+        };
         match task.constraint {
-            Constraint::AsSoonAsPossible => {}
+            Constraint::AsSoonAsPossible | Constraint::AsLateAsPossible => {}
             Constraint::StartNoEarlierThan(d) => es = es.max(snap(d)),
-            Constraint::MustStartOn(d) => {
-                let target = snap(d);
-                if es > target {
-                    conflicts.push(ConstraintConflict { task: task.id, constraint_start: target, link_driven_start: es });
+            Constraint::FinishNoEarlierThan(d) => es = es.max(start_for_finish(finish_on(d))),
+            Constraint::MustStartOn(d) => honour(snap(d), &mut es),
+            Constraint::MustFinishOn(d) => honour(start_for_finish(finish_on(d)), &mut es),
+            Constraint::StartNoLaterThan(d) => {
+                if es > snap(d) {
+                    honour(snap(d), &mut es);
                 }
-                es = target;
+            }
+            Constraint::FinishNoLaterThan(d) => {
+                let latest = start_for_finish(finish_on(d));
+                if es > latest {
+                    honour(latest, &mut es);
+                }
             }
         }
         early[node] = (es, cal.add_working(es, dur));
     }
 
     let project_finish = (0..n).filter(|&i| g.children[i].is_empty()).map(|i| early[i].1).max().unwrap_or(start);
+
+    // As late as possible (R33): latest tasks first, each moves as late as it can without
+    // moving anything after it (at their early dates) or the project's finish.
+    let alap: Vec<usize> = order.iter().rev().copied().filter(|&v| v < n && g.children[v].is_empty() && g.tasks[v].constraint == Constraint::AsLateAsPossible).collect();
+    if !alap.is_empty() {
+        for i in alap {
+            let dur = g.duration(i);
+            let mut finish = project_finish;
+            for &(to, link) in &g.succs[i] {
+                // A successor summary starts when its first task does.
+                let (ses, sef) = if g.children[to].is_empty() { early[to] } else { early[n + to] };
+                finish = finish.min(match link.kind {
+                    LinkType::FinishToStart => cal.add_working(ses, -link.lag),
+                    LinkType::FinishToFinish => cal.add_working(sef, -link.lag),
+                    LinkType::StartToStart => cal.add_working(cal.add_working(ses, -link.lag), dur),
+                    LinkType::StartToFinish => cal.add_working(cal.add_working(sef, -link.lag), dur),
+                });
+            }
+            if dur > 0 {
+                finish = cal.prev_working_end(finish);
+            }
+            let es = cal.add_working(finish, -dur);
+            if es > early[i].0 {
+                early[i] = (es, finish);
+            }
+        }
+        // Roll the summaries up again around the moved tasks.
+        for &node in &order {
+            if node >= n {
+                let i = node - n;
+                let kids = g.children[i].iter().map(|&c| early[g.exit(c)]);
+                early[node] = kids.fold((NEVER, Moment(i64::MIN)), |(es, ef), (ces, cef)| (es.min(ces), ef.max(cef)));
+            }
+        }
+    }
 
     // Backward pass (R19 to R21, R25), the mirror image. Per node: a leaf's (LS, LF); a
     // summary exit's ceilings (latest start for the tasks that start it, latest finish for
@@ -184,8 +236,13 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         if dur > 0 {
             lf = cal.prev_working_end(lf);
         }
-        if let Constraint::MustStartOn(d) = g.tasks[i].constraint {
-            lf = cal.add_working(snap(d), dur);
+        let finish_on = |d: Moment| if dur > 0 { cal.prev_working_end(d) } else { d };
+        match g.tasks[i].constraint {
+            Constraint::MustStartOn(d) => lf = cal.add_working(snap(d), dur),
+            Constraint::MustFinishOn(d) => lf = finish_on(d),
+            Constraint::StartNoLaterThan(d) => lf = lf.min(cal.add_working(snap(d), dur)),
+            Constraint::FinishNoLaterThan(d) => lf = lf.min(finish_on(d)),
+            _ => {}
         }
         late[node] = (cal.add_working(lf, -dur), lf);
     }
@@ -639,6 +696,64 @@ mod tests {
         // Must start on is never moved by leveling.
         p.0.tasks.get_mut(&tid(2)).unwrap().constraint = Constraint::MustStartOn(at(5, 8, 0));
         assert_eq!(dates(&p.run(), 2).0, at(5, 8, 0));
+    }
+
+    #[test]
+    fn r32_finish_no_earlier_than_holds_the_task_back() {
+        let s = P::new().task(1, DAY).constraint(1, Constraint::FinishNoEarlierThan(at(7, 17, 0))).run();
+        assert_eq!(dates(&s, 1), (at(7, 8, 0), at(7, 17, 0)));
+    }
+
+    #[test]
+    fn r32_must_finish_on_fixes_the_finish_and_reports_a_clash() {
+        let s = P::new().task(1, 2 * DAY).constraint(1, Constraint::MustFinishOn(at(9, 17, 0))).run();
+        assert_eq!(dates(&s, 1), (at(8, 8, 0), at(9, 17, 0)));
+        // Its predecessor takes three days, so the fixed finish is too early.
+        let s = P::new().task(1, 3 * DAY).task(2, DAY).fs(1, 2).constraint(2, Constraint::MustFinishOn(at(6, 17, 0))).run();
+        assert_eq!(dates(&s, 2), (at(6, 8, 0), at(6, 17, 0)));
+        assert_eq!(s.conflicts.len(), 1);
+        assert!(s.tasks[&tid(1)].total_slack < 0);
+    }
+
+    #[test]
+    fn r32_no_later_than_limits_are_honoured_and_reported() {
+        // Links want task 2 to start on Thursday; it must start by Tuesday.
+        let s = P::new().task(1, 3 * DAY).task(2, DAY).fs(1, 2).constraint(2, Constraint::StartNoLaterThan(at(6, 8, 0))).run();
+        assert_eq!(dates(&s, 2).0, at(6, 8, 0));
+        assert_eq!(s.conflicts.len(), 1);
+        // Without a clash, the limit only takes away slack: 2 runs Monday, may start up to Wednesday.
+        let s = P::new().task(1, 5 * DAY).task(2, DAY).constraint(2, Constraint::StartNoLaterThan(at(7, 8, 0))).run();
+        assert_eq!(dates(&s, 2).0, at(5, 8, 0));
+        assert!(s.conflicts.is_empty());
+        assert_eq!(s.tasks[&tid(2)].total_slack, 2 * DAY);
+        let s = P::new().task(1, 5 * DAY).task(2, DAY).constraint(2, Constraint::FinishNoLaterThan(at(6, 17, 0))).run();
+        assert_eq!(s.tasks[&tid(2)].total_slack, DAY);
+    }
+
+    #[test]
+    fn r33_as_late_as_possible_moves_up_to_its_successor() {
+        // 1 (1d) -> 3; 2 (3d) -> 3. ALAP task 1 runs the day before 3 instead of Monday.
+        let s = P::new().task(1, DAY).task(2, 3 * DAY).task(3, DAY).fs(1, 3).fs(2, 3).constraint(1, Constraint::AsLateAsPossible).run();
+        assert_eq!(dates(&s, 1), (at(7, 8, 0), at(7, 17, 0)));
+        assert_eq!(dates(&s, 3), (at(8, 8, 0), at(8, 17, 0)), "the successor does not move");
+        assert_eq!(s.tasks[&tid(1)].total_slack, 0);
+        // Unlinked, it ends with the project.
+        let s = P::new().task(1, DAY).task(2, 4 * DAY).constraint(1, Constraint::AsLateAsPossible).run();
+        assert_eq!(dates(&s, 1), (at(8, 8, 0), at(8, 17, 0)));
+    }
+
+    #[test]
+    fn r33_chained_as_late_as_possible_tasks() {
+        let s = P::new()
+            .task(1, DAY)
+            .task(2, DAY)
+            .task(9, 5 * DAY)
+            .fs(1, 2)
+            .constraint(1, Constraint::AsLateAsPossible)
+            .constraint(2, Constraint::AsLateAsPossible)
+            .run();
+        assert_eq!(dates(&s, 2), (at(9, 8, 0), at(9, 17, 0)));
+        assert_eq!(dates(&s, 1), (at(8, 8, 0), at(8, 17, 0)));
     }
 
     #[test]

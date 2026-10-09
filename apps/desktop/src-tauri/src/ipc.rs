@@ -234,13 +234,19 @@ fn ranges(pattern: &pm_core::DayPattern) -> Vec<crate::edits::TimeRange> {
 }
 
 fn constraint_view(c: pm_core::Constraint) -> crate::edits::ConstraintEdit {
-    use crate::edits::{ConstraintEdit, ConstraintKind};
-    let date = |m: Moment| Some(m.to_datetime().date().to_string());
-    match c {
-        pm_core::Constraint::AsSoonAsPossible => ConstraintEdit { kind: ConstraintKind::ASAP, date: None },
-        pm_core::Constraint::StartNoEarlierThan(m) => ConstraintEdit { kind: ConstraintKind::SNET, date: date(m) },
-        pm_core::Constraint::MustStartOn(m) => ConstraintEdit { kind: ConstraintKind::MSO, date: date(m) },
-    }
+    use crate::edits::{ConstraintEdit, ConstraintKind as K};
+    use pm_core::Constraint as C;
+    let kind = match c {
+        C::AsSoonAsPossible => K::ASAP,
+        C::AsLateAsPossible => K::ALAP,
+        C::StartNoEarlierThan(_) => K::SNET,
+        C::StartNoLaterThan(_) => K::SNLT,
+        C::FinishNoEarlierThan(_) => K::FNET,
+        C::FinishNoLaterThan(_) => K::FNLT,
+        C::MustStartOn(_) => K::MSO,
+        C::MustFinishOn(_) => K::MFO,
+    };
+    ConstraintEdit { kind, date: c.date().map(|m| m.to_datetime().date().to_string()) }
 }
 
 /// "32h", "1.5h": work is shown in hours, as Microsoft Project does.

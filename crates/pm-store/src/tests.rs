@@ -68,11 +68,14 @@ fn rich_project() -> Project {
     child.notes = "Ask facilities\nabout keys".into();
     let mut milestone = task(3);
     milestone.is_milestone = true;
+    milestone.constraint = Constraint::AsLateAsPossible;
     let mut late = task(4);
     late.constraint = Constraint::StartNoEarlierThan(Moment(29_002_000));
     late.leveling_delay = Duration::minutes(240).unwrap();
     late.fixed_cost = Money(150_000);
-    for t in [summary, child, milestone, late] {
+    let mut deadline = task(5);
+    deadline.constraint = Constraint::FinishNoLaterThan(Moment(29_003_000));
+    for t in [summary, child, milestone, late, deadline] {
         p.tasks.insert(t.id, t);
     }
     let d = Dependency { id: DependencyId(Uuid::from_u128(50)), predecessor: tid(2), successor: tid(3), kind: LinkType::StartToFinish, lag: -240 };

@@ -108,7 +108,8 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     assert!(task("Go live 🚀").is_milestone);
     assert!(matches!(task("Go live 🚀").constraint, Constraint::MustStartOn(_)));
     assert!(matches!(task("Templates").constraint, Constraint::StartNoEarlierThan(_)));
-    assert_eq!(task("Content migration").constraint, Constraint::AsSoonAsPossible);
+    assert!(matches!(task("Content migration").constraint, Constraint::MustFinishOn(_)));
+    assert_eq!(task("Visual design").constraint, Constraint::AsLateAsPossible);
 
     // Calendar: Friday afternoons off, Christmas off (three days), one working Saturday.
     assert_eq!(p.calendar.week()[4].working_minutes(), 240);
@@ -144,8 +145,6 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     let reported = lines(&report).join("\n");
     for expected in [
         "Elapsed durations",
-        "“As late as possible” is not supported yet",
-        "“Must finish on” constraints are not supported yet",
         "Manually scheduled tasks",
         "Milestones with a duration",
         "Lags given as a percentage",
@@ -202,7 +201,7 @@ fn export_escapes_text() {
 
 fn random_project() -> impl Strategy<Value = Project> {
     let names = prop::sample::select(vec!["Plan", "R&D <1>", "“Quotes” & 'apostrophes'", "Ünïcødé 🚀", "Tab\there", "  spaced  ", ""]);
-    let task = (names, 0usize..3, 0i64..5000, prop::bool::weighted(0.15), 0u8..=100, 0usize..3);
+    let task = (names, 0usize..3, 0i64..5000, prop::bool::weighted(0.15), 0u8..=100, 0usize..8);
     let tasks = prop::collection::vec(task, 1..30);
     let links = prop::collection::vec((0usize..30, 0usize..30, 0usize..4, -2000i64..2000), 0..40);
     let holidays = prop::collection::vec((0i64..120, prop::bool::ANY), 0..6);
@@ -245,7 +244,16 @@ fn random_project() -> impl Strategy<Value = Project> {
                 name: name.to_owned(),
                 duration: Duration::minutes(if milestone { 0 } else { minutes }).unwrap(),
                 is_milestone: milestone,
-                constraint: [Constraint::AsSoonAsPossible, Constraint::StartNoEarlierThan(date), Constraint::MustStartOn(date)][constraint],
+                constraint: [
+                    Constraint::AsSoonAsPossible,
+                    Constraint::StartNoEarlierThan(date),
+                    Constraint::MustStartOn(date),
+                    Constraint::AsLateAsPossible,
+                    Constraint::StartNoLaterThan(date),
+                    Constraint::FinishNoEarlierThan(date),
+                    Constraint::FinishNoLaterThan(date),
+                    Constraint::MustFinishOn(date),
+                ][constraint],
                 percent_complete: Percent::new(percent).unwrap(),
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),

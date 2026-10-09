@@ -49,3 +49,18 @@ resolve over-allocation) and **costs** (rates, fixed costs, task and project tot
    cost per task; task, summary and project totals.
 9. **Work breakdown structure diagram.** A WBS view: the outline drawn as a tree of boxes
    (project at the top, phases below, tasks under them), with WBS codes (1, 1.2, 1.2.3).
+
+## Part 2 (owner, 2026-10-09: "everything must be built"; .mpp reading at the very end)
+
+10. **[Done]** **All Microsoft Project constraint types:** as late as possible, start no later than,
+    finish no earlier than, finish no later than, must finish on (in addition to as soon as
+    possible, start no earlier than, must start on). Conflicts are reported, never hidden.
+11. **Manually scheduled tasks:** dates the user types are kept; the engine does not move them,
+    but warns when links are broken.
+12. **Baselines:** save the plan as a baseline; show baseline bars and variances.
+13. **Progress:** status date, actual start and finish, % complete driving remaining work.
+14. **Earned value:** planned value, earned value, actual cost, variances and indices.
+15. **Views:** workload (resource usage over time), calendar, board.
+
+Later iterations: team server, sync and chat (3); automation, portfolio, and `.mpp` reading (4,
+last, as the owner asked).

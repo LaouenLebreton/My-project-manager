@@ -170,11 +170,17 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         leaf(&mut w, "Milestone", if t.is_milestone && !row.has_children { "1" } else { "0" });
         leaf(&mut w, "Summary", if row.has_children { "1" } else { "0" });
         leaf(&mut w, "PercentComplete", &t.percent_complete.get().to_string());
-        let (ctype, cdate) = match t.constraint {
-            Constraint::AsSoonAsPossible => ("0", None),
-            Constraint::MustStartOn(m) => ("2", Some(m)),
-            Constraint::StartNoEarlierThan(m) => ("4", Some(m)),
+        let ctype = match t.constraint {
+            Constraint::AsSoonAsPossible => "0",
+            Constraint::AsLateAsPossible => "1",
+            Constraint::MustStartOn(_) => "2",
+            Constraint::MustFinishOn(_) => "3",
+            Constraint::StartNoEarlierThan(_) => "4",
+            Constraint::StartNoLaterThan(_) => "5",
+            Constraint::FinishNoEarlierThan(_) => "6",
+            Constraint::FinishNoLaterThan(_) => "7",
         };
+        let cdate = t.constraint.date();
         leaf(&mut w, "ConstraintType", ctype);
         if let Some(d) = cdate {
             leaf(&mut w, "ConstraintDate", &datetime(d));

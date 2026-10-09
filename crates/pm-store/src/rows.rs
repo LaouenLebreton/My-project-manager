@@ -49,11 +49,17 @@ pub fn write_project(conn: &Connection, p: &Project) -> Result<(), StoreError> {
 }
 
 pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
-    let (ctype, cdate) = match t.constraint {
-        Constraint::AsSoonAsPossible => ("ASAP", None),
-        Constraint::StartNoEarlierThan(m) => ("SNET", Some(m.0)),
-        Constraint::MustStartOn(m) => ("MSO", Some(m.0)),
+    let ctype = match t.constraint {
+        Constraint::AsSoonAsPossible => "ASAP",
+        Constraint::AsLateAsPossible => "ALAP",
+        Constraint::StartNoEarlierThan(_) => "SNET",
+        Constraint::StartNoLaterThan(_) => "SNLT",
+        Constraint::FinishNoEarlierThan(_) => "FNET",
+        Constraint::FinishNoLaterThan(_) => "FNLT",
+        Constraint::MustStartOn(_) => "MSO",
+        Constraint::MustFinishOn(_) => "MFO",
     };
+    let cdate = t.constraint.date().map(|m| m.0);
     conn.execute(
         "INSERT OR REPLACE INTO task
          (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents)
@@ -128,8 +134,13 @@ pub fn delete_assignment(conn: &Connection, id: AssignmentId) -> Result<(), Stor
 fn task_from_row(r: &Row) -> Result<Task, StoreError> {
     let constraint = match (r.get::<_, String>(6)?.as_str(), r.get::<_, Option<i64>>(7)?) {
         ("ASAP", None) => Constraint::AsSoonAsPossible,
+        ("ALAP", None) => Constraint::AsLateAsPossible,
         ("SNET", Some(m)) => Constraint::StartNoEarlierThan(Moment(m)),
+        ("SNLT", Some(m)) => Constraint::StartNoLaterThan(Moment(m)),
+        ("FNET", Some(m)) => Constraint::FinishNoEarlierThan(Moment(m)),
+        ("FNLT", Some(m)) => Constraint::FinishNoLaterThan(Moment(m)),
         ("MSO", Some(m)) => Constraint::MustStartOn(Moment(m)),
+        ("MFO", Some(m)) => Constraint::MustFinishOn(Moment(m)),
         (t, d) => return Err(StoreError::Damaged(format!("bad constraint {t} {d:?}"))),
     };
     let percent: u8 = r.get(8)?;

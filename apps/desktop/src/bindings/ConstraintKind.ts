@@ -3,4 +3,4 @@
 /**
  * Microsoft Project's abbreviations, which are also the values the UI sends.
  */
-export type ConstraintKind = "ASAP" | "SNET" | "MSO";
+export type ConstraintKind = "ASAP" | "ALAP" | "SNET" | "SNLT" | "FNET" | "FNLT" | "MSO" | "MFO";

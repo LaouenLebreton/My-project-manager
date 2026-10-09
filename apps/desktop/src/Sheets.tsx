@@ -9,7 +9,20 @@ import type { Snapshot } from "./bindings/Snapshot";
 import type { TimeRange } from "./bindings/TimeRange";
 import { GLOSSARY } from "./help";
 
+
 type Send = (edit: Edit) => Promise<unknown>;
+
+/** Microsoft Project's eight constraint types, explained in plain words. */
+export const CONSTRAINTS: Record<ConstraintKind, { label: string; dated: boolean; help: string }> = {
+  ASAP: { label: "As soon as possible", dated: false, help: "The task starts as soon as its predecessors allow." },
+  ALAP: { label: "As late as possible", dated: false, help: "The task starts as late as it can without delaying the tasks after it or the project's finish." },
+  SNET: { label: "Start no earlier than", dated: true, help: "The task will not start before this date, even if its predecessors finish sooner. Links can still push it later." },
+  SNLT: { label: "Start no later than", dated: true, help: "The task must start by this date. If its predecessors would make it later, Super PM keeps the date and warns about the conflict." },
+  FNET: { label: "Finish no earlier than", dated: true, help: "The task will not finish before the end of this day." },
+  FNLT: { label: "Finish no later than", dated: true, help: "The task must finish by the end of this day. If its predecessors would make it later, Super PM keeps the date and warns about the conflict." },
+  MSO: { label: "Must start on", dated: true, help: "The task starts on this date even if its predecessors finish later; Super PM then warns about the conflict. Leveling never moves it." },
+  MFO: { label: "Must finish on", dated: true, help: "The task finishes at the end of this day even if its predecessors finish later; Super PM then warns about the conflict. Leveling never moves it." },
+};
 
 /** A modal sheet: Escape or Cancel closes; Save sends the edit and closes unless refused. */
 function Sheet({ title, onClose, onSave, children }: { title: string; onClose: () => void; onSave: () => Promise<string | null>; children: React.ReactNode }) {
@@ -86,7 +99,7 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           name,
           durationText: row.isSummary ? null : duration,
           milestone: row.isSummary ? null : milestone,
-          constraint: { kind, date: kind === "ASAP" ? null : date },
+          constraint: { kind, date: CONSTRAINTS[kind].dated ? date : null },
           percentComplete: Math.max(0, Math.min(100, Math.round(Number(percent) || 0))),
           notes,
           resources: row.isSummary ? null : resources,
@@ -113,18 +126,14 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
         <label htmlFor="ti-constraint">Start</label>
         <div>
           <select id="ti-constraint" value={kind} onChange={(e) => setKind(e.target.value as ConstraintKind)}>
-            <option value="ASAP">As soon as possible</option>
-            <option value="SNET">No earlier than</option>
-            <option value="MSO">Must start on</option>
+            {(Object.keys(CONSTRAINTS) as ConstraintKind[]).map((k) => (
+              <option key={k} value={k}>
+                {CONSTRAINTS[k].label}
+              </option>
+            ))}
           </select>
-          {kind !== "ASAP" && <input type="date" aria-label="Constraint date" value={date} onChange={(e) => setDate(e.target.value)} required />}
-          <p className="secondary small">
-            {kind === "MSO"
-              ? "The task starts on this date even if its predecessors finish later; Super PM then warns about the conflict."
-              : kind === "SNET"
-                ? GLOSSARY.constraint.text
-                : "The task starts as soon as its predecessors allow."}
-          </p>
+          {CONSTRAINTS[kind].dated && <input type="date" aria-label="Constraint date" value={date} onChange={(e) => setDate(e.target.value)} required />}
+          <p className="secondary small">{CONSTRAINTS[kind].help}</p>
         </div>
 
         {!row.isSummary && (

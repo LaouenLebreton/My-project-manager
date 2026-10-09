@@ -95,6 +95,32 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE task ADD COLUMN fixed_cost_cents INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE resource ADD COLUMN rate_cents INTEGER NOT NULL DEFAULT 0 CHECK (rate_cents >= 0);
     "#,
+    // 4 -> 5: every Microsoft Project constraint type. SQLite cannot change a CHECK in
+    // place, so the task table is rebuilt and its rows copied.
+    r#"
+    CREATE TABLE task_v5 (
+        id                  TEXT PRIMARY KEY,
+        parent_id           TEXT,
+        sort_key            TEXT NOT NULL,
+        name                TEXT NOT NULL,
+        duration_min        INTEGER NOT NULL CHECK (duration_min >= 0),
+        is_milestone        INTEGER NOT NULL CHECK (is_milestone IN (0, 1)),
+        constraint_type     TEXT NOT NULL CHECK (constraint_type IN ('ASAP', 'ALAP', 'SNET', 'SNLT', 'FNET', 'FNLT', 'MSO', 'MFO')),
+        constraint_min      INTEGER,
+        percent_complete    INTEGER NOT NULL CHECK (percent_complete BETWEEN 0 AND 100),
+        notes               TEXT NOT NULL,
+        leveling_delay_min  INTEGER NOT NULL DEFAULT 0 CHECK (leveling_delay_min >= 0),
+        fixed_cost_cents    INTEGER NOT NULL DEFAULT 0,
+        CHECK ((constraint_type IN ('ASAP', 'ALAP')) = (constraint_min IS NULL))
+    );
+    INSERT INTO task_v5 (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min,
+                         percent_complete, notes, leveling_delay_min, fixed_cost_cents)
+        SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min,
+               percent_complete, notes, leveling_delay_min, fixed_cost_cents FROM task;
+    DROP TABLE task;
+    ALTER TABLE task_v5 RENAME TO task;
+    CREATE INDEX task_parent ON task (parent_id, sort_key);
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

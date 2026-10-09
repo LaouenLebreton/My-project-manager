@@ -3,14 +3,14 @@
 //! Like Microsoft Project's manual leveling: on demand, starting from no delays, the earliest
 //! overload is resolved first by delaying its least important task until the work it clashes
 //! with is done. Important means: least total slack, then earliest start, then outline order.
-//! Tasks fixed with "must start on" are never moved. Links and constraints keep working,
+//! Tasks fixed with "must start on" or "must finish on" are never moved. Links and constraints keep working,
 //! because a delay only pushes a task later (rule R30).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Constraint, Duration, Project, ResourceId, TaskId};
+use crate::model::{Duration, Project, ResourceId, TaskId};
 use crate::outline::outline;
 use crate::resources::loads;
 use crate::schedule::{schedule, ScheduleError};
@@ -73,7 +73,7 @@ pub fn level(p: &Project) -> Result<Leveled, ScheduleError> {
             let ts = s.tasks[t];
             (ts.total_slack, ts.early_start, position.get(t).copied().unwrap_or(usize::MAX))
         });
-        let movable = |t: &TaskId| !matches!(q.tasks[t].constraint, Constraint::MustStartOn(_));
+        let movable = |t: &TaskId| !q.tasks[t].constraint.is_fixed();
         let Some(&pick) = tasks.iter().rev().find(|t| movable(t)) else {
             unresolved.push(Unresolved::FixedDates { resource, tasks: overload.tasks.clone() });
             skipped.insert((resource, start));
@@ -308,7 +308,7 @@ mod tests {
             }
             // "Must start on" overrides links by design (reported as a conflict), so only
             // links into other tasks must hold.
-            for d in q.dependencies.values().filter(|d| !matches!(q.tasks[&d.successor].constraint, Constraint::MustStartOn(_))) {
+            for d in q.dependencies.values().filter(|d| !q.tasks[&d.successor].constraint.is_fixed()) {
                 prop_assert!(s.tasks[&d.successor].early_start >= s.tasks[&d.predecessor].early_finish);
             }
             prop_assert_eq!(level(&q).unwrap(), r, "leveling is repeatable");

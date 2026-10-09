@@ -62,15 +62,39 @@ impl From<Duration> for i64 {
     }
 }
 
-/// Scheduling constraint. The date is part of the variant, so "as soon as possible with a
-/// date" cannot be represented.
+/// Scheduling constraint, as in Microsoft Project. The date is part of the variant, so a
+/// constraint can never lack its date (or have one it does not use).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "date")]
 pub enum Constraint {
     #[default]
     AsSoonAsPossible,
+    AsLateAsPossible,
     StartNoEarlierThan(Moment),
+    StartNoLaterThan(Moment),
+    FinishNoEarlierThan(Moment),
+    FinishNoLaterThan(Moment),
     MustStartOn(Moment),
+    MustFinishOn(Moment),
+}
+
+impl Constraint {
+    pub fn date(self) -> Option<Moment> {
+        match self {
+            Constraint::AsSoonAsPossible | Constraint::AsLateAsPossible => None,
+            Constraint::StartNoEarlierThan(d)
+            | Constraint::StartNoLaterThan(d)
+            | Constraint::FinishNoEarlierThan(d)
+            | Constraint::FinishNoLaterThan(d)
+            | Constraint::MustStartOn(d)
+            | Constraint::MustFinishOn(d) => Some(d),
+        }
+    }
+
+    /// Must start on and must finish on fix the task in time; leveling never moves it.
+    pub fn is_fixed(self) -> bool {
+        matches!(self, Constraint::MustStartOn(_) | Constraint::MustFinishOn(_))
+    }
 }
 
 /// Position among siblings: a fractional index string, compared bytewise.

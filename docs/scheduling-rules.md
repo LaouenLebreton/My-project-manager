@@ -38,6 +38,9 @@ Rules marked *verify* must be checked against the owner's Microsoft Project refe
 - R17. Must Start On `D`: `ES = D` even if links demand later. When links demand later, the schedule reports a **constraint conflict** for that task (task id, required date, link-driven date). Never hidden.
 - R18. Constraint dates are snapped forward to working time.
 
+- R32. Every Microsoft Project constraint type. Finish dates mean the end of work on that day. Finish No Earlier Than holds the start back until the task can finish on or after the date. Must Finish On fixes the finish. Start/Finish No Later Than only bite when the links would make the task later: the date is honoured anyway and a conflict is reported (negative slack), as for Must Start On. In the backward pass, the "no later than" limits cap the late dates, and the "must" constraints fix them. *verify*
+- R33. As Late As Possible: after the forward pass, latest tasks first, each moves as late as it can without moving its successors (at their early dates) or the project's finish. Successors therefore never move. *verify* against Microsoft Project, which may also move ALAP chains as a group.
+
 ## Backward pass, slack, critical path
 
 - R19. Project finish = latest EF of all leaf tasks. Backward pass starts there for tasks with no successors.
