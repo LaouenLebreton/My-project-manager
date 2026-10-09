@@ -141,10 +141,15 @@
   <Resources>
     <Resource><UID>0</UID><ID>0</ID><Type>1</Type><IsNull>0</IsNull></Resource>
     <Resource><UID>1</UID><ID>1</ID><Name>Sam</Name><Type>1</Type><CalendarUID>2</CalendarUID></Resource>
-    <Resource><UID>2</UID><ID>2</ID><Name>Alex</Name><Type>1</Type></Resource>
+    <Resource><UID>2</UID><ID>2</ID><Name>Alex</Name><Type>1</Type><Initials>AL</Initials><MaxUnits>0.5</MaxUnits></Resource>
+    <Resource><UID>3</UID><ID>3</ID><Name>Paper</Name><Type>0</Type><MaterialLabel>reams</MaterialLabel></Resource>
+    <Resource><UID>4</UID><ID>4</ID><Name>Travel</Name><Type>2</Type></Resource>
   </Resources>
   <Assignments>
     <Assignment><UID>1</UID><TaskUID>2</TaskUID><ResourceUID>1</ResourceUID><Units>1</Units></Assignment>
     <Assignment><UID>2</UID><TaskUID>8</TaskUID><ResourceUID>-65535</ResourceUID></Assignment>
+    <Assignment><UID>3</UID><TaskUID>8</TaskUID><ResourceUID>3</ResourceUID><Units>2.5</Units></Assignment>
+    <Assignment><UID>4</UID><TaskUID>5</TaskUID><ResourceUID>2</ResourceUID><Units>1</Units></Assignment>
+    <Assignment><UID>5</UID><TaskUID>6</TaskUID><ResourceUID>4</ResourceUID><Units>1</Units></Assignment>
   </Assignments>
 </Project>

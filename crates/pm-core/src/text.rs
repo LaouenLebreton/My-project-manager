@@ -50,7 +50,7 @@ pub fn parse_resource_list(text: &str) -> Result<Vec<ResourceEntry>, TextError> 
                     let end = inner.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ',')).unwrap_or(inner.len());
                     let value: f64 = inner[..end].replace(',', ".").parse().map_err(|_| TextError::BadResource)?;
                     let hundredths = if inner[end..].trim_start().starts_with('%') { value } else { value * 100.0 };
-                    if !(hundredths.is_finite() && hundredths >= 1.0 && hundredths < 1e7) {
+                    if !(hundredths.is_finite() && (1.0..1e7).contains(&hundredths)) {
                         return Err(TextError::BadResource);
                     }
                     (name, Some(hundredths.round() as u32))

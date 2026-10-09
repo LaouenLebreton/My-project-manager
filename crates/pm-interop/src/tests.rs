@@ -25,6 +25,10 @@ struct Canon {
     calendar: Calendar,
     rows: Vec<CanonRow>,
     links: Vec<(usize, usize, LinkType, i64)>,
+    /// Name, initials, kind, max units (work), label (material), notes, in sheet order.
+    resources: Vec<(String, String, ResourceKind, u32, String, String)>,
+    /// Task row, resource name, units.
+    assignments: Vec<(usize, String, u32)>,
 }
 
 fn canon(p: &Project) -> Canon {
@@ -47,6 +51,21 @@ fn canon(p: &Project) -> Canon {
             })
             .collect(),
         links,
+        resources: {
+            let mut list: Vec<&Resource> = p.resources.values().collect();
+            list.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+            list.iter()
+                .map(|r| {
+                    let work = r.kind == ResourceKind::Work;
+                    (r.name.clone(), r.initials.clone(), r.kind, if work { r.max_units.0 } else { 0 }, if work { String::new() } else { r.material_label.clone() }, r.notes.clone())
+                })
+                .collect()
+        },
+        assignments: {
+            let mut list: Vec<(usize, String, u32)> = p.assignments.values().map(|a| (index[&a.task], p.resources[&a.resource].name.clone(), a.units.0)).collect();
+            list.sort();
+            list
+        },
     }
 }
 
@@ -90,6 +109,17 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     assert_eq!(link("Visual design", "Templates").map(|d| (d.kind, d.lag)), Some((LinkType::StartToStart, 480)));
     assert_eq!(link("Templates", "Content migration").map(|d| (d.kind, d.lag)), Some((LinkType::FinishToFinish, -480)));
     assert_eq!(link("Wireframes & sitemap", "Content migration").map(|d| d.lag), Some(480));
+    // Resources and assignments (iteration 2): Sam and Alex work, Paper is a material; the
+    // cost resource and the assignment on the "Build" summary are reported instead.
+    let mut names: Vec<(&str, u32)> = p.resources.values().map(|r| (r.name.as_str(), r.max_units.0)).collect();
+    names.sort();
+    assert_eq!(names, [("Alex", 50), ("Paper", 0), ("Sam", 100)]);
+    let assigned: Vec<(String, String, u32)> = {
+        let mut v: Vec<_> = p.assignments.values().map(|a| (p.tasks[&a.task].name.clone(), p.resources[&a.resource].name.clone(), a.units.0)).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(assigned, [("Go live 🚀".to_owned(), "Paper".to_owned(), 250), ("Wireframes & sitemap".to_owned(), "Sam".to_owned(), 100)]);
     // Links on summary tasks are kept (R25); the link to another project is not.
     assert_eq!(p.dependencies.len(), 7);
     assert!(link("Design", "Build").is_some(), "summary to summary");
@@ -113,9 +143,8 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
         "Deadlines",
         "Task calendars",
         "Task priorities",
-        "Work hours",
-        "Resources (arrive in iteration 2)",
-        "Resource assignments",
+        "Cost resources",
+        "Assignments that Super PM cannot hold (resources work on the tasks inside a summary",
         "Other calendars",
         "Recurring calendar exceptions",
         "Alternative work weeks",
@@ -124,8 +153,8 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     ] {
         assert!(reported.contains(expected), "report should mention {expected:?}; it says:\n{reported}");
     }
-    let resources = report.ignored.iter().find(|l| l.what.starts_with("Resources")).unwrap();
-    assert_eq!(resources.count, 2);
+    assert!(report.imported.iter().any(|l| l.what.starts_with("Resources") && l.count == 3));
+    assert!(report.imported.iter().any(|l| l.what.starts_with("Assignments") && l.count == 2));
     let options = report.ignored.iter().find(|l| l.what.starts_with("Project options")).unwrap();
     assert!(options.examples.contains(&"CurrencySymbol".to_owned()));
     assert!(report.recalculated.contains(&"TotalSlack".to_owned()) || report.recalculated.contains(&"Critical".to_owned()));
@@ -160,7 +189,9 @@ fn random_project() -> impl Strategy<Value = Project> {
     let tasks = prop::collection::vec(task, 1..30);
     let links = prop::collection::vec((0usize..30, 0usize..30, 0usize..4, -2000i64..2000), 0..40);
     let holidays = prop::collection::vec((0i64..120, prop::bool::ANY), 0..6);
-    (tasks, links, holidays).prop_map(|(tasks, links, holidays)| {
+    let people = prop::collection::vec((prop::sample::select(vec!["Alex", "Ana María", "O'Brien", "Team <A>", "Crane & Co"]), 1u32..400, any::<bool>()), 0..5);
+    let staffing = prop::collection::vec((0usize..30, 0usize..5, 1u32..300), 0..30);
+    (tasks, links, holidays, people, staffing).prop_map(|(tasks, links, holidays, people, staffing)| {
         let mut next = ids();
         let mut p = Project {
             id: ProjectId(next()),
@@ -209,6 +240,32 @@ fn random_project() -> impl Strategy<Value = Project> {
             let (Some(&(pa, _)), Some(&(pb, _))) = (created.get(a), created.get(b)) else { continue };
             let dependency = Dependency { id: DependencyId(next()), predecessor: pa, successor: pb, kind: kinds[kind], lag };
             let _ = apply(&mut p, &Command::InsertLink { dependency });
+        }
+        let mut resources = Vec::new();
+        let mut last: Option<SortKey> = None;
+        for (name, max, material) in people {
+            if resources.iter().any(|r: &Resource| r.name == name) {
+                continue;
+            }
+            let key = SortKey::between(last.as_ref(), None);
+            last = Some(key.clone());
+            resources.push(Resource {
+                id: ResourceId(next()),
+                sort_key: key,
+                name: name.to_owned(),
+                initials: name.chars().take(2).collect(),
+                kind: if material { ResourceKind::Material } else { ResourceKind::Work },
+                max_units: ResourceUnits(if material { 0 } else { max }),
+                material_label: if material { "tons".into() } else { String::new() },
+                notes: String::new(),
+            });
+        }
+        let ids: Vec<ResourceId> = resources.iter().map(|r| r.id).collect();
+        let _ = apply(&mut p, &Command::InsertResources { resources, assignments: vec![] });
+        for (t, r, units) in staffing {
+            let (Some(&(task, _)), Some(&resource)) = (created.get(t), ids.get(r)) else { continue };
+            let assignment = Assignment { id: AssignmentId(next()), task, resource, units: ResourceUnits(units) };
+            let _ = apply(&mut p, &Command::InsertAssignment { assignment });
         }
         p
     })

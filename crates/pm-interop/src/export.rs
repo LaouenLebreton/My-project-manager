@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 
-use pm_core::{outline, Constraint, DayPattern, LinkType, Moment, Project, Schedule, TaskId};
+use pm_core::{outline, Constraint, DayPattern, LinkType, Moment, Project, ResourceKind, Schedule, TaskId};
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
 
@@ -192,6 +192,56 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         close(&mut w, "Task");
     }
     close(&mut w, "Tasks");
+
+    // Resources in Resource Sheet order (UIDs from 1), then assignments.
+    let mut resources: Vec<&pm_core::Resource> = p.resources.values().collect();
+    resources.sort_by(|a, b| a.sort_key.cmp(&b.sort_key).then(a.id.cmp(&b.id)));
+    let resource_uid: HashMap<pm_core::ResourceId, usize> = resources.iter().enumerate().map(|(i, r)| (r.id, i + 1)).collect();
+    let decimal = |hundredths: u32| {
+        let s = format!("{:.2}", f64::from(hundredths) / 100.0);
+        s.trim_end_matches('0').trim_end_matches('.').to_owned()
+    };
+    if !resources.is_empty() {
+        open(&mut w, "Resources");
+        for (i, r) in resources.iter().enumerate() {
+            open(&mut w, "Resource");
+            leaf(&mut w, "UID", &(i + 1).to_string());
+            leaf(&mut w, "ID", &(i + 1).to_string());
+            leaf(&mut w, "Name", &r.name);
+            leaf(&mut w, "Type", if r.kind == ResourceKind::Material { "0" } else { "1" });
+            leaf(&mut w, "IsNull", "0");
+            leaf(&mut w, "Initials", &r.initials);
+            if r.kind == ResourceKind::Material {
+                leaf(&mut w, "MaterialLabel", &r.material_label);
+            } else {
+                leaf(&mut w, "MaxUnits", &decimal(r.max_units.0));
+            }
+            if !r.notes.is_empty() {
+                leaf(&mut w, "Notes", &r.notes);
+            }
+            close(&mut w, "Resource");
+        }
+        close(&mut w, "Resources");
+    }
+    let mut assignments: Vec<&pm_core::Assignment> = p.assignments.values().filter(|a| uid.contains_key(&a.task) && resource_uid.contains_key(&a.resource)).collect();
+    assignments.sort_by_key(|a| (uid[&a.task], resource_uid[&a.resource]));
+    if !assignments.is_empty() {
+        open(&mut w, "Assignments");
+        for (i, a) in assignments.iter().enumerate() {
+            open(&mut w, "Assignment");
+            leaf(&mut w, "UID", &(i + 1).to_string());
+            leaf(&mut w, "TaskUID", &uid[&a.task].to_string());
+            leaf(&mut w, "ResourceUID", &resource_uid[&a.resource].to_string());
+            leaf(&mut w, "Units", &decimal(a.units.0));
+            let task = &p.tasks[&a.task];
+            let minutes = if task.is_milestone { 0 } else { task.duration.get() * i64::from(a.units.0) / 100 };
+            if p.resources[&a.resource].kind == ResourceKind::Work {
+                leaf(&mut w, "Work", &iso_duration(minutes));
+            }
+            close(&mut w, "Assignment");
+        }
+        close(&mut w, "Assignments");
+    }
     close(&mut w, "Project");
     String::from_utf8(w.into_inner().into_inner()).expect("quick-xml writes UTF-8")
 }

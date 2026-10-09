@@ -5,7 +5,7 @@ progress tracking and the other views come in later iterations.
 
 ## Scope, in steps (each one committed and runnable)
 
-Status 2026-10-09: steps 1 to 5 done; step 6 next.
+Status 2026-10-09: steps 1 to 6 done. Next, after the owner confirms: leveling, then costs.
 
 1. **Model, commands, file format.** Resources (people, equipment, materials) and assignments
    (who works on which task, at what percentage). Commands with inverses, as for tasks.

@@ -4,8 +4,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use jiff::civil::{Date, DateTime};
 use pm_core::{
-    apply, Calendar, CalendarId, Command, Constraint, DayPattern, Dependency, DependencyId, Duration, LinkType,
-    Moment, Percent, Project, ProjectId, SortKey, Task, TaskId, WorkRange,
+    apply, Assignment, AssignmentId, Calendar, CalendarId, Command, Constraint, DayPattern, Dependency, DependencyId,
+    Duration, LinkType, Moment, Percent, Project, ProjectId, Resource, ResourceId, ResourceKind, ResourceUnits, SortKey,
+    Task, TaskId, WorkRange,
 };
 use uuid::Uuid;
 
@@ -25,7 +26,7 @@ pub enum ImportError {
 /// Task fields that Super PM calculates itself. Listed once in the report, not as losses.
 const RECALCULATED: &[&str] = &[
     "Start", "Finish", "EarlyStart", "EarlyFinish", "LateStart", "LateFinish", "TotalSlack", "FreeSlack",
-    "StartSlack", "FinishSlack", "Critical", "OutlineNumber", "WBS", "Summary", "RemainingDuration",
+    "StartSlack", "FinishSlack", "Critical", "OutlineNumber", "WBS", "Summary", "RemainingDuration", "Work",
     "StartVariance", "FinishVariance", "DurationVariance", "PreLeveledStart", "PreLeveledFinish",
 ];
 
@@ -214,7 +215,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
             r.recalculated(field);
         }
     }
-    report_resources(&root, &mut r);
+    import_resources(&root, &mut project, &by_uid, new_id, &mut r);
     Ok((project, r.finish()))
 }
 
@@ -256,7 +257,6 @@ fn report_task_extras(t: &Element, label: &str, r: &mut ReportBuilder) {
         ("HyperlinkAddress", "Hyperlinks"),
         ("Cost", "Costs (arrive in iteration 2)"),
         ("FixedCost", "Costs (arrive in iteration 2)"),
-        ("Work", "Work hours (resources arrive in iteration 2)"),
         ("TimephasedData", "Timephased data"),
         ("Contact", "Task contacts"),
     ];
@@ -282,23 +282,78 @@ fn report_task_extras(t: &Element, label: &str, r: &mut ReportBuilder) {
     }
 }
 
-fn report_resources(root: &Element, r: &mut ReportBuilder) {
-    let resources = root
-        .child("Resources")
-        .map(|x| x.children("Resource").filter(|res| res.int_of("UID").unwrap_or(0) != 0).count())
-        .unwrap_or(0);
-    if resources > 0 {
-        for _ in 0..resources {
-            r.ignored("Resources (arrive in iteration 2)", None);
+/// Resources and assignments (iteration 2). Assignments go through the same checks as typed
+/// ones, so anything Super PM cannot hold is reported with the reason.
+fn import_resources(root: &Element, p: &mut Project, tasks: &HashMap<i64, TaskId>, new_id: &mut dyn FnMut() -> Uuid, r: &mut ReportBuilder) {
+    let mut by_uid: HashMap<i64, ResourceId> = HashMap::new();
+    let mut last_key: Option<SortKey> = None;
+    let mut resources = Vec::new();
+    let mut file_resources: Vec<&Element> = root.child("Resources").map(|x| x.children("Resource").collect()).unwrap_or_default();
+    file_resources.sort_by_key(|x| x.int_of("ID").unwrap_or(i64::MAX));
+    for res in file_resources {
+        let uid = res.int_of("UID").unwrap_or(-1);
+        let name = res.raw_of("Name").unwrap_or("").trim().to_owned();
+        if uid <= 0 || res.flag("IsNull") || name.is_empty() {
+            continue; // the blank resource Microsoft Project keeps at UID 0
+        }
+        let kind = match res.int_of("Type").unwrap_or(1) {
+            0 => ResourceKind::Material,
+            1 => ResourceKind::Work,
+            _ => {
+                r.ignored("Cost resources (costs arrive later in iteration 2)", Some(&name));
+                continue;
+            }
+        };
+        // Names separate assignments in the Resources column, so they must be usable there.
+        let mut clean: String = name.chars().map(|c| if matches!(c, ',' | '[' | ']') { ' ' } else { c }).collect();
+        clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+        if clean != name {
+            r.approximated("Resource names with commas or square brackets had them replaced by spaces", Some(&name));
+        }
+        if resources.iter().any(|x: &Resource| x.name.eq_ignore_ascii_case(&clean)) {
+            clean = format!("{clean} ({uid})");
+            r.approximated("Resources with the same name got their file number added", Some(&clean));
+        }
+        let max = res.text_of("MaxUnits").and_then(|t| t.parse::<f64>().ok()).unwrap_or(1.0);
+        let key = SortKey::between(last_key.as_ref(), None);
+        last_key = Some(key.clone());
+        let id = ResourceId(new_id());
+        by_uid.insert(uid, id);
+        resources.push(Resource {
+            id,
+            sort_key: key,
+            initials: res.raw_of("Initials").unwrap_or("").trim().to_owned(),
+            name: clean,
+            kind,
+            max_units: ResourceUnits(if kind == ResourceKind::Work { (max * 100.0).round().max(0.0) as u32 } else { 0 }),
+            material_label: res.raw_of("MaterialLabel").unwrap_or("").trim().to_owned(),
+            notes: res.raw_of("Notes").unwrap_or("").to_owned(),
+        });
+    }
+    let count = resources.len();
+    if count > 0 {
+        apply(p, &Command::InsertResources { resources, assignments: vec![] }).expect("fresh resources with unique ids");
+    }
+    r.imported("Resources (people, equipment and materials), with maximum units", count);
+
+    let mut assigned = 0;
+    for a in root.child("Assignments").into_iter().flat_map(|x| x.children("Assignment")) {
+        let Some(&resource) = a.int_of("ResourceUID").and_then(|u| by_uid.get(&u)) else { continue }; // unassigned or a cost resource
+        let Some(&task) = a.int_of("TaskUID").and_then(|u| tasks.get(&u)) else { continue };
+        let units = a.text_of("Units").and_then(|t| t.parse::<f64>().ok()).unwrap_or(1.0);
+        let hundredths = (units * 100.0).round();
+        let name = p.tasks[&task].name.clone();
+        if hundredths < 1.0 {
+            r.ignored("Assignments with 0% units", Some(&name));
+            continue;
+        }
+        let assignment = Assignment { id: AssignmentId(new_id()), task, resource, units: ResourceUnits(hundredths as u32) };
+        match apply(p, &Command::InsertAssignment { assignment }) {
+            Ok(_) => assigned += 1,
+            Err(e) => r.ignored(&format!("Assignments that Super PM cannot hold ({e})"), Some(&name)),
         }
     }
-    let assignments = root
-        .child("Assignments")
-        .map(|x| x.children("Assignment").filter(|a| a.int_of("ResourceUID").unwrap_or(-65535) >= 0).count())
-        .unwrap_or(0);
-    for _ in 0..assignments {
-        r.ignored("Resource assignments (arrive in iteration 2)", None);
-    }
+    r.imported("Assignments: which resources work on which tasks, at what units", assigned);
 }
 
 /// Project-level options Super PM does not use, as one line with examples.
