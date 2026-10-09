@@ -80,6 +80,8 @@ export interface GridHandle {
 interface Editing {
   text: string;
   error: string | null;
+  /** Select the existing text when the editor opens, so typing replaces it (as in Finder). */
+  selectAll?: boolean;
 }
 
 /**
@@ -144,7 +146,9 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
 
   // Focus the editor before the browser paints, so the next keystroke lands in it.
   useLayoutEffect(() => {
-    if (editing) inputRef.current?.focus();
+    if (!editing) return;
+    inputRef.current?.focus();
+    if (editing.selectAll) inputRef.current?.select();
   }, [editing !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => gridRef.current?.focus(), []);
@@ -194,10 +198,11 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     }
   };
 
+  /** `initial`: a typed character that replaces the cell. Without it, the cell's text is selected. */
   const startEditing = (initial?: string) => {
     const col = COLUMNS[active.col];
     if (current && col.edit) {
-      setEditing({ text: initial ?? col.edit.initial(current), error: null });
+      setEditing({ text: initial ?? col.edit.initial(current), error: null, selectAll: initial === undefined });
     } else if (!current && active.col === NAME_COL) {
       setEditing({ text: initial ?? "", error: null }); // blank row: typing a name adds a task
     }
