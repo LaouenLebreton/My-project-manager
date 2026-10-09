@@ -81,6 +81,8 @@ pub struct ProjectInfo {
     /// For shading the chart: which weekdays are worked (Monday first) and dated exceptions.
     pub working_weekdays: Vec<bool>,
     pub calendar_exceptions: Vec<CalendarException>,
+    /// Working hours per weekday, Monday first, for the Working Time window.
+    pub working_week: Vec<Vec<crate::edits::TimeRange>>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -90,6 +92,7 @@ pub struct CalendarException {
     /// `YYYY-MM-DD`
     pub date: String,
     pub working: bool,
+    pub ranges: Vec<crate::edits::TimeRange>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -117,6 +120,8 @@ pub struct Row {
     pub duration_text: String,
     /// Incoming links as typed, e.g. "2, 5SS+1d" (row numbers).
     pub predecessors: String,
+    pub constraint: crate::edits::ConstraintEdit,
+    pub notes: String,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -172,6 +177,20 @@ fn iso(m: Moment) -> String {
     m.to_datetime().to_string()
 }
 
+fn ranges(pattern: &pm_core::DayPattern) -> Vec<crate::edits::TimeRange> {
+    pattern.ranges().iter().map(|r| crate::edits::TimeRange { start: r.start(), end: r.end() }).collect()
+}
+
+fn constraint_view(c: pm_core::Constraint) -> crate::edits::ConstraintEdit {
+    use crate::edits::{ConstraintEdit, ConstraintKind};
+    let date = |m: Moment| Some(m.to_datetime().date().to_string());
+    match c {
+        pm_core::Constraint::AsSoonAsPossible => ConstraintEdit { kind: ConstraintKind::ASAP, date: None },
+        pm_core::Constraint::StartNoEarlierThan(m) => ConstraintEdit { kind: ConstraintKind::SNET, date: date(m) },
+        pm_core::Constraint::MustStartOn(m) => ConstraintEdit { kind: ConstraintKind::MSO, date: date(m) },
+    }
+}
+
 pub fn snapshot(doc: &Document) -> Snapshot {
     let p = &doc.project;
     let sched = doc.schedule.as_ref().ok();
@@ -216,6 +235,8 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                         list.iter().map(|e| UNITS.format_predecessor(e)).collect::<Vec<_>>().join(", ")
                     })
                     .unwrap_or_default(),
+                constraint: constraint_view(t.constraint),
+                notes: t.notes.clone(),
             }
         })
         .collect();
@@ -274,8 +295,9 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             calendar_exceptions: p
                 .calendar
                 .exceptions()
-                .map(|(date, pattern)| CalendarException { date: date.to_string(), working: pattern.is_working() })
+                .map(|(date, pattern)| CalendarException { date: date.to_string(), working: pattern.is_working(), ranges: ranges(pattern) })
                 .collect(),
+            working_week: p.calendar.week().iter().map(ranges).collect(),
         },
         rows,
         links,

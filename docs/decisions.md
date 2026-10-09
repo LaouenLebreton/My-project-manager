@@ -85,3 +85,9 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **"What does this mean?"** (spec 5.1.7): a "?" next to Duration, Predecessors and Slack, and Help > Super PM Help (⌘?) with every term and keyboard shortcut. One source of wording (`src/help.ts`) for headers, Help and tour.
 - **⌘K command bar** (spec 5.1.2) with every command by name, including Undo and Redo with the action name. The View menu listed it, so it is built rather than left as a greyed-out item.
 - **Accessibility checklist** in `docs/accessibility-checklist.md`, run per release. Not yet run on the real app with VoiceOver; contrast has not been measured.
+
+## 2026-10-09, closing in-scope gaps
+
+- **Calendar and constraints were only half built:** the engine supported them, but the UI could not set working hours, holidays, the project start, "must start on", notes or % complete. Added Task > Task Info (⌘I), Project > Project Info and Project > Working Time. Each saves as one undo step ("Change Task Info", "Change Project Start", "Change Calendar"). Constrained tasks get a ⌖ marker in the grid with the date in its label, so a fixed date is never hidden.
+- **Working hours are typed as text** ("08:00–12:00, 13:00–17:00"). Rust validates them and explains what is wrong; a week with no working time is refused.
+- **Return selects the cell's text** when editing starts, so typing replaces it, as Finder does with names. Typing a character directly still starts fresh with that character.

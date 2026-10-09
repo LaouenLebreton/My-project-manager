@@ -26,6 +26,11 @@ pub mod id {
     pub const COMMAND_BAR: &str = "view.command_bar";
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
+    pub const TASK_INFO: &str = "task.info";
+    pub const INDENT: &str = "task.indent";
+    pub const OUTDENT: &str = "task.outdent";
+    pub const PROJECT_INFO: &str = "project.info";
+    pub const WORKING_TIME: &str = "project.working_time";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
 }
@@ -50,6 +55,8 @@ pub struct MenuHandles {
     save_copy: MenuItem<Wry>,
     export: MenuItem<Wry>,
     recent: Submenu<Wry>,
+    /// Task and Project menu items, which need an open project.
+    document_items: Vec<MenuItem<Wry>>,
 }
 
 impl MenuHandles {
@@ -65,6 +72,9 @@ impl MenuHandles {
     pub fn set_document_open(&self, open: bool) {
         let _ = self.save_copy.set_enabled(open);
         let _ = self.export.set_enabled(open);
+        for item in &self.document_items {
+            let _ = item.set_enabled(open);
+        }
     }
 
     /// Rebuilds File > Open Recent: file names, then Clear Menu.
@@ -144,6 +154,16 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .fullscreen()
         .build()?;
 
+    // Task and Project menus. Indent and Outdent show Tab and ⇧Tab without owning those
+    // keys (the grid handles them), so they have no accelerator here.
+    let task_info = item(app, id::TASK_INFO, "Task Info…", Some("CmdOrCtrl+I"))?;
+    let indent = item(app, id::INDENT, "Indent", None)?;
+    let outdent = item(app, id::OUTDENT, "Outdent", None)?;
+    let task = SubmenuBuilder::new(app, "Task").item(&task_info).separator().item(&indent).item(&outdent).build()?;
+    let project_info = item(app, id::PROJECT_INFO, "Project Info…", None)?;
+    let working_time = item(app, id::WORKING_TIME, "Working Time…", None)?;
+    let project = SubmenuBuilder::new(app, "Project").item(&project_info).item(&working_time).build()?;
+
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
         .maximize()
@@ -168,9 +188,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     if let Some(app_menu) = platform::app_menu(app)? {
         menu.append(&app_menu)?;
     }
-    for sub in [&file, &edit, &view, &window, &help] {
+    for sub in [&file, &edit, &view, &task, &project, &window, &help] {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    Ok((menu, MenuHandles { undo, redo, save_copy, export, recent }))
+    let document_items = vec![task_info, indent, outdent, project_info, working_time];
+    Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

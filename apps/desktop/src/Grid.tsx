@@ -26,7 +26,7 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { label: "#", width: "44px", align: "right", text: () => "" },
-  { label: "", width: "22px", text: () => "" },
+  { label: "", width: "30px", text: () => "" },
   {
     label: "Task Name",
     width: "minmax(160px, 1fr)",
@@ -75,6 +75,8 @@ export interface GridHandle {
   indent: (outdent: boolean) => void;
   addTaskBelow: () => void;
   deleteSelection: () => void;
+  /** The task under the cursor, for Task Info. */
+  activeRow: () => Row | undefined;
 }
 
 interface Editing {
@@ -169,6 +171,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     deleteSelection: () => {
       if (selection.length) void send({ kind: "DeleteTasks", ids: selection.map((r) => r.id) });
     },
+    activeRow: () => current,
   }));
 
   // Moves can follow an edit that added rows, before this render's rowCount is updated.
@@ -433,12 +436,24 @@ function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDa
   }
   if (ci === 0) return <span className="secondary">{i + 1}</span>;
   if (ci === 1) {
-    // A marker and a label, not colour alone (spec 5.1.9).
-    return r.critical ? (
-      <span className="critical" role="img" aria-label="Critical" title="Critical: any delay moves the project finish">
-        ▲
-      </span>
-    ) : null;
+    // A marker and a label, not colour alone (spec 5.1.9). A constraint gets its own marker,
+    // so a date the user fixed is never hidden.
+    const constraint =
+      r.constraint.kind === "ASAP" ? null : `${r.constraint.kind === "MSO" ? "Must start on" : "Starts no earlier than"} ${formatDate(r.constraint.date)}`;
+    return (
+      <>
+        {r.critical && (
+          <span className="critical" role="img" aria-label="Critical" title="Critical: any delay moves the project finish">
+            ▲
+          </span>
+        )}
+        {constraint && (
+          <span className="constraint" role="img" aria-label={constraint} title={constraint}>
+            ⌖
+          </span>
+        )}
+      </>
+    );
   }
   if (ci === NAME_COL && r.isMilestone) {
     return (

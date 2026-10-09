@@ -5,6 +5,8 @@ import { formatDate } from "./format";
 import { CommandBar, type CommandItem } from "./CommandBar";
 import { Gantt, type GanttHandle } from "./Gantt";
 import { HelpSheet } from "./HelpSheet";
+import { ProjectInfo, TaskInfo, WorkingTime } from "./Sheets";
+import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
@@ -22,7 +24,8 @@ export function App() {
 
   const [recent, setRecent] = useState<RecentFile[]>([]);
   const [report, setReport] = useState<ReportView | null>(null);
-  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | null>(null);
+  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | null>(null);
+  const [infoRow, setInfoRow] = useState<Row | null>(null);
   const ganttRef = useRef<GanttHandle>(null);
 
   const run = useCallback(async (action: () => Promise<Snapshot | null>) => {
@@ -104,6 +107,11 @@ export function App() {
         if (e.payload === "help.contents") setOverlay("help");
         if (e.payload === "help.tour") setOverlay("tour");
         if (e.payload === "view.command_bar") setOverlay((o) => (o === "commands" ? null : "commands"));
+        if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
+        if (e.payload === "task.indent") gridRef.current?.indent(false);
+        if (e.payload === "task.outdent") gridRef.current?.indent(true);
+        if (e.payload === "project.info") setOverlay("project");
+        if (e.payload === "project.working_time") setOverlay("working");
       }),
     ];
     return () => {
@@ -122,6 +130,9 @@ export function App() {
   if (snapshot) {
     commands.push(
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
+      { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
+      { name: "Project Info…", run: () => setOverlay("project") },
+      { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },
       { name: "Outdent Selected Tasks", shortcut: "⇧Tab", run: () => gridRef.current?.indent(true) },
       { name: "Delete Selected Tasks", shortcut: "⌫", run: () => gridRef.current?.deleteSelection() },
@@ -137,6 +148,9 @@ export function App() {
       {overlay === "help" && <HelpSheet onClose={() => setOverlay(null)} onTour={() => setOverlay(snapshot ? "tour" : null)} />}
       {overlay === "tour" && snapshot && <Tour onDone={() => setOverlay(null)} />}
       {overlay === "commands" && <CommandBar commands={commands} onClose={() => setOverlay(null)} />}
+      {overlay === "project" && snapshot && <ProjectInfo snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {overlay === "working" && snapshot && <WorkingTime snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {infoRow && <TaskInfo key={infoRow.id} row={infoRow} send={edit} onClose={() => setInfoRow(null)} />}
     </>
   );
 

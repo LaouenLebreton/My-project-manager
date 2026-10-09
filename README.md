@@ -15,6 +15,8 @@ for scope and `docs/` for decisions.
   to move, stretch, or link.
 - Scheduling: four link types with positive and negative lag, project calendar with holidays,
   "start no earlier than" and "must start on", critical path and slack, loop detection.
+- Task > Task Info (⌘I) for constraints, % complete and notes; Project > Project Info for the
+  start date; Project > Working Time for working hours, holidays and changed days.
 - Microsoft Project XML import and export, with a report of anything not imported exactly.
 - File > New, Open, Open Recent, Save a Copy, Open Backup; `.pmproj` opens from Finder.
 - First run opens a sample project with a short tour; Help explains every term; ⌘K runs any command.

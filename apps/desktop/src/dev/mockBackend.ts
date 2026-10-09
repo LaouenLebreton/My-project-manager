@@ -36,6 +36,8 @@ function row(name: string, depth = 0): Row {
     percentComplete: 0,
     durationText: "1d",
     predecessors: "",
+    constraint: { kind: "ASAP", date: null },
+    notes: "",
   };
 }
 
@@ -110,7 +112,8 @@ export function install() {
       finish: state.rows.reduce((f, r) => (r.finish && r.finish > f ? r.finish : f), "2026-10-09T17:00:00"),
       minutesPerDay: 480,
       workingWeekdays: [true, true, true, true, true, false, false],
-      calendarExceptions: [{ date: "2026-10-14", working: false }],
+      calendarExceptions: [{ date: "2026-10-14", working: false, ranges: [] }],
+      workingWeek: [0, 1, 2, 3, 4].map(() => [{ start: 480, end: 720 }, { start: 780, end: 1020 }]).concat([[], []]),
     },
     rows: state.rows.map((r) => ({ ...r })),
     links: state.links.map((l) => ({ ...l })),
@@ -205,6 +208,18 @@ export function install() {
             case "SetFinish":
               if (e.finishDate < state.rows[at(e.id)].start!.slice(0, 10)) fail("the finish cannot be before the start");
               state.rows[at(e.id)].finish = `${e.finishDate}T17:00:00`;
+              break;
+            case "UpdateTask": {
+              const r = state.rows[at(e.id)];
+              if (e.name !== null) r.name = e.name;
+              if (e.notes !== null) r.notes = e.notes;
+              if (e.percentComplete !== null) r.percentComplete = e.percentComplete;
+              if (e.constraint) r.constraint = e.constraint;
+              if (e.milestone !== null) r.isMilestone = e.milestone;
+              break;
+            }
+            case "SetCalendar":
+              if (e.week.every((d) => d.length === 0)) fail("the working week has no working time, so no task could ever be scheduled");
               break;
             case "AddLink":
               state.links.push({ id: `l${Math.random()}`, predecessorId: e.predecessorId, successorId: e.successorId, kind: "FS", lagMinutes: 0 });

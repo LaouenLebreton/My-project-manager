@@ -42,6 +42,7 @@ export const SHORTCUTS: [string, string][] = [
   ["⌘↑ / ⌘↓", "First / last row"],
   ["Delete", "Delete the selected tasks"],
   ["⌘Z / ⇧⌘Z", "Undo / redo any change"],
+  ["⌘I", "Task Info: constraint, % complete, notes"],
   ["⌘K", "Command bar: run any command by name"],
   ["⌘N / ⌘O", "New project / open a project"],
   ["⌘-scroll or pinch", "Zoom the chart"],

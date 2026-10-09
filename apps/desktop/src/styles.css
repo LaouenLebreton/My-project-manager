@@ -562,3 +562,58 @@ dialog.report li {
   font: inherit;
   opacity: 0.7;
 }
+
+.sheet {
+  min-width: 440px;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 10px 12px;
+  align-items: start;
+}
+
+.form > label {
+  padding-top: 4px;
+  text-align: right;
+  color: var(--text-secondary);
+}
+
+.form input,
+.form select,
+.form textarea,
+.working-week input,
+.working-week select {
+  font: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.form textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.form p {
+  margin: 4px 0 0;
+}
+
+label.inline {
+  margin-left: 12px;
+}
+
+.working-week th {
+  text-align: left;
+  font-weight: 400;
+  padding: 3px 12px 3px 0;
+}
+
+.working-week td {
+  padding: 3px 6px 3px 0;
+}
+
+.constraint {
+  color: var(--text-secondary);
+  margin-left: 2px;
+}

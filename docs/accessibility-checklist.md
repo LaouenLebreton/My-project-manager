@@ -17,6 +17,7 @@ Run before each release (spec sections 5.1.9 and 6). Turn on VoiceOver (⌘F5) f
 - [ ] Each "?" in the column headers is reachable with Tab and opens with Space or Return; its text closes when focus moves on.
 - [ ] Command bar: ⌘K opens with focus in the field; ↑↓ choose; Return runs; Escape closes.
 - [ ] Help (⌘?) and the import report close with Escape and return focus.
+- [ ] Task Info (⌘I), Project Info and Working Time: every field has a label, Tab moves through them in order, Return saves, Escape cancels, errors are announced.
 - [ ] Tour: Escape skips; buttons reachable with Tab.
 
 ## VoiceOver

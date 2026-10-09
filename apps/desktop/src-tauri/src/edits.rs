@@ -4,10 +4,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pm_core::{
-    outline, Command, Constraint, Dependency, DependencyId, Duration, LinkChange, LinkType, Moment, Percent, Project,
-    Schedule, SortKey, Task, TaskChange, TaskId, Units, MINUTES_PER_DAY,
+    outline, Calendar, Command, Constraint, DayPattern, Dependency, DependencyId, Duration, LinkChange, LinkType, Moment,
+    Percent, Project, ProjectChange, Schedule, SortKey, Task, TaskChange, TaskId, Units, WorkRange, MINUTES_PER_DAY,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -33,6 +33,58 @@ pub enum Edit {
     MoveTask { id: String, start_date: String },
     /// Dragged right edge: finish at the end of work on this date (`YYYY-MM-DD`).
     SetFinish { id: String, finish_date: String },
+    /// Task Info: only the fields given change, as one undo step.
+    UpdateTask {
+        id: String,
+        name: Option<String>,
+        duration_text: Option<String>,
+        milestone: Option<bool>,
+        constraint: Option<ConstraintEdit>,
+        percent_complete: Option<u8>,
+        notes: Option<String>,
+    },
+    /// Project Info: the day the project starts (`YYYY-MM-DD`).
+    SetProjectStart { date: String },
+    /// Working Time: the whole project calendar.
+    SetCalendar { week: Vec<Vec<TimeRange>>, exceptions: Vec<DayException> },
+}
+
+/// Microsoft Project's abbreviations, which are also the values the UI sends.
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub enum ConstraintKind {
+    /// As soon as possible.
+    ASAP,
+    /// Start no earlier than.
+    SNET,
+    /// Must start on.
+    MSO,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub struct ConstraintEdit {
+    pub kind: ConstraintKind,
+    /// `YYYY-MM-DD`; required for SNET and MSO.
+    pub date: Option<String>,
+}
+
+/// Working time within a day, in minutes after midnight.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub struct TimeRange {
+    pub start: u16,
+    pub end: u16,
+}
+
+/// A dated change to the working week: a holiday (no ranges) or different hours.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+pub struct DayException {
+    /// `YYYY-MM-DD`
+    pub date: String,
+    pub ranges: Vec<TimeRange>,
 }
 
 /// A core command, plus the id of a task it creates (so the UI can select it).
@@ -115,6 +167,80 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None })),
         Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None })),
+        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes } => {
+            let id = task_id(&id)?;
+            let t = task(p, id)?;
+            let set = |change| Command::SetTask { id, change };
+            let mut commands = Vec::new();
+            if let Some(n) = name.filter(|n| *n != t.name) {
+                commands.push(set(TaskChange::Name(n)));
+            }
+            if let Some(m) = milestone.filter(|m| *m != t.is_milestone) {
+                commands.push(set(TaskChange::Milestone(m)));
+            }
+            if let Some(text) = duration_text.filter(|_| !milestone.unwrap_or(t.is_milestone)) {
+                if is_summary(p, id) {
+                    return Err(err("a summary task's duration comes from the tasks inside it"));
+                }
+                let minutes = units.parse_duration(&text)?;
+                if minutes == 0 {
+                    return Err(err("a task needs a duration; tick Milestone for a zero-length event"));
+                }
+                if minutes != t.duration.get() {
+                    commands.push(set(TaskChange::Duration(Duration::minutes(minutes)?)));
+                }
+            }
+            if let Some(c) = constraint {
+                let date = |what: &str| -> Result<Moment, IpcError> {
+                    let d = c.date.as_deref().ok_or_else(|| err(format!("choose a date for “{what}”")))?;
+                    Ok(p.calendar.next_working(day_start(d)?))
+                };
+                let new = match c.kind {
+                    ConstraintKind::ASAP => Constraint::AsSoonAsPossible,
+                    ConstraintKind::SNET => Constraint::StartNoEarlierThan(date("Start no earlier than")?),
+                    ConstraintKind::MSO => Constraint::MustStartOn(date("Must start on")?),
+                };
+                if new != t.constraint {
+                    commands.push(set(TaskChange::Constraint(new)));
+                }
+            }
+            if let Some(pc) = percent_complete.filter(|pc| *pc != t.percent_complete.get()) {
+                let pc = Percent::new(pc).ok_or_else(|| err("% complete must be between 0 and 100"))?;
+                commands.push(set(TaskChange::PercentComplete(pc)));
+            }
+            if let Some(n) = notes.filter(|n| *n != t.notes) {
+                commands.push(set(TaskChange::Notes(n)));
+            }
+            Ok(batch("Change Task Info", commands).map(|command| Planned { command, created: None }))
+        }
+        Edit::SetProjectStart { date } => {
+            let start = p.calendar.next_working(day_start(&date)?);
+            if start == p.start {
+                return Ok(None);
+            }
+            plain(Command::SetProject { change: ProjectChange::Start(start) })
+        }
+        Edit::SetCalendar { week, exceptions } => {
+            let pattern = |ranges: &[TimeRange]| -> Result<DayPattern, IpcError> {
+                let ranges = ranges.iter().map(|r| WorkRange::new(r.start, r.end)).collect::<Result<Vec<_>, _>>()?;
+                Ok(DayPattern::new(ranges)?)
+            };
+            let week: [DayPattern; 7] = week
+                .iter()
+                .map(|d| pattern(d))
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .map_err(|_| err("a working week has seven days"))?;
+            let mut calendar = Calendar::new(week)?;
+            for e in &exceptions {
+                let d: jiff::civil::Date = e.date.parse().map_err(|_| err(format!("{:?} is not a date", e.date)))?;
+                calendar.set_exception(d, pattern(&e.ranges)?);
+            }
+            if calendar == p.calendar {
+                return Ok(None);
+            }
+            plain(Command::SetProject { change: ProjectChange::Calendar(calendar) })
+        }
         Edit::MoveTask { id, start_date } => {
             let id = task_id(&id)?;
             task(p, id)?;
@@ -460,6 +586,59 @@ mod tests {
         let sched = pm_core::schedule(&p).ok();
         let e = plan(&p, sched.as_ref(), &Units::default(), Edit::SetFinish { id: id[0].0.to_string(), finish_date: "2026-10-04".into() });
         assert_eq!(e.err().unwrap().message, "the finish cannot be before the start");
+    }
+
+    #[test]
+    fn task_info_changes_several_fields_as_one_step() {
+        let (mut p, id) = project(&[("A", 0)]);
+        let edit = Edit::UpdateTask {
+            id: id[0].0.to_string(),
+            name: Some("Survey".into()),
+            duration_text: Some("2d".into()),
+            milestone: Some(false),
+            constraint: Some(ConstraintEdit { kind: ConstraintKind::MSO, date: Some("2026-10-10".into()) }),
+            percent_complete: Some(25),
+            notes: Some("Bring the drone".into()),
+        };
+        let planned = plan(&p, None, &Units::default(), edit).unwrap().unwrap();
+        assert_eq!(planned.command.label(), "Change Task Info");
+        apply(&mut p, &planned.command).unwrap();
+        let t = &p.tasks[&id[0]];
+        assert_eq!((t.name.as_str(), t.duration.get(), t.percent_complete.get(), t.notes.as_str()), ("Survey", 960, 25, "Bring the drone"));
+        // Saturday the 10th moves to Monday the 12th at 08:00.
+        let monday = Moment::from_datetime(jiff::civil::date(2026, 10, 12).at(8, 0, 0, 0));
+        assert_eq!(t.constraint, Constraint::MustStartOn(monday));
+
+        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None };
+        assert!(plan(&p, None, &Units::default(), unchanged).unwrap().is_none(), "nothing to undo when nothing changed");
+        let no_date = Edit::UpdateTask {
+            id: id[0].0.to_string(),
+            name: None,
+            duration_text: None,
+            milestone: None,
+            constraint: Some(ConstraintEdit { kind: ConstraintKind::SNET, date: None }),
+            percent_complete: None,
+            notes: None,
+        };
+        assert_eq!(plan(&p, None, &Units::default(), no_date).err().unwrap().message, "choose a date for “Start no earlier than”");
+    }
+
+    #[test]
+    fn working_time_and_holidays() {
+        let (mut p, _) = project(&[("A", 0)]);
+        let day = vec![TimeRange { start: 540, end: 1020 }];
+        let mut week = vec![day.clone(); 4];
+        week.extend([vec![TimeRange { start: 540, end: 780 }], vec![], vec![]]);
+        let edit = Edit::SetCalendar { week: week.clone(), exceptions: vec![DayException { date: "2026-12-25".into(), ranges: vec![] }] };
+        run(&mut p, edit);
+        assert_eq!(p.calendar.week()[0].working_minutes(), 480);
+        assert_eq!(p.calendar.week()[4].working_minutes(), 240);
+        assert!(!p.calendar.pattern(pm_core::time::day_number(jiff::civil::date(2026, 12, 25))).is_working());
+        let none = Edit::SetCalendar { week: vec![vec![]; 7], exceptions: vec![] };
+        let e = plan(&p, None, &Units::default(), none).err().unwrap();
+        assert_eq!(e.message, "the working week has no working time, so no task could ever be scheduled");
+        let overlap = Edit::SetCalendar { week: vec![vec![TimeRange { start: 480, end: 720 }, TimeRange { start: 700, end: 800 }]; 7], exceptions: vec![] };
+        assert_eq!(plan(&p, None, &Units::default(), overlap).err().unwrap().message, "working time ranges on the same day overlap");
     }
 
     #[test]
