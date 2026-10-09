@@ -10,7 +10,7 @@ Raised by Claude Code on 2026-10-08 while reading the iteration 1 spec. Nothing 
 
 ## Decided 2026-10-09 (owner)
 
-6. **One window per project**, like Pages or Keynote (replaces "one project at a time").
+6. **[Done 2026-10-09]** **One window per project**, like Pages or Keynote (replaces "one project at a time").
 7. **[Done 2026-10-09]** **Outdent works like Microsoft Project:** outdenting a task makes the tasks below it in the same summary its subtasks.
 8. **Iteration 2 starts with resources and assignments.** Baselines, progress tracking and the other views move to later iterations.
 9. **.mpp files:** the owner has `.mpp` files rather than XML. Options: export XML from Microsoft Project (File > Save As > XML Format), or bring forward `.mpp` reading through MPXJ (needs Java). Not decided yet.

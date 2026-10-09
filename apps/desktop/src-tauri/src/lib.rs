@@ -9,50 +9,66 @@ mod sample;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
-/// Event sent to the web UI when a custom menu item is chosen. Payload is the item id.
+/// Event sent to a window when a custom menu item is chosen. Payload is the item id.
 pub const MENU_EVENT: &str = "menu";
-/// Event sent when the project changed without the UI asking (menu, Finder). Payload: Snapshot.
+/// Event sent to a window when its project changed without it asking (menu, Finder).
+/// Payload: Snapshot.
 pub const CHANGED_EVENT: &str = "document-changed";
 
+/// Menu actions apply to the front window.
 fn on_menu(app: &tauri::AppHandle, id: &str) {
-    let state = app.state::<ipc::AppState>();
-    // While a cell editor is open, Undo and Redo belong to the text being typed.
-    let typing = state.editing_text.load(std::sync::atomic::Ordering::Relaxed);
-    let result = match id {
-        menu::id::NEW => return actions::spawn_dialog(app, actions::new_with_dialog),
-        menu::id::OPEN => return actions::spawn_dialog(app, |a| actions::open_with_dialog(a, None, "Open Project")),
-        menu::id::OPEN_BACKUP => {
-            return actions::spawn_dialog(app, |a| actions::open_with_dialog(a, files::backups_root(a), "Open Backup"));
+    let front = actions::focused_label(app);
+    let label = front.clone();
+    let to_front = |event: &str, payload: &str| match &front {
+        Some(l) => {
+            let _ = app.emit_to(l.as_str(), event, payload);
         }
-        menu::id::IMPORT => return actions::spawn_dialog(app, actions::import_with_dialog),
-        menu::id::EXPORT => return actions::spawn_dialog(app, actions::export_with_dialog),
-        menu::id::SAVE_COPY => return actions::spawn_dialog(app, |a| actions::save_copy_with_dialog(a).map(|()| None)),
+        None => {
+            let _ = app.emit(event, payload);
+        }
+    };
+    let typing = front.as_ref().is_some_and(|l| app.state::<actions::AppState>().editing_text.lock().expect("lock").contains(l));
+    let result = match id {
+        menu::id::NEW => return actions::spawn_dialog(app, label, |a, l| actions::new_with_dialog(a, l).map(|_| ())),
+        menu::id::OPEN => return actions::spawn_dialog(app, label, |a, l| actions::open_with_dialog(a, l, None, "Open Project").map(|_| ())),
+        menu::id::OPEN_BACKUP => {
+            return actions::spawn_dialog(app, label, |a, l| actions::open_with_dialog(a, l, files::backups_root(a), "Open Backup").map(|_| ()));
+        }
+        menu::id::IMPORT => return actions::spawn_dialog(app, label, |a, l| actions::import_with_dialog(a, l).map(|_| ())),
+        menu::id::EXPORT => {
+            return actions::spawn_dialog(app, label, |a, l| l.map_or(Ok(()), |l| actions::export_with_dialog(a, l)));
+        }
+        menu::id::SAVE_COPY => {
+            return actions::spawn_dialog(app, label, |a, l| l.map_or(Ok(()), |l| actions::save_copy_with_dialog(a, l)));
+        }
         menu::id::CLEAR_RECENT => {
             files::clear_recent(app);
             return actions::refresh_menus(app);
         }
         recent if recent.starts_with(menu::id::RECENT_PREFIX) => {
-            actions::open_path(app, std::path::Path::new(&recent[menu::id::RECENT_PREFIX.len()..]))
+            actions::open_path(app, label.as_deref(), std::path::Path::new(&recent[menu::id::RECENT_PREFIX.len()..])).map(|_| ())
         }
-        menu::id::OPEN_5K => ipc::open_generated(5_000, app.clone()),
-        menu::id::OPEN_20K => ipc::open_generated(20_000, app.clone()),
-        menu::id::UNDO | menu::id::REDO if typing => {
-            let _ = app.emit(MENU_EVENT, id);
-            return;
+        menu::id::OPEN_5K => ipc::open_generated(app, label.as_deref(), 5_000).map(|_| ()),
+        menu::id::OPEN_20K => ipc::open_generated(app, label.as_deref(), 20_000).map(|_| ()),
+        // While a cell editor is open, Undo and Redo belong to the text being typed.
+        menu::id::UNDO | menu::id::REDO if typing => return to_front(MENU_EVENT, id),
+        menu::id::UNDO | menu::id::REDO => {
+            let Some(l) = label else { return };
+            let done = if id == menu::id::UNDO { ipc::undo_in(app, &l) } else { ipc::redo_in(app, &l) };
+            done.map(|snapshot| {
+                let _ = app.emit_to(l.as_str(), CHANGED_EVENT, snapshot);
+            })
         }
-        menu::id::UNDO => ipc::undo(app.clone(), state),
-        menu::id::REDO => ipc::redo(app.clone(), state),
-        _ => {
-            let _ = app.emit(MENU_EVENT, id);
-            return;
-        }
+        _ => return to_front(MENU_EVENT, id),
     };
-    match result {
-        Ok(snapshot) => {
-            let _ = app.emit(CHANGED_EVENT, snapshot);
-        }
-        Err(e) => {
-            let _ = app.emit("error", e);
+    if let Err(e) = result {
+        match &front {
+            Some(l) => {
+                let _ = app.emit_to(l.as_str(), "error", e);
+            }
+            None => {
+                let _ = app.emit("error", e);
+            }
         }
     }
 }
@@ -60,40 +76,45 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(ipc::AppState::default())
+        .manage(actions::AppState::default())
         .setup(|app| {
             let (menu, handles) = menu::build(app.handle())?;
             app.set_menu(menu)?;
             app.manage(handles);
-            actions::refresh_menus(app.handle());
+            actions::set_focused(app.handle(), actions::START_WINDOW);
             // Local backups on a schedule (spec 4.7); only projects that changed are copied.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(files::BACKUP_INTERVAL);
-                actions::backup_now(&handle);
+                actions::backup_all(&handle);
             });
             Ok(())
         })
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .on_window_event(|window, event| {
-            // Closing the window closes the project; the app stays in the Dock, like other
-            // Mac document apps, and the window comes back from the Dock or File menu.
-            if let WindowEvent::CloseRequested { api, .. } = event
-                && window.label() == "main"
-            {
-                api.prevent_close();
-                actions::close(window.app_handle());
-                let _ = window.hide();
+            let app = window.app_handle();
+            match event {
+                WindowEvent::Focused(true) => actions::set_focused(app, window.label()),
+                // Closing a window closes its project. The last window stays (hidden) so the
+                // app keeps running in the Dock with a start window, like Mac document apps.
+                WindowEvent::CloseRequested { api, .. } => {
+                    if actions::close_window(app, window.label()) {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+                WindowEvent::Destroyed => actions::forget_window(app, window.label()),
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
             ipc::get_snapshot,
+            ipc::take_import_report,
             ipc::open_sample,
             ipc::apply_edit,
             ipc::undo,
             ipc::redo,
             ipc::set_text_editing,
-            ipc::open_generated,
             ipc::new_project,
             ipc::open_project,
             ipc::open_recent,
@@ -108,21 +129,16 @@ pub fn run() {
         // Double-clicking a .pmproj in Finder (or dropping it on the Dock icon).
         #[cfg(target_os = "macos")]
         RunEvent::Opened { urls } => {
-            if let Some(path) = urls.iter().find_map(|u| u.to_file_path().ok()) {
-                match actions::open_path(app, &path) {
-                    Ok(snapshot) => {
-                        let _ = app.emit(CHANGED_EVENT, snapshot);
-                    }
-                    Err(e) => {
-                        let _ = app.emit("error", e);
-                        actions::show_window(app);
-                    }
+            for path in urls.iter().filter_map(|u| u.to_file_path().ok()) {
+                if let Err(e) = actions::open_path(app, None, &path) {
+                    actions::show_any_window(app);
+                    let _ = app.emit("error", e);
                 }
             }
         }
         #[cfg(target_os = "macos")]
-        RunEvent::Reopen { .. } => actions::show_window(app),
-        RunEvent::ExitRequested { .. } => actions::backup_now(app),
+        RunEvent::Reopen { .. } => actions::show_any_window(app),
+        RunEvent::ExitRequested { .. } => actions::backup_all(app),
         _ => {}
     });
 }

@@ -5,12 +5,10 @@
 //! these definitions into `apps/desktop/src/bindings` by `cargo test -p super-pm`.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 
 use pm_core::{outline, LinkType, Moment, PredecessorEntry, ScheduleError, TaskId, Units};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 use ts_rs::TS;
 
 use crate::document::{this_monday_morning, Document};
@@ -20,12 +18,7 @@ use crate::menu::MenuHandles;
 /// Unit sizes for display and typing; per-calendar settings arrive with calendar editing.
 pub const UNITS: Units = Units { minutes_per_day: 480, days_per_week: 5 };
 
-#[derive(Default)]
-pub struct AppState {
-    pub doc: Mutex<Option<Document>>,
-    /// True while a grid cell editor has focus: ⌘Z then undoes typing, not project edits.
-    pub editing_text: AtomicBool,
-}
+pub use crate::actions::AppState;
 
 /// An error shown to the user, in plain words.
 #[derive(Clone, Debug, Serialize, TS)]
@@ -308,76 +301,98 @@ pub fn snapshot(doc: &Document) -> Snapshot {
     }
 }
 
-/// Snapshot after a change, with the Edit menu brought up to date.
-pub fn changed(app: &AppHandle, doc: &Document) -> Snapshot {
-    if let Some(menu) = app.try_state::<MenuHandles>() {
+/// Snapshot after a change in `label`'s window, with the Edit menu brought up to date if that
+/// window is in front.
+pub fn changed(app: &AppHandle, label: &str, doc: &Document) -> Snapshot {
+    if crate::actions::is_focused(app, label)
+        && let Some(menu) = app.try_state::<MenuHandles>()
+    {
         menu.update_undo(doc.undo_label(), doc.redo_label());
     }
     snapshot(doc)
 }
 
-#[tauri::command]
-pub fn get_snapshot(state: State<AppState>) -> Option<Snapshot> {
-    state.doc.lock().expect("state lock").as_ref().map(snapshot)
+/// Runs `f` on the project in `label`'s window.
+pub fn with_doc<T>(app: &AppHandle, label: &str, f: impl FnOnce(&mut Document) -> Result<T, IpcError>) -> Result<T, IpcError> {
+    let state = app.state::<AppState>();
+    let mut docs = state.docs.lock().expect("state lock");
+    let doc = docs.get_mut(label).ok_or_else(|| err("no project is open in this window"))?;
+    f(doc)
 }
 
-/// Opens the sample project, creating it in the app's data folder the first time.
+/// The project in the calling window, if any (a new window asks for its project on load).
 #[tauri::command]
-pub fn open_sample(app: AppHandle) -> Result<Snapshot, IpcError> {
+pub fn get_snapshot(window: WebviewWindow, state: State<AppState>) -> Option<Snapshot> {
+    state.docs.lock().expect("state lock").get(window.label()).map(snapshot)
+}
+
+/// An import report waiting for this window (it may have opened while the import finished).
+#[tauri::command]
+pub fn take_import_report(window: WebviewWindow, state: State<AppState>) -> Option<ReportView> {
+    state.pending_reports.lock().expect("state lock").remove(window.label())
+}
+
+/// Opens the sample project, creating it in the app's data folder the first time. Returns the
+/// snapshot if it opened in the calling window; otherwise another window shows it.
+#[tauri::command]
+pub async fn open_sample(window: WebviewWindow, app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
     let dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("Office Move (Sample).pmproj");
-    let doc = if path.exists() {
-        Document::open(&path)?
-    } else {
-        Document::create(&path, crate::sample::office_move(this_monday_morning()))?
-    };
-    Ok(crate::actions::install(&app, doc))
+    if path.exists() {
+        return crate::actions::open_path(&app, Some(window.label()), &path);
+    }
+    let doc = Document::create(&path, crate::sample::office_move(this_monday_morning()))?;
+    Ok(crate::actions::install(&app, Some(window.label()), doc))
 }
 
 /// Development builds only: opens a freshly generated project of `count` tasks.
-#[tauri::command]
-pub fn open_generated(count: u32, app: AppHandle) -> Result<Snapshot, IpcError> {
+pub fn open_generated(app: &AppHandle, asking: Option<&str>, count: u32) -> Result<Option<Snapshot>, IpcError> {
     if !cfg!(debug_assertions) {
         return Err(err("test projects are only available in development builds"));
     }
     let dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("Test Project ({count} tasks).pmproj"));
+    let already = app.state::<AppState>().docs.lock().expect("state lock").values().any(|d| d.path == path);
+    if already {
+        return crate::actions::open_path(app, asking, &path);
+    }
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
     }
     let doc = Document::create(&path, crate::sample::generated(count as usize, this_monday_morning()))?;
-    Ok(crate::actions::install(&app, doc))
+    Ok(crate::actions::install(app, asking, doc))
 }
 
-/// File > New Project: asks where to save, then creates and opens it. `None` if cancelled.
+/// File > New Project: asks where to save, then creates and opens it. `None` if cancelled
+/// or if it opened in another window.
 #[tauri::command]
-pub async fn new_project(app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
-    crate::actions::new_with_dialog(&app)
+pub async fn new_project(window: WebviewWindow, app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    crate::actions::new_with_dialog(&app, Some(window.label()))
 }
 
-/// File > Open. `None` if cancelled.
+/// File > Open. `None` if cancelled or if it opened in another window.
 #[tauri::command]
-pub async fn open_project(app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
-    crate::actions::open_with_dialog(&app, None, "Open Project")
+pub async fn open_project(window: WebviewWindow, app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    crate::actions::open_with_dialog(&app, Some(window.label()), None, "Open Project")
 }
 
-/// File > Import Microsoft Project XML. `None` if cancelled.
+/// File > Import Microsoft Project XML. `None` if cancelled or if it opened in another window.
 #[tauri::command]
-pub async fn import_project(app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
-    crate::actions::import_with_dialog(&app)
+pub async fn import_project(window: WebviewWindow, app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    crate::actions::import_with_dialog(&app, Some(window.label()))
 }
 
 /// File > Export as Microsoft Project XML.
 #[tauri::command]
-pub async fn export_project(app: AppHandle) -> Result<(), IpcError> {
-    crate::actions::export_with_dialog(&app).map(|_| ())
+pub async fn export_project(window: WebviewWindow, app: AppHandle) -> Result<(), IpcError> {
+    crate::actions::export_with_dialog(&app, window.label())
 }
 
 #[tauri::command]
-pub fn open_recent(path: String, app: AppHandle) -> Result<Snapshot, IpcError> {
-    crate::actions::open_path(&app, std::path::Path::new(&path))
+pub async fn open_recent(path: String, window: WebviewWindow, app: AppHandle) -> Result<Option<Snapshot>, IpcError> {
+    crate::actions::open_path(&app, Some(window.label()), std::path::Path::new(&path))
 }
 
 /// The import report, shaped for the dialog that shows it.
@@ -431,39 +446,53 @@ pub fn recent_files(app: AppHandle) -> Vec<RecentFile> {
 }
 
 #[tauri::command]
-pub fn apply_edit(edit: Edit, app: AppHandle, state: State<AppState>) -> Result<EditResult, IpcError> {
-    let mut guard = state.doc.lock().expect("state lock");
-    let doc = guard.as_mut().ok_or_else(|| err("no project is open"))?;
-    let created_id = match plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, edit)? {
-        Some(planned) => {
-            doc.apply(&planned.command)?;
-            planned.created.map(|id| id.0.to_string())
-        }
-        None => None,
-    };
-    Ok(EditResult { snapshot: changed(&app, doc), created_id })
+pub fn apply_edit(edit: Edit, window: WebviewWindow, app: AppHandle) -> Result<EditResult, IpcError> {
+    let label = window.label();
+    with_doc(&app, label, |doc| {
+        let created_id = match plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, edit)? {
+            Some(planned) => {
+                doc.apply(&planned.command)?;
+                planned.created.map(|id| id.0.to_string())
+            }
+            None => None,
+        };
+        Ok(EditResult { snapshot: changed(&app, label, doc), created_id })
+    })
 }
 
 /// The grid reports when a cell editor opens and closes (see [`AppState::editing_text`]).
 #[tauri::command]
-pub fn set_text_editing(editing: bool, state: State<AppState>) {
-    state.editing_text.store(editing, Ordering::Relaxed);
+pub fn set_text_editing(editing: bool, window: WebviewWindow, state: State<AppState>) {
+    let mut set = state.editing_text.lock().expect("state lock");
+    if editing {
+        set.insert(window.label().to_owned());
+    } else {
+        set.remove(window.label());
+    }
+}
+
+pub fn undo_in(app: &AppHandle, label: &str) -> Result<Snapshot, IpcError> {
+    with_doc(app, label, |doc| {
+        doc.undo()?;
+        Ok(changed(app, label, doc))
+    })
+}
+
+pub fn redo_in(app: &AppHandle, label: &str) -> Result<Snapshot, IpcError> {
+    with_doc(app, label, |doc| {
+        doc.redo()?;
+        Ok(changed(app, label, doc))
+    })
 }
 
 #[tauri::command]
-pub fn undo(app: AppHandle, state: State<AppState>) -> Result<Snapshot, IpcError> {
-    let mut guard = state.doc.lock().expect("state lock");
-    let doc = guard.as_mut().ok_or_else(|| err("no project is open"))?;
-    doc.undo()?;
-    Ok(changed(&app, doc))
+pub fn undo(window: WebviewWindow, app: AppHandle) -> Result<Snapshot, IpcError> {
+    undo_in(&app, window.label())
 }
 
 #[tauri::command]
-pub fn redo(app: AppHandle, state: State<AppState>) -> Result<Snapshot, IpcError> {
-    let mut guard = state.doc.lock().expect("state lock");
-    let doc = guard.as_mut().ok_or_else(|| err("no project is open"))?;
-    doc.redo()?;
-    Ok(changed(&app, doc))
+pub fn redo(window: WebviewWindow, app: AppHandle) -> Result<Snapshot, IpcError> {
+    redo_in(&app, window.label())
 }
 
 #[cfg(test)]

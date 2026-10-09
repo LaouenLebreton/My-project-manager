@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Main window: events only. No network, shell or file system plugins.","local":true,"windows":["main"],"permissions":["core:event:default"]}}
+{"default":{"identifier":"default","description":"Every window (start window and one per project): events only. No network, shell or file system plugins.","local":true,"windows":["main","doc-*"],"permissions":["core:event:default"]}}

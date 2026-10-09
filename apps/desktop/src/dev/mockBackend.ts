@@ -153,6 +153,8 @@ export function install() {
       switch (cmd) {
         case "get_snapshot":
           return null;
+        case "take_import_report":
+          return null;
         case "recent_files":
           return [{ name: "Office Move", path: "/Users/me/Documents/Office Move.pmproj" }];
         case "new_project":

@@ -1,76 +1,198 @@
-//! Opening, creating and closing projects, from the menu, the UI, or Finder.
+//! Opening, creating and closing projects, one window per project (owner decision
+//! 2026-10-09), from the menu, the UI, or Finder.
+//!
+//! Locking rule: never hold the documents lock while creating, showing or focusing a window.
+//! Those calls can deliver window events (focus) whose handlers take the same lock.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::document::Document;
+use crate::document::{new_id, Document};
 use crate::files::{self, EXTENSION};
-use crate::ipc::{changed, AppState, IpcError, ReportView, Snapshot};
+use crate::ipc::{snapshot, IpcError, ReportView, Snapshot};
 use crate::menu::MenuHandles;
 
 pub const CLOSED_EVENT: &str = "document-closed";
-/// Sent after an import, with the [`ReportView`] to show.
+/// Sent after an import; the report also waits in [`AppState::pending_reports`] for a window
+/// that is still loading.
 pub const IMPORT_REPORT_EVENT: &str = "import-report";
+/// The window that shows the start screen when no project is open.
+pub const START_WINDOW: &str = "main";
 
-fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
-    app.get_webview_window("main")
+#[derive(Default)]
+pub struct AppState {
+    /// Open projects, by window label.
+    pub docs: Mutex<HashMap<String, Document>>,
+    /// Windows whose cell editor is open: ⌘Z there undoes typing, not project edits.
+    pub editing_text: Mutex<HashSet<String>>,
+    /// The window the menus act on: the one most recently brought to the front.
+    pub focused: Mutex<Option<String>>,
+    /// Import reports for windows that had not loaded yet when the import finished.
+    pub pending_reports: Mutex<HashMap<String, ReportView>>,
 }
 
-pub fn show_window(app: &AppHandle) {
-    if let Some(w) = main_window(app) {
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
+fn err(message: impl Into<String>) -> IpcError {
+    IpcError { message: message.into() }
 }
 
-/// Makes `doc` the open project: backs up the previous one, updates the window title,
-/// Open Recent and the Edit menu, and returns the snapshot for the UI.
-pub fn install(app: &AppHandle, doc: Document) -> Snapshot {
+pub fn focused_label(app: &AppHandle) -> Option<String> {
     let state = app.state::<AppState>();
-    let mut guard = state.doc.lock().expect("state lock");
-    if let Some(previous) = guard.as_mut() {
-        backup_logged(app, previous);
-    }
-    files::note_recent(app, &doc.path);
-    if let Some(w) = main_window(app) {
-        let _ = w.set_title(&files::display_name(&doc.path));
-    }
-    let snap = changed(app, &doc);
-    *guard = Some(doc);
-    drop(guard);
+    let remembered = state.focused.lock().expect("lock").clone();
+    remembered.filter(|l| app.get_webview_window(l).is_some()).or_else(|| {
+        app.webview_windows().into_iter().find(|(_, w)| w.is_visible().unwrap_or(false)).map(|(l, _)| l)
+    })
+}
+
+pub fn is_focused(app: &AppHandle, label: &str) -> bool {
+    focused_label(app).as_deref() == Some(label)
+}
+
+pub fn set_focused(app: &AppHandle, label: &str) {
+    *app.state::<AppState>().focused.lock().expect("lock") = Some(label.to_owned());
     refresh_menus(app);
-    show_window(app);
-    snap
 }
 
-pub fn open_path(app: &AppHandle, path: &Path) -> Result<Snapshot, IpcError> {
-    let doc = Document::open(path).map_err(|e| IpcError { message: format!("“{}” could not be opened: {e}", files::display_name(path)) })?;
-    Ok(install(app, doc))
+fn show(window: &WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
 }
 
-/// Closes the project (after a backup) and shows the start screen.
-pub fn close(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let mut guard = state.doc.lock().expect("state lock");
-    if let Some(doc) = guard.as_mut() {
-        backup_logged(app, doc);
+/// Brings a window to the front: the start window if nothing is visible (Dock click).
+pub fn show_any_window(app: &AppHandle) {
+    let windows = app.webview_windows();
+    if windows.values().any(|w| w.is_visible().unwrap_or(false)) {
+        return;
     }
-    *guard = None;
-    drop(guard);
-    if let Some(w) = main_window(app) {
+    match windows.get(START_WINDOW).or_else(|| windows.values().next()) {
+        Some(w) => show(w),
+        None => {
+            if let Ok(w) = create_window(app, START_WINDOW) {
+                show(&w);
+            }
+        }
+    }
+}
+
+fn create_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
+    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
+        .title("Super PM")
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(720.0, 480.0)
+        .visible(false);
+    // Cascade from the front window, as document apps do.
+    if let Some(front) = focused_label(app).and_then(|l| app.get_webview_window(&l))
+        && let (Ok(pos), Ok(scale)) = (front.outer_position(), front.scale_factor())
+    {
+        let p = pos.to_logical::<f64>(scale);
+        builder = builder.position(p.x + 28.0, p.y + 28.0);
+    }
+    builder.build()
+}
+
+/// The window a newly opened project should use: the asking window if it is empty, else any
+/// empty window (such as the hidden start window), else a new one.
+fn window_for_new_project(app: &AppHandle, asking: Option<&str>) -> String {
+    let docs = app.state::<AppState>();
+    let docs = docs.docs.lock().expect("lock");
+    let empty = |label: &str| !docs.contains_key(label) && app.get_webview_window(label).is_some();
+    if let Some(label) = asking.filter(|l| empty(l)) {
+        return label.to_owned();
+    }
+    let mut windows: Vec<String> = app.webview_windows().into_keys().collect();
+    windows.sort();
+    windows.into_iter().find(|l| empty(l)).unwrap_or_else(|| format!("doc-{}", new_id().simple()))
+}
+
+/// Opens `doc` in a window (see [`window_for_new_project`]), or brings forward the window
+/// that already has this file. Returns the snapshot if it went into `asking`.
+pub fn install(app: &AppHandle, asking: Option<&str>, doc: Document) -> Option<Snapshot> {
+    let state = app.state::<AppState>();
+    let existing = state.docs.lock().expect("lock").iter().find(|(_, d)| d.path == doc.path).map(|(l, _)| l.clone());
+    if let Some(label) = existing {
+        drop(doc); // the file is already open there
+        if let Some(w) = app.get_webview_window(&label) {
+            show(&w);
+        }
+        set_focused(app, &label);
+        return None;
+    }
+
+    let label = window_for_new_project(app, asking);
+    files::note_recent(app, &doc.path);
+    let title = files::display_name(&doc.path);
+    let snap = snapshot(&doc);
+    // Registered before the window exists, so a new window finds it when its page loads.
+    state.docs.lock().expect("lock").insert(label.clone(), doc);
+
+    let window = match app.get_webview_window(&label) {
+        Some(w) => Some(w),
+        None => create_window(app, &label).map_err(|e| eprintln!("could not open a window: {e}")).ok(),
+    };
+    if let Some(w) = &window {
+        let _ = w.set_title(&title);
+        show(w);
+    }
+    let _ = app.emit_to(label.as_str(), crate::CHANGED_EVENT, snap.clone());
+    set_focused(app, &label);
+    (asking == Some(label.as_str())).then_some(snap)
+}
+
+pub fn open_path(app: &AppHandle, asking: Option<&str>, path: &Path) -> Result<Option<Snapshot>, IpcError> {
+    // Already open: bring its window forward without opening the file twice.
+    let open_in = app.state::<AppState>().docs.lock().expect("lock").iter().find(|(_, d)| d.path == path).map(|(l, _)| l.clone());
+    if let Some(label) = open_in {
+        if let Some(w) = app.get_webview_window(&label) {
+            show(&w);
+        }
+        set_focused(app, &label);
+        return Ok(None);
+    }
+    let doc = Document::open(path).map_err(|e| err(format!("“{}” could not be opened: {e}", files::display_name(path))))?;
+    Ok(install(app, asking, doc))
+}
+
+/// The window is closing: back up and close its project. Returns true if the window should
+/// stay open (hidden) because it is the last one, so the app keeps a start window.
+pub fn close_window(app: &AppHandle, label: &str) -> bool {
+    let state = app.state::<AppState>();
+    if let Some(mut doc) = state.docs.lock().expect("lock").remove(label) {
+        backup_logged(app, &mut doc);
+    }
+    state.editing_text.lock().expect("lock").remove(label);
+    let others = app.webview_windows().into_iter().any(|(l, w)| l != label && w.is_visible().unwrap_or(false));
+    if others {
+        return false;
+    }
+    if let Some(w) = app.get_webview_window(label) {
         let _ = w.set_title("Super PM");
     }
+    let _ = app.emit_to(label, CLOSED_EVENT, ());
     refresh_menus(app);
-    let _ = app.emit(CLOSED_EVENT, ());
+    true
 }
 
-/// Backs up the open project if it changed (timer, quit).
-pub fn backup_now(app: &AppHandle) {
+pub fn forget_window(app: &AppHandle, label: &str) {
     let state = app.state::<AppState>();
-    let mut guard = state.doc.lock().expect("state lock");
-    if let Some(doc) = guard.as_mut() {
+    state.docs.lock().expect("lock").remove(label);
+    state.editing_text.lock().expect("lock").remove(label);
+    state.pending_reports.lock().expect("lock").remove(label);
+    let mut focused = state.focused.lock().expect("lock");
+    if focused.as_deref() == Some(label) {
+        *focused = None;
+    }
+    drop(focused);
+    refresh_menus(app);
+}
+
+/// Backs up every open project that changed (timer, quit).
+pub fn backup_all(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    for doc in state.docs.lock().expect("lock").values_mut() {
         backup_logged(app, doc);
     }
 }
@@ -82,11 +204,13 @@ fn backup_logged(app: &AppHandle, doc: &mut Document) {
     }
 }
 
+/// Brings the menus up to date with the front window's project.
 pub fn refresh_menus(app: &AppHandle) {
+    let label = focused_label(app);
     let state = app.state::<AppState>();
-    let (open, undo, redo) = match state.doc.lock().expect("state lock").as_ref() {
-        Some(d) => (true, d.undo_label(), d.redo_label()),
-        None => (false, None, None),
+    let (open, undo, redo) = match label.as_deref().and_then(|l| state.docs.lock().ok().map(|d| d.get(l).map(|d| (d.undo_label(), d.redo_label())))) {
+        Some(Some((u, r))) => (true, u, r),
+        _ => (false, None, None),
     };
     if let Some(menu) = app.try_state::<MenuHandles>() {
         menu.update_undo(undo, redo);
@@ -99,87 +223,68 @@ fn documents_dir(app: &AppHandle) -> Option<PathBuf> {
     app.path().document_dir().ok()
 }
 
+/// A dialog attached to its window as a sheet, as Mac apps do.
+fn dialog(app: &AppHandle, parent: Option<&str>) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    let mut d = app.dialog().file();
+    if let Some(w) = parent.and_then(|l| app.get_webview_window(l)) {
+        d = d.set_parent(&w);
+    }
+    d
+}
+
 // Dialogs. These block until the user answers, so they must not run on the main thread:
 // Tauri runs async commands on a worker thread, and menu actions start one.
 
-pub fn new_with_dialog(app: &AppHandle) -> Result<Option<Snapshot>, IpcError> {
-    let mut dialog = app
-        .dialog()
-        .file()
+pub fn new_with_dialog(app: &AppHandle, asking: Option<&str>) -> Result<Option<Snapshot>, IpcError> {
+    let mut d = dialog(app, asking)
         .set_title("New Project")
         .set_file_name(format!("Untitled.{EXTENSION}"))
         .add_filter("Super PM Project", &[EXTENSION]);
     if let Some(dir) = documents_dir(app) {
-        dialog = dialog.set_directory(dir);
+        d = d.set_directory(dir);
     }
-    let Some(choice) = dialog.blocking_save_file() else { return Ok(None) };
-    let path = files::with_extension(choice.into_path().map_err(|e| IpcError { message: e.to_string() })?);
-    let doc = files::create(&path).map_err(|message| IpcError { message })?;
-    Ok(Some(install(app, doc)))
+    let Some(choice) = d.blocking_save_file() else { return Ok(None) };
+    let path = files::with_extension(choice.into_path().map_err(|e| err(e.to_string()))?);
+    let doc = files::create(&path).map_err(err)?;
+    Ok(install(app, asking, doc))
 }
 
-pub fn open_with_dialog(app: &AppHandle, directory: Option<PathBuf>, title: &str) -> Result<Option<Snapshot>, IpcError> {
-    let mut dialog = app.dialog().file().set_title(title).add_filter("Super PM Project", &[EXTENSION]);
+pub fn open_with_dialog(app: &AppHandle, asking: Option<&str>, directory: Option<PathBuf>, title: &str) -> Result<Option<Snapshot>, IpcError> {
+    let mut d = dialog(app, asking).set_title(title).add_filter("Super PM Project", &[EXTENSION]);
     if let Some(dir) = directory.or_else(|| documents_dir(app)) {
-        dialog = dialog.set_directory(dir);
+        d = d.set_directory(dir);
     }
-    let Some(choice) = dialog.blocking_pick_file() else { return Ok(None) };
-    let path = choice.into_path().map_err(|e| IpcError { message: e.to_string() })?;
-    open_path(app, &path).map(Some)
+    let Some(choice) = d.blocking_pick_file() else { return Ok(None) };
+    let path = choice.into_path().map_err(|e| err(e.to_string()))?;
+    open_path(app, asking, &path)
 }
 
-pub fn save_copy_with_dialog(app: &AppHandle) -> Result<(), IpcError> {
+pub fn save_copy_with_dialog(app: &AppHandle, label: &str) -> Result<(), IpcError> {
     let state = app.state::<AppState>();
-    let name = match state.doc.lock().expect("state lock").as_ref() {
-        Some(d) => files::display_name(&d.path),
-        None => return Ok(()),
-    };
-    let mut dialog = app
-        .dialog()
-        .file()
+    let Some(name) = state.docs.lock().expect("lock").get(label).map(|d| files::display_name(&d.path)) else { return Ok(()) };
+    let mut d = dialog(app, Some(label))
         .set_title("Save a Copy")
         .set_file_name(format!("{name} copy.{EXTENSION}"))
         .add_filter("Super PM Project", &[EXTENSION]);
     if let Some(dir) = documents_dir(app) {
-        dialog = dialog.set_directory(dir);
+        d = d.set_directory(dir);
     }
-    let Some(choice) = dialog.blocking_save_file() else { return Ok(()) };
-    let path = files::with_extension(choice.into_path().map_err(|e| IpcError { message: e.to_string() })?);
+    let Some(choice) = d.blocking_save_file() else { return Ok(()) };
+    let path = files::with_extension(choice.into_path().map_err(|e| err(e.to_string()))?);
     if path.exists() {
         // The panel asked before replacing.
         std::fs::remove_file(&path)?;
     }
-    let guard = state.doc.lock().expect("state lock");
-    if let Some(doc) = guard.as_ref() {
+    if let Some(doc) = state.docs.lock().expect("lock").get(label) {
         doc.save_copy(&path)?;
     }
     Ok(())
 }
 
-/// Runs a dialog action off the main thread and reports the outcome to the UI.
-pub fn spawn_dialog(app: &AppHandle, action: impl FnOnce(&AppHandle) -> Result<Option<Snapshot>, IpcError> + Send + 'static) {
-    let app = app.clone();
-    std::thread::spawn(move || match action(&app) {
-        Ok(Some(snapshot)) => {
-            let _ = app.emit(crate::CHANGED_EVENT, snapshot);
-        }
-        Ok(None) => {}
-        Err(e) => {
-            let _ = app.emit("error", e);
-        }
-    });
-}
-
-// Microsoft Project XML ---------------------------------------------------------------------
-
-fn err(message: impl Into<String>) -> IpcError {
-    IpcError { message: message.into() }
-}
-
 /// Import: pick the XML, convert it, ask where to save the new project, open it, and show
 /// the import report.
-pub fn import_with_dialog(app: &AppHandle) -> Result<Option<Snapshot>, IpcError> {
-    let mut pick = app.dialog().file().set_title("Import Microsoft Project XML").add_filter("Microsoft Project XML", &["xml"]);
+pub fn import_with_dialog(app: &AppHandle, asking: Option<&str>) -> Result<Option<Snapshot>, IpcError> {
+    let mut pick = dialog(app, asking).set_title("Import Microsoft Project XML").add_filter("Microsoft Project XML", &["xml"]);
     if let Some(dir) = documents_dir(app) {
         pick = pick.set_directory(dir);
     }
@@ -187,12 +292,10 @@ pub fn import_with_dialog(app: &AppHandle) -> Result<Option<Snapshot>, IpcError>
     let source = choice.into_path().map_err(|e| err(e.to_string()))?;
     let bytes = std::fs::read(&source)?;
     let text = String::from_utf8_lossy(&bytes);
-    let (project, report) = pm_interop::import_mspdi(&text, &mut crate::document::new_id)
+    let (project, report) = pm_interop::import_mspdi(&text, &mut new_id)
         .map_err(|e| err(format!("“{}” could not be imported: {e}", files::display_name(&source))))?;
 
-    let mut save = app
-        .dialog()
-        .file()
+    let mut save = dialog(app, asking)
         .set_title("Save Imported Project")
         .set_file_name(format!("{}.{EXTENSION}", files::display_name(&source)))
         .add_filter("Super PM Project", &[EXTENSION]);
@@ -202,35 +305,56 @@ pub fn import_with_dialog(app: &AppHandle) -> Result<Option<Snapshot>, IpcError>
     let Some(choice) = save.blocking_save_file() else { return Ok(None) };
     let path = files::with_extension(choice.into_path().map_err(|e| err(e.to_string()))?);
     let doc = files::create_with(&path, project).map_err(err)?;
-    let snapshot = install(app, doc);
-    let _ = app.emit(IMPORT_REPORT_EVENT, ReportView::new(&files::display_name(&source), report));
-    Ok(Some(snapshot))
+    let snapshot = install(app, asking, doc);
+    let view = ReportView::new(&files::display_name(&source), report);
+    let state = app.state::<AppState>();
+    let label = state.docs.lock().expect("lock").iter().find(|(_, d)| d.path == path).map(|(l, _)| l.clone());
+    if let Some(label) = label {
+        state.pending_reports.lock().expect("lock").insert(label.clone(), view.clone());
+        let _ = app.emit_to(label.as_str(), IMPORT_REPORT_EVENT, view);
+    }
+    Ok(snapshot)
 }
 
-pub fn export_with_dialog(app: &AppHandle) -> Result<Option<Snapshot>, IpcError> {
+pub fn export_with_dialog(app: &AppHandle, label: &str) -> Result<(), IpcError> {
     let state = app.state::<AppState>();
-    let (name, folder) = match state.doc.lock().expect("state lock").as_ref() {
-        Some(d) => (files::display_name(&d.path), d.path.parent().map(Path::to_owned)),
-        None => return Ok(None),
+    let Some((name, folder)) = state.docs.lock().expect("lock").get(label).map(|d| (files::display_name(&d.path), d.path.parent().map(Path::to_owned)))
+    else {
+        return Ok(());
     };
-    let mut dialog = app
-        .dialog()
-        .file()
+    let mut d = dialog(app, Some(label))
         .set_title("Export as Microsoft Project XML")
         .set_file_name(format!("{name}.xml"))
         .add_filter("Microsoft Project XML", &["xml"]);
     if let Some(dir) = folder {
-        dialog = dialog.set_directory(dir);
+        d = d.set_directory(dir);
     }
-    let Some(choice) = dialog.blocking_save_file() else { return Ok(None) };
+    let Some(choice) = d.blocking_save_file() else { return Ok(()) };
     let mut path = choice.into_path().map_err(|e| err(e.to_string()))?;
     if path.extension().is_none() {
         path.set_extension("xml");
     }
-    let xml = match state.doc.lock().expect("state lock").as_ref() {
+    let xml = match state.docs.lock().expect("lock").get(label) {
         Some(d) => pm_interop::export_mspdi(&d.project, d.schedule.as_ref().ok()),
-        None => return Ok(None),
+        None => return Ok(()),
     };
     std::fs::write(&path, xml)?;
-    Ok(None)
+    Ok(())
+}
+
+/// Runs a dialog action off the main thread; errors are shown in `label`'s window.
+pub fn spawn_dialog(app: &AppHandle, label: Option<String>, action: impl FnOnce(&AppHandle, Option<&str>) -> Result<(), IpcError> + Send + 'static) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = action(&app, label.as_deref()) {
+            match label.or_else(|| focused_label(&app)) {
+                Some(l) => {
+                    let _ = app.emit_to(l.as_str(), "error", e);
+                }
+                None => {
+                    let _ = app.emit("error", e);
+                }
+            }
+        }
+    });
 }

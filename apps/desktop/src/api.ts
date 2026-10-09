@@ -5,6 +5,7 @@ import type { Edit } from "./bindings/Edit";
 import type { EditResult } from "./bindings/EditResult";
 import type { IpcError } from "./bindings/IpcError";
 import type { RecentFile } from "./bindings/RecentFile";
+import type { ReportView } from "./bindings/ReportView";
 import type { Snapshot } from "./bindings/Snapshot";
 
 export type { Edit, EditResult, IpcError, RecentFile, Snapshot };
@@ -12,7 +13,8 @@ export type { Edit, EditResult, IpcError, RecentFile, Snapshot };
 /** Rejects with an IpcError whose message can be shown to the user as is. */
 export const api = {
   getSnapshot: () => invoke<Snapshot | null>("get_snapshot"),
-  openSample: () => invoke<Snapshot>("open_sample"),
+  /** Opening a project resolves with null if it opened in another window (or was cancelled). */
+  openSample: () => invoke<Snapshot | null>("open_sample"),
   applyEdit: (edit: Edit) => invoke<EditResult>("apply_edit", { edit }),
   undo: () => invoke<Snapshot>("undo"),
   redo: () => invoke<Snapshot>("redo"),
@@ -21,7 +23,8 @@ export const api = {
   openProject: () => invoke<Snapshot | null>("open_project"),
   importProject: () => invoke<Snapshot | null>("import_project"),
   exportProject: () => invoke<void>("export_project"),
-  openRecent: (path: string) => invoke<Snapshot>("open_recent", { path }),
+  openRecent: (path: string) => invoke<Snapshot | null>("open_recent", { path }),
+  takeImportReport: () => invoke<ReportView | null>("take_import_report"),
   recentFiles: () => invoke<RecentFile[]>("recent_files"),
   setTextEditing: (editing: boolean) => invoke<void>("set_text_editing", { editing }),
 };

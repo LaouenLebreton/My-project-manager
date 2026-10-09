@@ -90,6 +90,8 @@ export function App() {
       }
     }, (e) => setError(errorMessage(e)));
     api.recentFiles().then(setRecent, () => {});
+    // A window opened by an import collects its report when it loads.
+    api.takeImportReport().then((r) => r && setReport(r), () => {});
     const subscriptions = [
       // Undo and Redo from the Edit menu run in Rust; the result arrives here.
       listen<Snapshot>("document-changed", (e) => {
@@ -97,7 +99,10 @@ export function App() {
         setError(null);
       }),
       listen<IpcError>("error", (e) => setError(e.payload.message)),
-      listen<ReportView>("import-report", (e) => setReport(e.payload)),
+      listen<ReportView>("import-report", (e) => {
+        setReport(e.payload);
+        void api.takeImportReport(); // shown now, so it is no longer waiting
+      }),
       listen("document-closed", () => {
         setSnapshot(null);
         api.recentFiles().then(setRecent, () => {});
