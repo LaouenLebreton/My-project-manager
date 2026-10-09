@@ -53,6 +53,7 @@ function row(name: string, depth = 0): Row {
     fixedCostCents: 0,
     actualStart: null,
     actualFinish: null,
+    earnedValue: null,
   };
 }
 
@@ -161,6 +162,8 @@ export function install() {
       currency: "€",
       baselineSavedAt: state.baselineSavedAt,
       statusDate: state.statusDate,
+      baselineFinish: state.baselineSavedAt ? (state.rows.at(-1)?.finish ?? null) : null,
+      earnedValue: state.baselineSavedAt ? { asOf: state.statusDate ?? "2026-10-09T17:00:00", bcws: 400_000, bcwp: 320_000, acwp: 350_000, spi: 0.8, cpi: 320 / 350 } : null,
       costCents: 1_234_550,
     },
     rows: state.rows.map((r) => ({ ...r })),

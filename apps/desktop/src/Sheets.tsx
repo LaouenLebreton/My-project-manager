@@ -7,7 +7,7 @@ import type { ConstraintKind } from "./bindings/ConstraintKind";
 import type { Row } from "./bindings/Row";
 import type { Snapshot } from "./bindings/Snapshot";
 import type { TimeRange } from "./bindings/TimeRange";
-import { formatDate } from "./format";
+import { formatDate, formatMoney } from "./format";
 import { GLOSSARY } from "./help";
 
 
@@ -25,8 +25,9 @@ export const CONSTRAINTS: Record<ConstraintKind, { label: string; dated: boolean
   MFO: { label: "Must finish on", dated: true, help: "The task finishes at the end of this day even if its predecessors finish later; Super PM then warns about the conflict. Leveling never moves it." },
 };
 
-/** A modal sheet: Escape or Cancel closes; Save sends the edit and closes unless refused. */
-function Sheet({ title, onClose, onSave, children }: { title: string; onClose: () => void; onSave: () => Promise<string | null>; children: React.ReactNode }) {
+/** A modal sheet: Escape or Cancel closes; Save sends the edit and closes unless refused.
+ * Without `onSave` it only shows information, with a Done button. */
+function Sheet({ title, onClose, onSave, children }: { title: string; onClose: () => void; onSave?: () => Promise<string | null>; children: React.ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => ref.current?.showModal(), []);
@@ -35,7 +36,7 @@ function Sheet({ title, onClose, onSave, children }: { title: string; onClose: (
       <form
         onSubmit={async (e) => {
           e.preventDefault();
-          const problem = await onSave();
+          const problem = onSave ? await onSave() : null;
           if (problem) setError(problem);
           else ref.current?.close();
         }}
@@ -48,11 +49,13 @@ function Sheet({ title, onClose, onSave, children }: { title: string; onClose: (
           </p>
         )}
         <div className="report-actions">
-          <button type="button" onClick={() => ref.current?.close()}>
-            Cancel
-          </button>
+          {onSave && (
+            <button type="button" onClick={() => ref.current?.close()}>
+              Cancel
+            </button>
+          )}
           <button className="primary" type="submit">
-            Save
+            {onSave ? "Save" : "Done"}
           </button>
         </div>
       </form>
@@ -397,6 +400,93 @@ export function WorkingTime({ snapshot, send, onClose }: { snapshot: Snapshot; s
       <button type="button" onClick={() => setExceptions([...exceptions, { date: "", working: false, text: "" }])}>
         Add Day
       </button>
+    </Sheet>
+  );
+}
+
+/** "+€250" / "−€250" for variances. */
+function signedMoney(cents: number, currency: string): string {
+  return `${cents > 0 ? "+" : cents < 0 ? "−" : ""}${formatMoney(Math.abs(cents), currency)}`;
+}
+
+/** Project > Project Statistics: dates, costs and earned value at a glance. */
+export function ProjectStatistics({ snapshot, onClose }: { snapshot: Snapshot; onClose: () => void }) {
+  const p = snapshot.project;
+  const money = (c: number) => formatMoney(c, p.currency);
+  const ev = p.earnedValue;
+  const index = (v: number | null, good: string, bad: string) =>
+    v === null ? "—" : `${v.toFixed(2)} (${v >= 1 ? good : bad})`;
+  return (
+    <Sheet title="Project Statistics" onClose={onClose}>
+      <table className="stats">
+        <tbody>
+          <tr>
+            <th scope="row">Start</th>
+            <td>{formatDate(p.start)}</td>
+          </tr>
+          <tr>
+            <th scope="row">Finish</th>
+            <td>
+              {formatDate(p.finish)}
+              {p.baselineFinish && ` (baseline ${formatDate(p.baselineFinish)})`}
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">Cost</th>
+            <td>{money(p.costCents)}</td>
+          </tr>
+          <tr>
+            <th scope="row">Status date</th>
+            <td>{p.statusDate ? formatDate(p.statusDate) : "Not set (today is used)"}</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3>Earned value</h3>
+      {ev ? (
+        <>
+          <table className="stats">
+            <tbody>
+              <tr>
+                <th scope="row" title="BCWS: the baseline cost of the work that should be done by now">
+                  Planned value
+                </th>
+                <td>{money(ev.bcws)}</td>
+              </tr>
+              <tr>
+                <th scope="row" title="BCWP: the baseline cost of the work actually done">
+                  Earned value
+                </th>
+                <td>{money(ev.bcwp)}</td>
+              </tr>
+              <tr>
+                <th scope="row" title="ACWP: what the work done has cost">
+                  Actual cost
+                </th>
+                <td>{money(ev.acwp)}</td>
+              </tr>
+              <tr>
+                <th scope="row">Schedule variance (SV)</th>
+                <td>{signedMoney(ev.bcwp - ev.bcws, p.currency)}</td>
+              </tr>
+              <tr>
+                <th scope="row">Cost variance (CV)</th>
+                <td>{signedMoney(ev.bcwp - ev.acwp, p.currency)}</td>
+              </tr>
+              <tr>
+                <th scope="row">SPI</th>
+                <td>{index(ev.spi, "on or ahead of schedule", "behind schedule")}</td>
+              </tr>
+              <tr>
+                <th scope="row">CPI</th>
+                <td>{index(ev.cpi, "on or under budget", "over budget")}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="secondary small">{GLOSSARY.earned.text}</p>
+        </>
+      ) : (
+        <p className="secondary small">Save a baseline (Project &gt; Set Baseline) to compare progress against the plan.</p>
+      )}
     </Sheet>
   );
 }

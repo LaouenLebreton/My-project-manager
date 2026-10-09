@@ -857,3 +857,20 @@ label.inline {
   background: Field;
   color: FieldText;
 }
+
+/* Project Statistics: label and value pairs. */
+table.stats {
+  border-collapse: collapse;
+  margin: 4px 0 12px;
+}
+table.stats th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--text-secondary);
+  padding: 3px 16px 3px 0;
+}
+table.stats td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 0;
+}

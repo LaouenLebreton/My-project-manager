@@ -123,6 +123,35 @@ pub struct ProjectInfo {
     pub status_date: Option<String>,
     #[ts(type = "number")]
     pub cost_cents: i64,
+    /// Earned value as of the status date (or today); None without a baseline.
+    pub earned_value: Option<EarnedView>,
+    /// When the baseline had the project finish.
+    pub baseline_finish: Option<String>,
+}
+
+/// Earned value in cents, as in Microsoft Project's Earned Value table.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct EarnedView {
+    pub as_of: String,
+    /// Planned value: the baseline cost of the work due by then.
+    #[ts(type = "number")]
+    pub bcws: i64,
+    /// Earned value: the baseline cost of the work done.
+    #[ts(type = "number")]
+    pub bcwp: i64,
+    /// Actual cost of the work done.
+    #[ts(type = "number")]
+    pub acwp: i64,
+    pub spi: Option<f64>,
+    pub cpi: Option<f64>,
+}
+
+impl EarnedView {
+    fn new(as_of: Moment, ev: pm_core::Ev) -> Self {
+        EarnedView { as_of: iso(as_of), bcws: ev.bcws, bcwp: ev.bcwp, acwp: ev.acwp, spi: ev.spi(), cpi: ev.cpi() }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -191,6 +220,8 @@ pub struct Row {
     /// Progress: when work really started and finished.
     pub actual_start: Option<String>,
     pub actual_finish: Option<String>,
+    /// Earned value for this task (summaries add up theirs); None without a baseline.
+    pub earned_value: Option<EarnedView>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -334,6 +365,8 @@ pub fn snapshot(doc: &Document) -> Snapshot {
     let p = &doc.project;
     let sched = doc.schedule.as_ref().ok();
     let outline_rows = outline(p);
+    let as_of = p.status_date.unwrap_or_else(|| Moment::from_datetime(jiff::Zoned::now().datetime()));
+    let earned = pm_core::earned_value(p, &doc.loads, as_of);
     let row_number: HashMap<TaskId, usize> = outline_rows.iter().enumerate().map(|(i, r)| (r.id, i + 1)).collect();
     let mut incoming: HashMap<TaskId, Vec<PredecessorEntry>> = HashMap::new();
     for d in p.dependencies.values() {
@@ -395,6 +428,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 fixed_cost_cents: t.fixed_cost.0,
                 actual_start: t.actual.start().map(iso),
                 actual_finish: t.actual.finish().map(iso),
+                earned_value: earned.as_ref().and_then(|e| e.tasks.get(&r.id)).map(|ev| EarnedView::new(as_of, *ev)),
                 leveled_from: s
                     .filter(|_| t.leveling_delay.get() > 0)
                     .map(|s| iso(p.calendar.add_working(s.early_start, -t.leveling_delay.get()))),
@@ -471,6 +505,8 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             baseline_saved_at: p.baseline.as_ref().map(|b| b.saved_at.clone()),
             status_date: p.status_date.map(iso),
             cost_cents: doc.loads.project_cost,
+            earned_value: earned.as_ref().map(|e| EarnedView::new(as_of, e.project)),
+            baseline_finish: p.baseline.as_ref().and_then(|b| b.tasks.values().map(|t| t.finish).max()).map(iso),
         },
         rows,
         links,

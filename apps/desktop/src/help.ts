@@ -46,6 +46,10 @@ export const GLOSSARY = {
     term: "% Done",
     text: "How much of a task is finished. Typing a percentage records the actual start (and, at 100%, the actual finish) from the schedule; those dates then stay fixed whatever happens to the links. Project > Update Project fills this in for every task up to a day.",
   },
+  earned: {
+    term: "Earned value",
+    text: "Compares the work done with the baseline, in money, as of the status date. Planned value is what should be done by then, earned value what is done, actual cost what it cost. An SPI or CPI below 1 means behind schedule or over budget. Keep % Done up to date for meaningful numbers.",
+  },
   overallocated: {
     term: "Over-allocated",
     text: "A resource asked for more than it has at the same time, such as one person on two full-time tasks at once. Marked ⚠. Move a task, share the work, or lower the units to fix it.",

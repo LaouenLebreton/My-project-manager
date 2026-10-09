@@ -6,6 +6,7 @@
 
 pub mod calendar;
 pub mod command;
+pub mod earned;
 pub mod leveling;
 pub mod model;
 pub mod outline;
@@ -19,6 +20,7 @@ pub use command::{apply, Command, CommandError, LinkChange, ProjectChange, Resou
 pub use model::*;
 pub use outline::{outline, OutlineRow};
 pub use text::{format_resource, parse_money, parse_resource_list, PredecessorEntry, ResourceEntry, TextError, Units};
+pub use earned::{earned_value, EarnedValue, Ev};
 pub use leveling::{level, Leveled, Unresolved};
 pub use resources::{capture_baseline, loads, Loads, Overload, ResourceLoad};
 pub use schedule::{check, schedule, ConstraintConflict, Schedule, ScheduleError, TaskSchedule};

@@ -7,7 +7,7 @@ import { Gantt, type GanttHandle } from "./Gantt";
 import { FindBar } from "./FindBar";
 import { HelpSheet } from "./HelpSheet";
 import { ResourceSheet } from "./ResourceSheet";
-import { ProjectInfo, TaskInfo, UpdateProject, WorkingTime } from "./Sheets";
+import { ProjectInfo, ProjectStatistics, TaskInfo, UpdateProject, WorkingTime } from "./Sheets";
 import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { WbsChart } from "./WbsChart";
@@ -30,7 +30,7 @@ export function App() {
 
   const [recent, setRecent] = useState<RecentFile[]>([]);
   const [report, setReport] = useState<ReportView | null>(null);
-  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | null>(null);
+  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
   const [view, setView] = useState<"tasks" | "resources" | "wbs">("tasks");
@@ -139,6 +139,7 @@ export function App() {
         if (e.payload === "project.clear_leveling") void editRef.current({ kind: "ClearLeveling" }).catch((err) => setError(errorMessage(err)));
         if (e.payload === "project.set_baseline") void editRef.current({ kind: "SetBaseline" }).catch((err) => setError(errorMessage(err)));
         if (e.payload === "project.update") setOverlay("update");
+        if (e.payload === "project.statistics") setOverlay("stats");
         const percent = /^task\.percent_(\d+)$/.exec(e.payload);
         if (percent && selectedRef.current.size)
           void editRef.current({ kind: "SetPercentComplete", ids: [...selectedRef.current], percent: Number(percent[1]) }).catch((err) => setError(errorMessage(err)));
@@ -170,6 +171,7 @@ export function App() {
       { name: "Level Resources", run: () => void edit({ kind: "LevelResources" }).catch((e) => setError(errorMessage(e))) },
       { name: "Set Baseline", run: () => void edit({ kind: "SetBaseline" }).catch((e) => setError(errorMessage(e))) },
       { name: "Clear Baseline", run: () => void edit({ kind: "ClearBaseline" }).catch((e) => setError(errorMessage(e))) },
+      { name: "Project Statistics… (earned value)", run: () => setOverlay("stats") },
       { name: "Update Project… (progress up to a day)", run: () => setOverlay("update") },
       ...[0, 25, 50, 75, 100].map((n) => ({
         name: `Mark Selected Tasks ${n}% Complete`,
@@ -193,6 +195,7 @@ export function App() {
       {overlay === "tour" && snapshot && <Tour onDone={() => setOverlay(null)} />}
       {overlay === "commands" && <CommandBar commands={commands} onClose={() => setOverlay(null)} />}
       {overlay === "project" && snapshot && <ProjectInfo snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {overlay === "stats" && snapshot && <ProjectStatistics snapshot={snapshot} onClose={() => setOverlay(null)} />}
       {overlay === "update" && snapshot && <UpdateProject snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
       {overlay === "working" && snapshot && <WorkingTime snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
       {infoRow && <TaskInfo key={infoRow.id} row={infoRow} send={edit} onClose={() => setInfoRow(null)} />}

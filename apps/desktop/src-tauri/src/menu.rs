@@ -39,6 +39,7 @@ pub mod id {
     pub const SET_BASELINE: &str = "project.set_baseline";
     pub const CLEAR_BASELINE: &str = "project.clear_baseline";
     pub const UPDATE_PROJECT: &str = "project.update";
+    pub const STATISTICS: &str = "project.statistics";
     /// `task.percent_0` … `task.percent_100`: Microsoft Project's 0%…100% Complete buttons.
     pub const PERCENT: [(&str, &str); 5] = [
         ("task.percent_0", "0% Complete"),
@@ -196,8 +197,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let set_baseline = item(app, id::SET_BASELINE, "Set Baseline", None)?;
     let clear_baseline = item(app, id::CLEAR_BASELINE, "Clear Baseline", None)?;
     let update_project = item(app, id::UPDATE_PROJECT, "Update Project…", None)?;
+    let statistics = item(app, id::STATISTICS, "Project Statistics…", None)?;
     let project = SubmenuBuilder::new(app, "Project")
         .item(&project_info)
+        .item(&statistics)
         .item(&working_time)
         .separator()
         .item(&level)
@@ -236,7 +239,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, level, clear_leveling, set_baseline, clear_baseline, update_project];
+    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }
