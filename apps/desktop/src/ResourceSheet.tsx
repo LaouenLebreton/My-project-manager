@@ -67,6 +67,9 @@ const COLUMNS: Column[] = [
 ];
 const NAME_COL = 1;
 const TEMPLATE = COLUMNS.map((c) => c.width).join(" ");
+/** The columns' combined minimum width: rows and headers never get narrower, so a narrow
+ * window scrolls sideways with headers and rows staying in line. */
+const MIN_WIDTH = COLUMNS.reduce((sum, c) => sum + Number(/(\d+)px/.exec(c.width)?.[1] ?? 0), 0);
 
 /**
  * The Resource Sheet: the project's people, equipment and materials. Keyboard first, like the
@@ -83,6 +86,7 @@ export function ResourceSheet({ snapshot, onEdit, onTextEditing }: { snapshot: S
     editingRef.current = e;
     setEditingState(e);
   };
+  const [scrollLeft, setScrollLeft] = useState(0);
   const gridRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const row = Math.min(active.row, rowCount - 1);
@@ -181,14 +185,17 @@ export function ResourceSheet({ snapshot, onEdit, onTextEditing }: { snapshot: S
         tabIndex={0}
         onKeyDown={onGridKey}
       >
-        <div className="grid-header" role="row" style={{ gridTemplateColumns: TEMPLATE, height: 34 }}>
-          {COLUMNS.map((c, i) => (
-            <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined}>
-              {c.label}
-            </div>
-          ))}
+        <div className="grid-header-wrap">
+          <div className="grid-header" role="row" style={{ gridTemplateColumns: TEMPLATE, height: 34, minWidth: MIN_WIDTH, transform: `translateX(${-scrollLeft}px)` }}>
+            {COLUMNS.map((c, i) => (
+              <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined}>
+                {c.label}
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="grid-body">
+        <div className="grid-body" onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}>
+          <div style={{ minWidth: MIN_WIDTH }}>
           {[...rows, undefined].map((r, i) => (
             <div
               key={r?.id ?? "new"}
@@ -243,6 +250,7 @@ export function ResourceSheet({ snapshot, onEdit, onTextEditing }: { snapshot: S
               })}
             </div>
           ))}
+          </div>
         </div>
       </div>
       <ResourceDetails resource={current} />

@@ -63,6 +63,9 @@ const COLUMNS: Column[] = [
 ];
 const NAME_COL = 2;
 const TEMPLATE = COLUMNS.map((c) => c.width).join(" ");
+/** The columns' combined minimum width: rows and headers never get narrower, so a narrow
+ * window scrolls sideways with headers and rows staying in line. */
+const MIN_WIDTH = COLUMNS.reduce((sum, c) => sum + Number(/(\d+)px/.exec(c.width)?.[1] ?? 0), 0);
 
 export interface GridProps {
   snapshot: Snapshot;
@@ -120,6 +123,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     setEditingState(e);
   };
   const [scrollTop, setScrollTop] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
   const [viewport, setViewport] = useState(600);
   const bodyRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -371,23 +375,31 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       tabIndex={0}
       onKeyDown={onGridKey}
     >
-      <div className="grid-header" role="row" aria-rowindex={1} style={{ gridTemplateColumns: TEMPLATE, height: HEADER_HEIGHT }}>
-        {COLUMNS.map((c, i) => (
-          <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined} data-tour={c.tour}>
-            {c.label}
-            {c.help && <HeaderHelp term={c.help} />}
-          </div>
-        ))}
+      <div className="grid-header-wrap">
+        <div
+          className="grid-header"
+          role="row"
+          aria-rowindex={1}
+          style={{ gridTemplateColumns: TEMPLATE, height: HEADER_HEIGHT, minWidth: MIN_WIDTH, transform: `translateX(${-scrollLeft}px)` }}
+        >
+          {COLUMNS.map((c, i) => (
+            <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined} data-tour={c.tour}>
+              {c.label}
+              {c.help && <HeaderHelp term={c.help} />}
+            </div>
+          ))}
+        </div>
       </div>
       <div
         ref={bodyRef}
         className="grid-body"
         onScroll={(e) => {
           setScrollTop(e.currentTarget.scrollTop);
+          setScrollLeft(e.currentTarget.scrollLeft);
           onScrollTop(e.currentTarget.scrollTop);
         }}
       >
-        <div style={{ height: rowCount * ROW_HEIGHT, position: "relative" }}>
+        <div style={{ height: rowCount * ROW_HEIGHT, position: "relative", minWidth: MIN_WIDTH }}>
           {visible.map((i) => {
             const r = rows[i];
             const selected = r ? selectedIds.has(r.id) : false;

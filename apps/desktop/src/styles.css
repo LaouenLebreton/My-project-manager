@@ -685,3 +685,16 @@ label.inline {
   margin: 4px 0;
   padding-left: 18px;
 }
+
+/* Headers follow the body's sideways scroll. Clipped left and right only, so the "?" help
+   popovers can still drop below the header. */
+.grid-header-wrap {
+  position: relative;
+  z-index: 3;
+  clip-path: inset(0 0 -600px 0);
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+}
+
+.grid-header-wrap .grid-header {
+  border-bottom: none;
+}
