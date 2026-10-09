@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Edit, Snapshot } from "./api";
+import type { Edit, EditResult, Snapshot } from "./api";
 import type { Row } from "./bindings/Row";
 import { formatDate } from "./format";
 
@@ -65,7 +65,7 @@ export interface GanttProps {
   snapshot: Snapshot;
   scrollTop: number;
   selectedIds: Set<string>;
-  onEdit: (edit: Edit) => Promise<unknown>;
+  onEdit: (edit: Edit) => Promise<EditResult>;
   onSelectRow: (row: number) => void;
   onScrollBy: (dy: number) => void;
   onMessage: (message: string | null) => void;
@@ -489,11 +489,27 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
     }
     if (!edit) return;
     try {
-      await onEdit(edit);
+      const result = await onEdit(edit);
+      // A drag cannot pull a task earlier than its links allow; say so instead of silently
+      // leaving the bar where it was.
+      if (edit.kind === "MoveTask") {
+        const moved = result.snapshot.rows.find((x) => x.id === r.id);
+        const start = moved?.start?.slice(0, 10);
+        if (start && start > edit.startDate) {
+          flash(`“${r.name}” cannot start before ${formatDate(moved!.start)}: its predecessors finish later. Change the links to move it earlier.`);
+        }
+      }
     } catch (err) {
-      onMessage((err as { message?: string }).message ?? String(err));
+      flash((err as { message?: string }).message ?? String(err));
     }
   };
+
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function flash(message: string) {
+    onMessage(message);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => onMessage(null), 8000);
+  }
 
   const onWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {

@@ -77,6 +77,9 @@ export interface GridHandle {
   deleteSelection: () => void;
   /** The task under the cursor, for Task Info. */
   activeRow: () => Row | undefined;
+  /** Edit > Find: the next task whose name contains `text`, wrapping. While typing
+   * (`fromCurrent`), the current row counts; Return moves past it. */
+  findNext: (text: string, fromCurrent?: boolean) => boolean;
 }
 
 interface Editing {
@@ -172,6 +175,18 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       if (selection.length) void send({ kind: "DeleteTasks", ids: selection.map((r) => r.id) });
     },
     activeRow: () => current,
+    findNext: (text: string, fromCurrent = false) => {
+      const needle = text.trim().toLocaleLowerCase();
+      if (!needle) return false;
+      for (let k = fromCurrent ? 0 : 1; k <= rows.length; k++) {
+        const i = (row + k) % rows.length;
+        if (rows[i].name.toLocaleLowerCase().includes(needle)) {
+          moveTo(i, NAME_COL);
+          return true;
+        }
+      }
+      return false;
+    },
   }));
 
   // Moves can follow an edit that added rows, before this render's rowCount is updated.

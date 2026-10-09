@@ -4,6 +4,7 @@ import { api, errorMessage, type Edit, type IpcError, type RecentFile, type Snap
 import { formatDate } from "./format";
 import { CommandBar, type CommandItem } from "./CommandBar";
 import { Gantt, type GanttHandle } from "./Gantt";
+import { FindBar } from "./FindBar";
 import { HelpSheet } from "./HelpSheet";
 import { ProjectInfo, TaskInfo, WorkingTime } from "./Sheets";
 import type { Row } from "./bindings/Row";
@@ -26,6 +27,7 @@ export function App() {
   const [report, setReport] = useState<ReportView | null>(null);
   const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
+  const [finding, setFinding] = useState(false);
   const ganttRef = useRef<GanttHandle>(null);
 
   const run = useCallback(async (action: () => Promise<Snapshot | null>) => {
@@ -107,6 +109,7 @@ export function App() {
         if (e.payload === "help.contents") setOverlay("help");
         if (e.payload === "help.tour") setOverlay("tour");
         if (e.payload === "view.command_bar") setOverlay((o) => (o === "commands" ? null : "commands"));
+        if (e.payload === "edit.find") setFinding(true);
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
@@ -130,6 +133,7 @@ export function App() {
   if (snapshot) {
     commands.push(
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
+      { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
       { name: "Project Info…", run: () => setOverlay("project") },
       { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
@@ -217,6 +221,7 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
+      {finding && <FindBar onFind={(t, fromCurrent) => gridRef.current?.findNext(t, fromCurrent) ?? false} onClose={() => setFinding(false)} />}
       <div className="workspace">
         <div className="pane" style={{ width: gridWidth }}>
           <Grid

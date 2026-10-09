@@ -136,6 +136,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     // they work in text fields.
     let undo = item(app, id::UNDO, "Undo", Some("CmdOrCtrl+Z"))?;
     let redo = item(app, id::REDO, "Redo", Some("CmdOrCtrl+Shift+Z"))?;
+    let find = item(app, id::FIND, "Find…", Some("CmdOrCtrl+F"))?;
     let edit = SubmenuBuilder::new(app, "Edit")
         .item(&undo)
         .item(&redo)
@@ -145,7 +146,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .paste()
         .select_all()
         .separator()
-        .item(&item(app, id::FIND, "Find…", Some("CmdOrCtrl+F"))?)
+        .item(&find)
         .build()?;
 
     let view = SubmenuBuilder::new(app, "View")
@@ -192,6 +193,6 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![task_info, indent, outdent, project_info, working_time];
+    let document_items = vec![find, task_info, indent, outdent, project_info, working_time];
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }
