@@ -1,0 +1,30 @@
+[package]
+name = "pm-server"
+description = "Super PM team server: accounts, shared projects, live sync and chat"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "super-pm-server"
+path = "src/main.rs"
+
+[dependencies]
+pm-core.workspace = true
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
+axum = { version = "0.8.9", features = ["ws"] }
+getrandom = "0.4.3"
+hex = "0.4.3"
+jiff = { version = "0.2.36", default-features = false, features = ["std"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.11.0"
+thiserror.workspace = true
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "sync", "signal"] }
+uuid = { version = "1.27", default-features = false, features = ["std", "v7", "serde"] }
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+tower = { version = "0.5.3", features = ["util"] }

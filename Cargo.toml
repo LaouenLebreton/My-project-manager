@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pm-core", "crates/pm-store", "crates/pm-interop", "apps/desktop/src-tauri"]
+members = ["crates/pm-core", "crates/pm-store", "crates/pm-interop", "crates/pm-server", "apps/desktop/src-tauri"]
 
 [workspace.package]
 edition = "2024"
