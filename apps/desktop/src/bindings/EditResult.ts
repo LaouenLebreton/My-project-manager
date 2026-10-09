@@ -5,4 +5,8 @@ export type EditResult = { snapshot: Snapshot,
 /**
  * The task the edit created, if any, so the grid can select it.
  */
-createdId: string | null, };
+createdId: string | null, 
+/**
+ * A result to tell the user about (leveling), in plain words.
+ */
+message: string | null, };

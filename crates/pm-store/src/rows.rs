@@ -56,8 +56,8 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
     };
     conn.execute(
         "INSERT OR REPLACE INTO task
-         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             t.id.0.to_string(),
             t.parent.map(|p| p.0.to_string()),
@@ -69,6 +69,7 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
             cdate,
             t.percent_complete.get(),
             t.notes,
+            t.leveling_delay.get(),
         ],
     )?;
     Ok(())
@@ -140,6 +141,7 @@ fn task_from_row(r: &Row) -> Result<Task, StoreError> {
         is_milestone: r.get(5)?,
         constraint,
         percent_complete: Percent::new(percent).ok_or_else(|| StoreError::Damaged(format!("percent {percent}")))?,
+        leveling_delay: Duration::minutes(r.get(10)?).map_err(|e| StoreError::Damaged(e.to_string()))?,
         notes: r.get(9)?,
     })
 }
@@ -157,7 +159,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
 
     let mut tasks = BTreeMap::new();
     let mut stmt = conn.prepare(
-        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes FROM task",
+        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min FROM task",
     )?;
     let mut q = stmt.query([])?;
     while let Some(r) = q.next()? {

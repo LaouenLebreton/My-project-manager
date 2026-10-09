@@ -67,6 +67,10 @@ pub enum Edit {
         material_label: Option<String>,
     },
     DeleteResources { ids: Vec<String> },
+    /// Project > Level Resources: delay tasks so nobody is over-allocated.
+    LevelResources,
+    /// Project > Clear Leveling: remove every leveling delay.
+    ClearLeveling,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
@@ -118,6 +122,8 @@ pub struct DayException {
 pub struct Planned {
     pub command: Command,
     pub created: Option<TaskId>,
+    /// Something to tell the user about the result (leveling).
+    pub message: Option<String>,
 }
 
 fn err(message: impl Into<String>) -> IpcError {
@@ -146,7 +152,7 @@ fn child_keys(p: &Project, parent: Option<TaskId>) -> Vec<&SortKey> {
 /// The command for an edit, or `None` when it would change nothing (e.g. indenting the
 /// first task).
 pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit) -> Result<Option<Planned>, IpcError> {
-    let plain = |command| Ok(Some(Planned { command, created: None }));
+    let plain = |command| Ok(Some(Planned { command, created: None, message: None }));
     match edit {
         Edit::AddTask { after_id, name } => {
             let after = after_id.as_deref().map(task_id).transpose()?.map(|a| task(p, a)).transpose()?;
@@ -167,11 +173,12 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     is_milestone: false,
                     constraint: Constraint::AsSoonAsPossible,
                     percent_complete: Percent::default(),
+                    leveling_delay: Duration::ZERO,
                     notes: String::new(),
                 }],
                 dependencies: vec![],
             };
-            Ok(Some(Planned { command, created: Some(id) }))
+            Ok(Some(Planned { command, created: Some(id), message: None }))
         }
         Edit::RenameTask { id, name } => plain(Command::SetTask { id: task_id(&id)?, change: TaskChange::Name(name) }),
         Edit::SetDuration { id, text } => set_duration(p, units, task_id(&id)?, &text),
@@ -192,8 +199,8 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 lag: 0,
             },
         }),
-        Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None })),
-        Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None })),
+        Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
+        Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
         Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
@@ -243,7 +250,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             {
                 commands.push(planned.command);
             }
-            Ok(batch("Change Task Info", commands).map(|command| Planned { command, created: None }))
+            Ok(batch("Change Task Info", commands).map(|command| Planned { command, created: None, message: None }))
         }
         Edit::SetProjectStart { date } => {
             let start = p.calendar.next_working(day_start(&date)?);
@@ -285,7 +292,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             };
             let resource = new_resource(&name, SortKey::between(before, next));
             let command = Command::InsertResources { resources: vec![resource], assignments: vec![] };
-            Ok(Some(Planned { command, created: None }))
+            Ok(Some(Planned { command, created: None, message: None }))
         }
         Edit::UpdateResource { id, name, initials, resource_type, max_units, material_label } => {
             let id = resource_id(&id)?;
@@ -317,7 +324,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             if let Some(l) = material_label.filter(|l| *l != r.material_label) {
                 commands.push(set(ResourceChange::MaterialLabel(l)));
             }
-            Ok(batch("Change Resource", commands).map(|command| Planned { command, created: None }))
+            Ok(batch("Change Resource", commands).map(|command| Planned { command, created: None, message: None }))
         }
         Edit::DeleteResources { ids } => {
             let ids = ids.iter().map(|s| resource_id(s)).collect::<Result<Vec<_>, _>>()?;
@@ -325,6 +332,12 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 return Ok(None);
             }
             plain(Command::DeleteResources { ids })
+        }
+        Edit::LevelResources => level_resources(p),
+        Edit::ClearLeveling => {
+            let set = |t: &Task| Command::SetTask { id: t.id, change: TaskChange::LevelingDelay(Duration::ZERO) };
+            let commands: Vec<Command> = p.tasks.values().filter(|t| t.leveling_delay.get() > 0).map(set).collect();
+            Ok(batch("Clear Leveling", commands).map(|command| Planned { command, created: None, message: None }))
         }
         Edit::MoveTask { id, start_date } => {
             let id = task_id(&id)?;
@@ -460,9 +473,51 @@ fn set_task_resources(p: &Project, task: TaskId, text: &str) -> Result<Option<Pl
     }
     Ok(match commands.len() {
         0 => None,
-        1 => commands.pop().map(|command| Planned { command, created: None }),
-        _ => Some(Planned { command: Command::Batch { label: "Change Resources".into(), commands }, created: None }),
+        1 => commands.pop().map(|command| Planned { command, created: None, message: None }),
+        _ => Some(Planned { command: Command::Batch { label: "Change Resources".into(), commands }, created: None, message: None }),
     })
+}
+
+/// Leveling as one undo step, with a plain-words summary of what happened.
+fn level_resources(p: &Project) -> Result<Option<Planned>, IpcError> {
+    let result = pm_core::level(p).map_err(|e| err(format!("resources cannot be leveled while dates cannot be calculated: {e}")))?;
+    let mut commands = Vec::new();
+    for t in p.tasks.values() {
+        let wanted = result.delays.get(&t.id).copied().unwrap_or(0);
+        if wanted != t.leveling_delay.get() {
+            commands.push(Command::SetTask { id: t.id, change: TaskChange::LevelingDelay(Duration::minutes(wanted)?) });
+        }
+    }
+    let name = |id: &TaskId| p.tasks.get(id).map_or_else(String::new, |t| format!("“{}”", t.name));
+    let person = |id: &ResourceId| p.resources.get(id).map_or_else(String::new, |r| r.name.clone());
+    let delayed = result.delays.len();
+    let mut message = match delayed {
+        0 if result.unresolved.is_empty() => "Nobody is over-allocated, so no task needed to move.".to_owned(),
+        0 => "No task could be moved to help.".to_owned(),
+        1 => "1 task now starts later so nobody is over-allocated.".to_owned(),
+        n => format!("{n} tasks now start later so nobody is over-allocated."),
+    };
+    for u in &result.unresolved {
+        message.push(' ');
+        message.push_str(&match u {
+            pm_core::Unresolved::TooMuchOnOneTask { resource, task, units, max_units } => format!(
+                "Still over-allocated: {} is assigned at {units}% on {} but can give {max_units}%; lower the units or raise the maximum.",
+                person(resource),
+                name(task)
+            ),
+            pm_core::Unresolved::FixedDates { resource, tasks } => format!(
+                "Still over-allocated: {} on {}, which must start on fixed dates.",
+                person(resource),
+                tasks.iter().map(name).collect::<Vec<_>>().join(" and ")
+            ),
+            pm_core::Unresolved::GaveUp { resource, .. } => format!("Leveling stopped before it could clear every clash for {}.", person(resource)),
+        });
+    }
+    if delayed > 0 {
+        message.push_str(" Project > Clear Leveling (or Undo) takes the delays away.");
+    }
+    let command = batch("Level Resources", commands);
+    Ok(Some(Planned { command: command.unwrap_or(Command::Batch { label: "Level Resources".into(), commands: vec![] }), created: None, message: Some(message) }))
 }
 
 /// Midnight at the start of a `YYYY-MM-DD` date.
@@ -494,7 +549,7 @@ fn set_duration(p: &Project, units: &Units, id: TaskId, text: &str) -> Result<Op
         (m, false) if m == t.duration.get() => return Ok(None),
         (m, false) => set(TaskChange::Duration(Duration::minutes(m)?)),
     };
-    Ok(Some(Planned { command, created: None }))
+    Ok(Some(Planned { command, created: None, message: None }))
 }
 
 /// Replaces the task's incoming links with the ones typed, changing only what differs.
@@ -535,8 +590,8 @@ fn set_predecessors(p: &Project, units: &Units, id: TaskId, text: &str) -> Resul
     }
     Ok(match commands.len() {
         0 => None,
-        1 => commands.pop().map(|command| Planned { command, created: None }),
-        _ => Some(Planned { command: Command::Batch { label: "Change Predecessors".into(), commands }, created: None }),
+        1 => commands.pop().map(|command| Planned { command, created: None, message: None }),
+        _ => Some(Planned { command: Command::Batch { label: "Change Predecessors".into(), commands }, created: None, message: None }),
     })
 }
 
@@ -675,6 +730,7 @@ mod tests {
                     is_milestone: false,
                     constraint: Constraint::AsSoonAsPossible,
                     percent_complete: Percent::default(),
+                    leveling_delay: Duration::ZERO,
                     notes: String::new(),
                 },
             );

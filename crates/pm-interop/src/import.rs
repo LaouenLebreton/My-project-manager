@@ -160,6 +160,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
                 is_milestone,
                 constraint,
                 percent_complete: Percent::new(percent).expect("clamped"),
+                leveling_delay: Duration::ZERO,
                 notes: t.raw_of("Notes").unwrap_or("").to_owned(),
             },
         );

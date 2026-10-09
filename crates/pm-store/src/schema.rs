@@ -85,6 +85,10 @@ pub const MIGRATIONS: &[&str] = &[
     CREATE INDEX assignment_task ON assignment (task_id);
     CREATE INDEX assignment_resource ON assignment (resource_id);
     "#,
+    // 2 -> 3: leveling delay per task (iteration 2).
+    r#"
+    ALTER TABLE task ADD COLUMN leveling_delay_min INTEGER NOT NULL DEFAULT 0 CHECK (leveling_delay_min >= 0);
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

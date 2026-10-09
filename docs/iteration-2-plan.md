@@ -5,7 +5,7 @@ progress tracking and the other views come in later iterations.
 
 ## Scope, in steps (each one committed and runnable)
 
-Status 2026-10-09: steps 1 to 6 done. Next, after the owner confirms: leveling, then costs.
+Status 2026-10-09: steps 1 to 7 done; costs (8) next, then the WBS diagram (9).
 
 1. **Model, commands, file format.** Resources (people, equipment, materials) and assignments
    (who works on which task, at what percentage). Commands with inverses, as for tasks.
@@ -39,3 +39,13 @@ resolve over-allocation) and **costs** (rates, fixed costs, task and project tot
   to the tasks inside.
 - **Material resources** (concrete, licences) have a quantity instead of a percentage and are
   never over-allocated.
+
+## Next (owner confirmed 2026-10-09)
+
+7. **Leveling.** Delay tasks so no work resource is over-allocated, without breaking links or
+   constraints. On demand (Project > Level Resources), one undoable step, like Microsoft
+   Project's manual leveling. Leveling delays are stored per task, shown, and can be cleared.
+8. **Costs.** Standard rate per hour for work resources, cost per unit for materials, fixed
+   cost per task; task, summary and project totals.
+9. **Work breakdown structure diagram.** A WBS view: the outline drawn as a tree of boxes
+   (project at the top, phases below, tasks under them), with WBS codes (1, 1.2, 1.2.3).

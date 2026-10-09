@@ -277,6 +277,18 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
         ctx.fill();
       }
     } else {
+      if (r.leveledFrom) {
+        // Leveling delay: a thin line from where the task would have started.
+        const from = x(r.leveledFrom);
+        ctx.strokeStyle = c.secondary;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(from, cy);
+        ctx.lineTo(x1, cy);
+        ctx.moveTo(from, cy - 3);
+        ctx.lineTo(from, cy + 3);
+        ctx.stroke();
+      }
       const top = cy - BAR_HEIGHT / 2;
       ctx.fillStyle = r.critical ? c.critical : c.bar;
       roundRect(ctx, x1, top, x2 - x1, BAR_HEIGHT, 3);

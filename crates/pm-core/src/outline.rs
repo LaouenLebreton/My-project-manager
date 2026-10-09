@@ -177,6 +177,7 @@ mod tests {
             is_milestone: false,
             constraint: Constraint::AsSoonAsPossible,
             percent_complete: Percent::default(),
+            leveling_delay: Duration::ZERO,
             notes: String::new(),
         }
     }

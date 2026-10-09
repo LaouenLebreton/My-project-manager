@@ -27,6 +27,7 @@ pub fn office_move(start: Moment) -> Project {
                 is_milestone: milestone,
                 constraint: Constraint::AsSoonAsPossible,
                 percent_complete: Percent::default(),
+                leveling_delay: Duration::ZERO,
                 notes: String::new(),
             },
         );
@@ -121,6 +122,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
                 is_milestone: !is_phase && next(20) == 0,
                 constraint: Constraint::AsSoonAsPossible,
                 percent_complete: Percent::default(),
+                leveling_delay: Duration::ZERO,
                 notes: String::new(),
             },
         );

@@ -46,6 +46,16 @@ function Sheet({ title, onClose, onSave, children }: { title: string; onClose: (
   );
 }
 
+/** "1 working day", "2.5 working days", "3 working hours". */
+function leveledBy(minutes: number): string {
+  if (minutes >= 480) {
+    const days = Math.round((minutes / 480) * 100) / 100;
+    return `${days} working ${days === 1 ? "day" : "days"}`;
+  }
+  const hours = Math.round((minutes / 60) * 100) / 100;
+  return `${hours} working ${hours === 1 ? "hour" : "hours"}`;
+}
+
 async function attempt(send: Send, edit: Edit): Promise<string | null> {
   try {
     await send(edit);
@@ -122,6 +132,16 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
               <input id="ti-resources" value={resources} onChange={(e) => setResources(e.target.value)} placeholder="Alex, Sam[50%]" />
               <p className="secondary small">{GLOSSARY.resources.text}</p>
             </div>
+          </>
+        )}
+
+        {row.levelingDelayMinutes > 0 && (
+          <>
+            <span className="form-label">Leveling</span>
+            <p className="secondary small">
+              Starts {leveledBy(row.levelingDelayMinutes)} later than it could, so its resources are not over-allocated. Project &gt; Clear Leveling removes
+              this.
+            </p>
           </>
         )}
 

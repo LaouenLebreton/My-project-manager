@@ -30,6 +30,7 @@ export function App() {
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
   const [view, setView] = useState<"tasks" | "resources">("tasks");
+  const [notice, setNotice] = useState<string | null>(null);
   const ganttRef = useRef<GanttHandle>(null);
 
   const run = useCallback(async (action: () => Promise<Snapshot | null>) => {
@@ -49,6 +50,7 @@ export function App() {
     const t1 = performance.now();
     setSnapshot(result.snapshot);
     setError(null);
+    if (result.message) setNotice(result.message);
     if (import.meta.env.DEV) {
       // Development readout for the performance check: round trip, then until painted.
       requestAnimationFrame(() =>
@@ -72,6 +74,10 @@ export function App() {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  // Menu events are subscribed once; the ref always reaches the current edit function.
+  const editRef = useRef(edit);
+  editRef.current = edit;
 
   const textEditing = useCallback((editing: boolean) => {
     void api.setTextEditing(editing);
@@ -124,6 +130,8 @@ export function App() {
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
         if (e.payload === "project.info") setOverlay("project");
         if (e.payload === "project.working_time") setOverlay("working");
+        if (e.payload === "project.level") void editRef.current({ kind: "LevelResources" }).catch((err) => setError(errorMessage(err)));
+        if (e.payload === "project.clear_leveling") void editRef.current({ kind: "ClearLeveling" }).catch((err) => setError(errorMessage(err)));
       }),
     ];
     return () => {
@@ -147,6 +155,8 @@ export function App() {
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
       { name: "Project Info…", run: () => setOverlay("project") },
+      { name: "Level Resources", run: () => void edit({ kind: "LevelResources" }).catch((e) => setError(errorMessage(e))) },
+      { name: "Clear Leveling", run: () => void edit({ kind: "ClearLeveling" }).catch((e) => setError(errorMessage(e))) },
       { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },
       { name: "Outdent Selected Tasks", shortcut: "⇧Tab", run: () => gridRef.current?.indent(true) },
@@ -233,6 +243,14 @@ export function App() {
         <p role="alert" className="banner error">
           {error}
         </p>
+      )}
+      {notice && (
+        <div role="status" className="banner info">
+          <span>{notice}</span>
+          <button className="link" onClick={() => setNotice(null)} aria-label="Dismiss">
+            OK
+          </button>
+        </div>
       )}
       {snapshot.problem && (
         <p role="alert" className="banner error">

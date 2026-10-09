@@ -34,6 +34,7 @@ fn task(n: u128) -> Task {
         is_milestone: false,
         constraint: Constraint::AsSoonAsPossible,
         percent_complete: Percent::default(),
+        leveling_delay: Duration::ZERO,
         notes: String::new(),
     }
 }
@@ -67,6 +68,7 @@ fn rich_project() -> Project {
     milestone.is_milestone = true;
     let mut late = task(4);
     late.constraint = Constraint::StartNoEarlierThan(Moment(29_002_000));
+    late.leveling_delay = Duration::minutes(240).unwrap();
     for t in [summary, child, milestone, late] {
         p.tasks.insert(t.id, t);
     }
@@ -127,10 +129,15 @@ fn version_1_files_are_upgraded() {
     drop(Store::create(&path, &p).unwrap());
     // Turn it back into a version 1 file, as an iteration 1 build would have written it.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; PRAGMA user_version = 1;").unwrap();
     drop(conn);
     let (mut s, mut loaded) = Store::open(&path).unwrap();
-    assert_eq!(loaded, p, "everything from version 1 is still there");
+    // Version 1 had no leveling delays; they come back as zero.
+    let mut expected = p.clone();
+    for t in expected.tasks.values_mut() {
+        t.leveling_delay = Duration::ZERO;
+    }
+    assert_eq!(loaded, expected, "everything from version 1 is still there");
     let v: i64 = s.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     assert_eq!(v, CURRENT_VERSION);
     staff(&mut loaded.clone()); // the new tables accept data

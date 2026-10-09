@@ -41,6 +41,7 @@ fn generate(n: usize) -> Project {
                 is_milestone: !is_summary && next(20) == 0,
                 constraint: Constraint::AsSoonAsPossible,
                 percent_complete: Percent::default(),
+                leveling_delay: Duration::ZERO,
                 notes: String::new(),
             },
         );

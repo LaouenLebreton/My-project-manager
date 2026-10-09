@@ -21,4 +21,12 @@ resourceNames: string,
 /**
  * One of the task's resources is over-allocated while it runs.
  */
-overloaded: boolean, };
+overloaded: boolean, 
+/**
+ * Leveling delay in working minutes (0 if none).
+ */
+levelingDelayMinutes: number, 
+/**
+ * Where the task would start without its leveling delay; drawn as a line before the bar.
+ */
+leveledFrom: string | null, };

@@ -113,6 +113,17 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         if dur > 0 {
             es = snap(es);
         }
+        // Leveling waits after everything else that drives the start (R30).
+        let delay = task.leveling_delay.get();
+        if delay > 0 && !matches!(task.constraint, Constraint::MustStartOn(_)) {
+            es = cal.add_working(es.max(match task.constraint {
+                Constraint::StartNoEarlierThan(d) => snap(d),
+                _ => es,
+            }), delay);
+            if dur > 0 {
+                es = snap(es);
+            }
+        }
         match task.constraint {
             Constraint::AsSoonAsPossible => {}
             Constraint::StartNoEarlierThan(d) => es = es.max(snap(d)),
@@ -434,6 +445,7 @@ mod tests {
                     is_milestone: false,
                     constraint: Constraint::AsSoonAsPossible,
                     percent_complete: Percent::default(),
+                    leveling_delay: Duration::ZERO,
                     notes: String::new(),
                 },
             );
@@ -609,6 +621,22 @@ mod tests {
         // Task 1 would have to finish a day earlier than it can.
         assert_eq!(s.tasks[&tid(1)].total_slack, -DAY);
         assert!(s.tasks[&tid(1)].critical);
+    }
+
+    #[test]
+    fn r30_leveling_delay_pushes_the_start_and_uses_up_slack() {
+        // 1 (3d) and 2 (1d) in parallel; 2 delayed by a day has one day of slack left.
+        let mut p = P::new().task(1, 3 * DAY).task(2, DAY);
+        p.0.tasks.get_mut(&tid(2)).unwrap().leveling_delay = Duration::minutes(DAY).unwrap();
+        let s = p.run();
+        assert_eq!(dates(&s, 2), (at(6, 8, 0), at(6, 17, 0)));
+        assert_eq!(s.tasks[&tid(2)].total_slack, DAY);
+        // After a start-no-earlier-than date, the delay counts from that date.
+        p.0.tasks.get_mut(&tid(2)).unwrap().constraint = Constraint::StartNoEarlierThan(at(7, 8, 0));
+        assert_eq!(dates(&p.run(), 2), (at(8, 8, 0), at(8, 17, 0)));
+        // Must start on is never moved by leveling.
+        p.0.tasks.get_mut(&tid(2)).unwrap().constraint = Constraint::MustStartOn(at(5, 8, 0));
+        assert_eq!(dates(&p.run(), 2).0, at(5, 8, 0));
     }
 
     #[test]

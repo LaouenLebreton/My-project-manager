@@ -33,6 +33,8 @@ pub mod id {
     pub const OUTDENT: &str = "task.outdent";
     pub const PROJECT_INFO: &str = "project.info";
     pub const WORKING_TIME: &str = "project.working_time";
+    pub const LEVEL: &str = "project.level";
+    pub const CLEAR_LEVELING: &str = "project.clear_leveling";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
 }
@@ -170,7 +172,15 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let task = SubmenuBuilder::new(app, "Task").item(&task_info).separator().item(&indent).item(&outdent).build()?;
     let project_info = item(app, id::PROJECT_INFO, "Project Info…", None)?;
     let working_time = item(app, id::WORKING_TIME, "Working Time…", None)?;
-    let project = SubmenuBuilder::new(app, "Project").item(&project_info).item(&working_time).build()?;
+    let level = item(app, id::LEVEL, "Level Resources", None)?;
+    let clear_leveling = item(app, id::CLEAR_LEVELING, "Clear Leveling", None)?;
+    let project = SubmenuBuilder::new(app, "Project")
+        .item(&project_info)
+        .item(&working_time)
+        .separator()
+        .item(&level)
+        .item(&clear_leveling)
+        .build()?;
 
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
@@ -200,6 +210,6 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources];
+    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, level, clear_leveling];
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

@@ -698,3 +698,16 @@ label.inline {
 .grid-header-wrap .grid-header {
   border-bottom: none;
 }
+
+.banner.info {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, AccentColor 12%, Canvas);
+}
+
+.form > .form-label {
+  padding-top: 4px;
+  text-align: right;
+  color: var(--text-secondary);
+}

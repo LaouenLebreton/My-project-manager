@@ -228,6 +228,7 @@ fn random_project() -> impl Strategy<Value = Project> {
                 is_milestone: milestone,
                 constraint: [Constraint::AsSoonAsPossible, Constraint::StartNoEarlierThan(date), Constraint::MustStartOn(date)][constraint],
                 percent_complete: Percent::new(percent).unwrap(),
+                leveling_delay: Duration::ZERO,
                 notes: if k % 3 == 0 { format!("Note {k}: <b>&amp;</b>\nline two") } else { String::new() },
             };
             // Through the command layer, so the project is one the app could hold.

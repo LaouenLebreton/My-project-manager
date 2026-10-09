@@ -6,6 +6,7 @@
 
 pub mod calendar;
 pub mod command;
+pub mod leveling;
 pub mod model;
 pub mod outline;
 pub mod resources;
@@ -18,6 +19,7 @@ pub use command::{apply, Command, CommandError, LinkChange, ProjectChange, Resou
 pub use model::*;
 pub use outline::{outline, OutlineRow};
 pub use text::{format_resource, parse_resource_list, PredecessorEntry, ResourceEntry, TextError, Units};
+pub use leveling::{level, Leveled, Unresolved};
 pub use resources::{loads, Loads, Overload, ResourceLoad};
 pub use schedule::{check, schedule, ConstraintConflict, Schedule, ScheduleError, TaskSchedule};
 pub use time::{Moment, MINUTES_PER_DAY};

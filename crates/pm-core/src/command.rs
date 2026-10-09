@@ -51,6 +51,8 @@ pub enum TaskChange {
     Notes(String),
     /// Outline position: parent and place among siblings.
     Position { parent: Option<TaskId>, sort_key: SortKey },
+    /// Set by Level Resources and Clear Leveling.
+    LevelingDelay(Duration),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +151,7 @@ impl Command {
                 TaskChange::PercentComplete(_) => "Change Percent Complete",
                 TaskChange::Notes(_) => "Edit Notes",
                 TaskChange::Position { .. } => "Move Task",
+                TaskChange::LevelingDelay(_) => "Change Leveling Delay",
             }
             .into(),
             Command::InsertLink { .. } => "Add Link".into(),
@@ -520,6 +523,7 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
         TaskChange::Constraint(v) => TaskChange::Constraint(std::mem::replace(&mut t.constraint, *v)),
         TaskChange::PercentComplete(v) => TaskChange::PercentComplete(std::mem::replace(&mut t.percent_complete, *v)),
         TaskChange::Notes(v) => TaskChange::Notes(std::mem::replace(&mut t.notes, v.clone())),
+        TaskChange::LevelingDelay(v) => TaskChange::LevelingDelay(std::mem::replace(&mut t.leveling_delay, *v)),
         TaskChange::Position { parent, sort_key } => TaskChange::Position {
             parent: std::mem::replace(&mut t.parent, *parent),
             sort_key: std::mem::replace(&mut t.sort_key, sort_key.clone()),
@@ -561,6 +565,7 @@ mod tests {
             is_milestone: false,
             constraint: Constraint::AsSoonAsPossible,
             percent_complete: Percent::default(),
+            leveling_delay: Duration::ZERO,
             notes: String::new(),
         }
     }

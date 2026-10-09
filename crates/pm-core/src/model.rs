@@ -119,6 +119,10 @@ pub struct Task {
     pub constraint: Constraint,
     pub percent_complete: Percent,
     pub notes: String,
+    /// Working time leveling added before the task starts (Microsoft Project's "Leveling
+    /// Delay"). Set by Level Resources, cleared by Clear Leveling.
+    #[serde(default)]
+    pub leveling_delay: Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

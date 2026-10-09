@@ -12,4 +12,4 @@ resources: string | null, } | { "kind": "SetProjectStart", date: string, } | { "
 /**
  * Typed maximum: `100%`, `300%` or `3` (people).
  */
-maxUnits: string | null, materialLabel: string | null, } | { "kind": "DeleteResources", ids: Array<string>, };
+maxUnits: string | null, materialLabel: string | null, } | { "kind": "DeleteResources", ids: Array<string>, } | { "kind": "LevelResources" } | { "kind": "ClearLeveling" };

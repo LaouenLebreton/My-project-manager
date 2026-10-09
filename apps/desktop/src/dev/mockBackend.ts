@@ -41,6 +41,8 @@ function row(name: string, depth = 0): Row {
     notes: "",
     resourceNames: "",
     overloaded: false,
+    levelingDelayMinutes: 0,
+    leveledFrom: null,
   };
 }
 
@@ -268,7 +270,8 @@ export function install() {
               state.rows = state.rows.filter((r) => !e.ids.includes(r.id));
               break;
           }
-          return { snapshot: snapshot(), createdId };
+          const message = e.kind === "LevelResources" ? "1 task now starts later so nobody is over-allocated." : null;
+          return { snapshot: snapshot(), createdId, message };
         }
       }
       fail(`mock backend has no command ${cmd}`);

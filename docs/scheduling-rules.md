@@ -57,6 +57,11 @@ Rules marked *verify* must be checked against the owner's Microsoft Project refe
   - R25d. A summary's own Start No Earlier Than or Must Start On holds back every task inside it, like a link into it. *verify*
 - R26. An empty summary (all children deleted) becomes a normal task with its last derived duration.
 
+## Leveling (iteration 2)
+
+- R30. A task's leveling delay (working minutes) is added after its links and Start No Earlier Than date have set its start. Must Start On tasks ignore it. The delay uses up slack, because late dates do not include it.
+- R31. Level Resources starts from no delays and repeats: resolve the earliest over-allocation by delaying its least important task (most slack, then latest start, then later in the outline) until the first task it clashes with finishes. Must Start On tasks never move. A task asking for more than its resource has, and clashes between fixed-date tasks, are reported instead. The result is one undo step; Clear Leveling removes all delays. *verify* against Microsoft Project's "standard" leveling order.
+
 ## Errors
 
 - R27. A cycle returns an error listing the task ids in one cycle, in order. No partial schedule.

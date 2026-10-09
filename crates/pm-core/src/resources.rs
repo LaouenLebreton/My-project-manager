@@ -172,6 +172,7 @@ mod tests {
                 is_milestone: minutes == 0,
                 constraint: Constraint::AsSoonAsPossible,
                 percent_complete: Percent::default(),
+                leveling_delay: Duration::ZERO,
                 notes: String::new(),
             };
             apply(&mut self.0, &Command::InsertTasks { tasks: vec![t], dependencies: vec![] }).unwrap();

@@ -44,6 +44,8 @@ pub struct EditResult {
     pub snapshot: Snapshot,
     /// The task the edit created, if any, so the grid can select it.
     pub created_id: Option<String>,
+    /// A result to tell the user about (leveling), in plain words.
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -150,6 +152,11 @@ pub struct Row {
     pub resource_names: String,
     /// One of the task's resources is over-allocated while it runs.
     pub overloaded: bool,
+    /// Leveling delay in working minutes (0 if none).
+    #[ts(type = "number")]
+    pub leveling_delay_minutes: i64,
+    /// Where the task would start without its leveling delay; drawn as a line before the bar.
+    pub leveled_from: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -329,6 +336,10 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 notes: t.notes.clone(),
                 resource_names: resource_names(p, r.id),
                 overloaded: doc.loads.overloaded_tasks.contains(&r.id),
+                leveling_delay_minutes: t.leveling_delay.get(),
+                leveled_from: s
+                    .filter(|_| t.leveling_delay.get() > 0)
+                    .map(|s| iso(p.calendar.add_working(s.early_start, -t.leveling_delay.get()))),
             }
         })
         .collect();
@@ -549,14 +560,17 @@ pub fn recent_files(app: AppHandle) -> Vec<RecentFile> {
 pub fn apply_edit(edit: Edit, window: WebviewWindow, app: AppHandle) -> Result<EditResult, IpcError> {
     let label = window.label();
     with_doc(&app, label, |doc| {
-        let created_id = match plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, edit)? {
+        let (created_id, message) = match plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, edit)? {
             Some(planned) => {
-                doc.apply(&planned.command)?;
-                planned.created.map(|id| id.0.to_string())
+                // An empty batch (leveling with nothing to change) only carries its message.
+                if !matches!(&planned.command, pm_core::Command::Batch { commands, .. } if commands.is_empty()) {
+                    doc.apply(&planned.command)?;
+                }
+                (planned.created.map(|id| id.0.to_string()), planned.message)
             }
-            None => None,
+            None => (None, None),
         };
-        Ok(EditResult { snapshot: changed(&app, label, doc), created_id })
+        Ok(EditResult { snapshot: changed(&app, label, doc), created_id, message })
     })
 }
 
@@ -738,6 +752,39 @@ mod tests {
         let sam = s.resources.iter().find(|r| r.name == "Sam").unwrap();
         assert!(sam.overloads.is_empty());
         assert_eq!(sam.total_text, "20h");
+    }
+
+    #[test]
+    fn leveling_clears_an_overload_and_says_so() {
+        let mut doc = sample_doc();
+        let s = snapshot(&doc);
+        for name in ["Book movers", "Order furniture"] {
+            let id = row(&s, name).id.clone();
+            let planned = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::SetTaskResources { id, text: "Alex".into() }).unwrap().unwrap();
+            doc.apply(&planned.command).unwrap();
+        }
+        assert!(row(&snapshot(&doc), "Book movers").overloaded);
+        let snapshot_before_finish = snapshot(&doc).project.finish;
+
+        let planned = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::LevelResources).unwrap().unwrap();
+        assert_eq!(planned.message.as_deref(), Some("1 task now starts later so nobody is over-allocated. Project > Clear Leveling (or Undo) takes the delays away."));
+        doc.apply(&planned.command).unwrap();
+        let s = snapshot(&doc);
+        assert!(s.rows.iter().all(|r| !r.overloaded));
+        assert!(s.resources.iter().all(|r| r.overloads.is_empty()));
+        assert_eq!(s.undo_label.as_deref(), Some("Level Resources"));
+        // "Book movers" leads a 6-day chain (1 day, 2-day wait, 3 days packing) to moving day;
+        // "Order furniture" (5 days) has a day of slack, so it is the one that waits, and the
+        // project still finishes on the same day.
+        assert_eq!(row(&s, "Order furniture").leveling_delay_minutes, 480);
+        assert_eq!(row(&s, "Book movers").leveling_delay_minutes, 0);
+        assert_eq!(s.project.finish, snapshot_before_finish);
+
+        let clear = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::ClearLeveling).unwrap().unwrap();
+        doc.apply(&clear.command).unwrap();
+        assert!(row(&snapshot(&doc), "Book movers").overloaded);
+        doc.undo().unwrap();
+        assert!(!row(&snapshot(&doc), "Book movers").overloaded, "undo of Clear Leveling restores the delays");
     }
 
     #[test]
