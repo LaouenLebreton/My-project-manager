@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::access::{Limits, Role};
+use pm_sync::Change;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -101,6 +102,17 @@ pub trait Storage: Send + Sync + 'static {
     /// A member's role and limits when the owner has set them.
     fn project_member(&self, project: Uuid, user: Uuid) -> Result<Option<(Role, Limits)>>;
     fn set_project_member(&self, project: Uuid, user: Uuid, role: Role, limits: &Limits) -> Result<()>;
+
+    /// The last saved copy of the project (JSON) and the version it is at. Changes after that
+    /// version are replayed on top.
+    fn project_snapshot(&self, id: Uuid) -> Result<Option<(String, i64)>>;
+    /// Records change `change.version`, which must follow the stored version directly; false
+    /// if another server instance got there first. `snapshot` also saves the whole project.
+    fn append_change(&self, project: Uuid, change: &Change, snapshot: Option<&str>) -> Result<bool>;
+    /// Changes after `since`, oldest first, at most `limit`.
+    fn changes_since(&self, project: Uuid, since: i64, limit: u32) -> Result<Vec<Change>>;
+    /// The change made from this client edit, if it was accepted (resends are idempotent).
+    fn change_by_client(&self, project: Uuid, client_change: Uuid) -> Result<Option<Change>>;
 }
 
 /// Forward-only migrations; `PRAGMA user_version` holds the version.
@@ -160,6 +172,13 @@ const MIGRATIONS: &[&str] = &[
         command    TEXT NOT NULL,
         PRIMARY KEY (project_id, version)
     );
+    "#,
+    // 2 -> 3: live sync. Changes remember the client edit they came from; projects remember
+    // which version their saved copy is at.
+    r#"
+    ALTER TABLE change ADD COLUMN client_change TEXT NOT NULL DEFAULT '';
+    CREATE UNIQUE INDEX change_client ON change (project_id, client_change);
+    ALTER TABLE project ADD COLUMN data_version INTEGER NOT NULL DEFAULT 0;
     "#,
 ];
 
@@ -233,6 +252,18 @@ fn project_from_row(r: &rusqlite::Row) -> rusqlite::Result<ProjectRecord> {
         created_at: r.get(5)?,
         updated_at: r.get(6)?,
     })
+}
+
+/// A stored change; the inner error is a damaged command.
+fn change_from_row(r: &rusqlite::Row) -> rusqlite::Result<std::result::Result<Change, String>> {
+    let command: String = r.get(6)?;
+    let version = r.get(0)?;
+    let client_change = uuid_at(r, 1)?;
+    let author = uuid_at(r, 2)?;
+    let (author_name, at, label) = (r.get(3)?, r.get(4)?, r.get(5)?);
+    Ok(serde_json::from_str(&command)
+        .map(|command| Change { version, client_change, author, author_name, at, label, command })
+        .map_err(|e| format!("change {version}: {e}")))
 }
 
 impl Storage for SqliteStorage {
@@ -403,5 +434,57 @@ impl Storage for SqliteStorage {
             params![project.to_string(), user.to_string(), role.code(), limits],
         )?;
         Ok(())
+    }
+
+    fn project_snapshot(&self, id: Uuid) -> Result<Option<(String, i64)>> {
+        Ok(self.conn().query_row("SELECT data, data_version FROM project WHERE id = ?1", [id.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)
+    }
+
+    fn append_change(&self, project: Uuid, c: &Change, snapshot: Option<&str>) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let updated = match snapshot {
+            Some(data) => tx.execute(
+                "UPDATE project SET version = ?1, updated_at = ?2, data = ?3, data_version = ?1 WHERE id = ?4 AND version = ?5",
+                params![c.version, c.at, data, project.to_string(), c.version - 1],
+            )?,
+            None => tx.execute(
+                "UPDATE project SET version = ?1, updated_at = ?2 WHERE id = ?3 AND version = ?4",
+                params![c.version, c.at, project.to_string(), c.version - 1],
+            )?,
+        };
+        if updated == 0 {
+            return Ok(false);
+        }
+        let command = serde_json::to_string(&c.command).map_err(|e| StorageError::Damaged(e.to_string()))?;
+        tx.execute(
+            "INSERT INTO change (project_id, version, author_id, at, label, command, client_change) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![project.to_string(), c.version, c.author.to_string(), c.at, c.label, command, c.client_change.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    fn changes_since(&self, project: Uuid, since: i64, limit: u32) -> Result<Vec<Change>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT c.version, c.client_change, c.author_id, u.name, c.at, c.label, c.command FROM change c JOIN user u ON u.id = c.author_id
+             WHERE c.project_id = ?1 AND c.version > ?2 ORDER BY c.version LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![project.to_string(), since, limit], change_from_row)?;
+        rows.map(|r| r?.map_err(StorageError::Damaged)).collect()
+    }
+
+    fn change_by_client(&self, project: Uuid, client_change: Uuid) -> Result<Option<Change>> {
+        let found = self
+            .conn()
+            .query_row(
+                "SELECT c.version, c.client_change, c.author_id, u.name, c.at, c.label, c.command FROM change c JOIN user u ON u.id = c.author_id
+                 WHERE c.project_id = ?1 AND c.client_change = ?2",
+                [project.to_string(), client_change.to_string()],
+                change_from_row,
+            )
+            .optional()?;
+        found.transpose().map_err(StorageError::Damaged)
     }
 }

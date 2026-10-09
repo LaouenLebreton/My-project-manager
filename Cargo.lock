@@ -2508,6 +2508,7 @@ dependencies = [
  "http-body-util",
  "jiff",
  "pm-core",
+ "pm-sync",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2525,6 +2526,19 @@ dependencies = [
  "jiff",
  "pm-core",
  "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
+name = "pm-sync"
+version = "0.1.0"
+dependencies = [
+ "jiff",
+ "pm-core",
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

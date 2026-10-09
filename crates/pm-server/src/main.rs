@@ -8,7 +8,6 @@
 //! nginx) before people connect over a network.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use pm_server::storage::SqliteStorage;
 use pm_server::{router, AppState};
@@ -41,7 +40,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let app = router(AppState { storage: Arc::new(storage) });
+    let app = router(AppState::new(storage));
     let listener = match tokio::net::TcpListener::bind(&listen).await {
         Ok(l) => l,
         Err(e) => {

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 pm-core.workspace = true
+pm-sync.workspace = true
 argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
 axum = { version = "0.8.9", features = ["ws"] }
 getrandom = "0.4.3"

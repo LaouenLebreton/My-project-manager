@@ -182,9 +182,10 @@ pub struct OpenedProject {
 }
 
 async fn open_project(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>) -> ApiResult<OpenedProject> {
-    let (_, role, limits) = access(&state, id, me.id).await?;
-    let (record, data) = db(&state, move |s| s.project(id)).await?.ok_or_else(|| not_found("project"))?;
-    let project = serde_json::from_str(&data).map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("the stored project is damaged: {e}")))?;
+    let (mut record, role, limits) = access(&state, id, me.id).await?;
+    // The latest state, with every change applied, and the version it is at.
+    let (project, version) = crate::live::with_live(&state, id, |l| (l.project.clone(), l.version)).await?;
+    record.version = version;
     Ok(Json(OpenedProject { record, project, role, limits }))
 }
 

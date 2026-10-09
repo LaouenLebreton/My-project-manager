@@ -12,7 +12,7 @@ use super::*;
 use crate::storage::SqliteStorage;
 
 fn server() -> Router {
-    router(AppState { storage: Arc::new(SqliteStorage::in_memory().unwrap()) })
+    router(AppState::new(SqliteStorage::in_memory().unwrap()))
 }
 
 async fn call(app: &Router, method: &str, path: &str, token: Option<&str>, body: Option<Value>) -> (StatusCode, Value) {
@@ -196,4 +196,92 @@ async fn a_project_shared_with_a_team_opens_for_its_members() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = call(&app, "PUT", &format!("/api/projects/{id}/members/{alex_id}"), Some(&laouen), Some(json!({ "role": "owner" }))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+/// Shares a sample project with a new team holding all three people; returns its id and the
+/// id of its one task.
+async fn shared(app: &Router, people: &[(String, String); 3]) -> (String, String) {
+    let owner = &people[0].0;
+    let (_, team) = call(app, "POST", "/api/teams", Some(owner), Some(json!({ "name": "Team" }))).await;
+    let team_id = team["team"]["id"].as_str().unwrap().to_owned();
+    for email in ["alex@example.com", "sam@example.com"] {
+        call(app, "POST", &format!("/api/teams/{team_id}/members"), Some(owner), Some(json!({ "email": email }))).await;
+    }
+    let project = sample_project("Live");
+    let task = project["tasks"].as_object().unwrap().keys().next().unwrap().clone();
+    let (_, record) = call(app, "POST", "/api/projects", Some(owner), Some(json!({ "teamId": team_id, "project": project }))).await;
+    (record["id"].as_str().unwrap().to_owned(), task)
+}
+
+fn rename(task: &str, name: &str) -> Value {
+    json!({ "type": "SetTask", "id": task, "change": { "field": "Name", "value": name } })
+}
+
+#[tokio::test]
+async fn changes_are_ordered_stored_and_broadcast() {
+    let storage = Arc::new(SqliteStorage::in_memory().unwrap());
+    let state = AppState { storage: storage.clone(), hub: Arc::default() };
+    let app = router(state.clone());
+    let p = people(&app).await;
+    let (id, task) = shared(&app, &p).await;
+    let mut rx = state.hub.room(id.parse().unwrap()).tx.subscribe();
+
+    let edit = |client: &str, command: Value| json!({ "clientChange": client, "command": command });
+    let a = uuid::Uuid::now_v7().to_string();
+    let (status, first) = call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(&a, rename(&task, "Alex's name")))).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!((first["version"].as_i64(), first["authorName"].as_str(), first["label"].as_str()), (Some(1), Some("Alex"), Some("Rename Task")));
+    assert_eq!(rx.recv().await.unwrap().version, 1, "everyone watching hears it");
+
+    // Sending the same edit again (a lost reply) returns the same change, not a second one.
+    let (_, again) = call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(&a, rename(&task, "Alex's name")))).await;
+    assert_eq!(again, first);
+
+    let duration = json!({ "type": "SetTask", "id": task, "change": { "field": "Duration", "value": 2400 } });
+    let (_, second) = call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[0].0), Some(edit(&uuid::Uuid::now_v7().to_string(), duration))).await;
+    assert_eq!(second["version"].as_i64(), Some(2));
+
+    // Deleted, then renamed by someone who had not heard: refused in plain words.
+    let delete = json!({ "type": "DeleteTasks", "ids": [task] });
+    call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[0].0), Some(edit(&uuid::Uuid::now_v7().to_string(), delete))).await;
+    let (status, refused) = call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(&uuid::Uuid::now_v7().to_string(), rename(&task, "Too late")))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(refused["message"].as_str().unwrap().starts_with("this change no longer fits the project"));
+
+    let (_, log) = call(&app, "GET", &format!("/api/projects/{id}/changes?since=0"), Some(&p[2].0), None).await;
+    let versions: Vec<i64> = log.as_array().unwrap().iter().map(|c| c["version"].as_i64().unwrap()).collect();
+    assert_eq!(versions, [1, 2, 3]);
+    let (_, opened) = call(&app, "GET", &format!("/api/projects/{id}"), Some(&p[2].0), None).await;
+    assert_eq!(opened["record"]["version"].as_i64(), Some(3));
+    assert!(opened["project"]["tasks"].as_object().unwrap().is_empty());
+
+    // Viewers cannot change anything.
+    let sam = &p[2].1;
+    call(&app, "PUT", &format!("/api/projects/{id}/members/{sam}"), Some(&p[0].0), Some(json!({ "role": "viewer" }))).await;
+    let insert = json!({ "type": "InsertTasks", "tasks": [], "dependencies": [] });
+    let (status, body) = call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[2].0), Some(edit(&uuid::Uuid::now_v7().to_string(), insert))).await;
+    assert_eq!((status, body["message"].as_str()), (StatusCode::FORBIDDEN, Some("you can view this project but not change it")));
+}
+
+#[tokio::test]
+async fn a_restarted_server_rebuilds_projects_from_snapshots_and_changes() {
+    let storage = Arc::new(SqliteStorage::in_memory().unwrap());
+    let app = router(AppState { storage: storage.clone(), hub: Arc::default() });
+    let p = people(&app).await;
+    let (id, task) = shared(&app, &p).await;
+    // Past one saved snapshot (every 100 changes), then a few more.
+    for n in 1..=105 {
+        let body = json!({ "clientChange": uuid::Uuid::now_v7().to_string(), "command": rename(&task, &format!("Name {n}")) });
+        let (status, _) = call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[0].0), Some(body)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (snapshot, at) = storage.project_snapshot(id.parse().unwrap()).unwrap().unwrap();
+    assert_eq!(at, 100);
+    assert!(snapshot.contains("Name 100"));
+
+    // A new server process: nothing in memory.
+    let restarted = router(AppState { storage, hub: Arc::default() });
+    let (_, opened) = call(&restarted, "GET", &format!("/api/projects/{id}"), Some(&p[1].0), None).await;
+    assert_eq!(opened["record"]["version"].as_i64(), Some(105));
+    assert_eq!(opened["project"]["tasks"][&task]["name"], "Name 105");
 }

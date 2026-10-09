@@ -5,6 +5,8 @@
 
 pub mod access;
 pub mod auth;
+pub mod live;
+pub mod permissions;
 pub mod sharing;
 pub mod storage;
 
@@ -24,6 +26,13 @@ use storage::{Storage, StorageError, User};
 #[derive(Clone)]
 pub struct AppState {
     pub storage: Arc<dyn Storage>,
+    pub hub: Arc<live::Hub>,
+}
+
+impl AppState {
+    pub fn new(storage: impl Storage) -> Self {
+        AppState { storage: Arc::new(storage), hub: Arc::default() }
+    }
 }
 
 /// An error the client can show as it is: a status and a plain-words message.
@@ -95,6 +104,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/me", get(me))
         .route("/api/users", post(create_user))
         .merge(sharing::routes())
+        .merge(live::routes())
         .with_state(state)
 }
 
