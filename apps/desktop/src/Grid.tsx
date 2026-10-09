@@ -47,7 +47,7 @@ const COLUMNS: Column[] = [
   { label: "Finish", width: "112px", text: (r) => formatDate(r.finish), title: (r) => formatDateTime(r.finish) },
   {
     label: "% Done",
-    width: "64px",
+    width: "80px",
     align: "right",
     help: "progress",
     text: (r) => `${r.percentComplete}%`,
