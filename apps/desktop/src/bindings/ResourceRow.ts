@@ -14,7 +14,11 @@ totalText: string,
 /**
  * Highest load as a percentage of full time (work resources).
  */
-peakPercent: number, taskCount: number, overloads: Array<OverloadView>, 
+peakPercent: number, taskCount: number, 
+/**
+ * The tasks it works on, as typed in the Tasks column: "Survey, 7[50%]".
+ */
+tasksText: string, overloads: Array<OverloadView>, 
 /**
  * Cost per hour (work) or per unit (material), in cents.
  */

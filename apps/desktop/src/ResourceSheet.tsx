@@ -55,6 +55,14 @@ const COLUMNS: Column[] = [
     },
   },
   {
+    // Assign straight from the sheet: task names (or row numbers) with optional units, as in
+    // the task grid's Resources column.
+    label: "Tasks",
+    width: "minmax(200px, 1fr)",
+    text: (r) => r.tasksText,
+    edit: (r) => ({ initial: r.tasksText, make: (t) => ({ kind: "SetResourceTasks", id: r.id, text: t }) }),
+  },
+  {
     label: "Max Units",
     width: "90px",
     align: "right",
@@ -80,7 +88,6 @@ const COLUMNS: Column[] = [
   { label: "Work / Qty", width: "96px", align: "right", text: (r) => r.totalText },
   { label: "Cost", width: "100px", align: "right", text: (r, currency) => (r.costCents ? formatMoney(r.costCents, currency) : "") },
   { label: "Peak", width: "70px", align: "right", text: (r) => `${r.peakPercent}%`, notApplicable: (r) => r.resourceType === "Material" },
-  { label: "Tasks", width: "60px", align: "right", text: (r) => String(r.taskCount) },
 ];
 const NAME_COL = 1;
 const TEMPLATE = COLUMNS.map((c) => c.width).join(" ");
@@ -337,7 +344,7 @@ function ResourceDetails({ resource }: { resource: ResourceRow | undefined }) {
     return (
       <aside className="resource-details" aria-live="polite">
         <strong>{resource.name}</strong>
-        {resource.taskCount === 0 ? " is not assigned to any task yet." : ` works on ${resource.taskCount} ${resource.taskCount === 1 ? "task" : "tasks"} and is never over-allocated.`}
+        {resource.taskCount === 0 ? " is not assigned to any task yet. Type task names in its Tasks column, such as Survey, Build[50%]." : ` works on ${resource.taskCount} ${resource.taskCount === 1 ? "task" : "tasks"} and is never over-allocated.`}
       </aside>
     );
   }

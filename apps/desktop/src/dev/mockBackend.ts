@@ -139,6 +139,7 @@ export function install() {
     totalText: "40h",
     peakPercent: overloaded ? 200 : 100,
     taskCount: 2,
+    tasksText: "Task 1, Task 2[50%]",
     rateCents: 4_550,
     costCents: 182_000,
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
@@ -271,6 +272,15 @@ export function install() {
               if (e.percentComplete !== null) r.percentComplete = e.percentComplete;
               if (e.constraint) r.constraint = e.constraint;
               if (e.milestone !== null) r.isMilestone = e.milestone;
+              break;
+            }
+            case "SetResourceTasks": {
+              const r = state.resources.find((x) => x.id === e.id)!;
+              const names = e.text.split(",").map((t) => t.trim()).filter(Boolean);
+              const bad = names.find((t) => !state.rows.some((row) => row.name.toLowerCase() === t.replace(/\[.*\]$/, "").toLowerCase()) && !/^\d+/.test(t));
+              if (bad) fail(`there is no task called “${bad}”`);
+              r.tasksText = names.join(", ");
+              r.taskCount = names.length;
               break;
             }
             case "SetPercentComplete":

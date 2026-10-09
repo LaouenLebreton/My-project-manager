@@ -28,7 +28,7 @@ export const GLOSSARY = {
   },
   resources: {
     term: "Resources",
-    text: "Who (or what) works on a task. Type names separated by commas: Alex, Sam. Add a share of their time in brackets, Sam[50%], or a quantity for materials, Concrete[2.5 tons]. A new name adds that resource to the Resource Sheet.",
+    text: "Who (or what) works on a task. Type names separated by commas: Alex, Sam. Add a share of their time in brackets, Sam[50%], or a quantity for materials, Concrete[2.5 tons]. A new name adds that resource to the Resource Sheet. You can also assign from the Resource Sheet: type task names (or row numbers) in a resource's Tasks column.",
   },
   wbs: {
     term: "Work breakdown structure (WBS)",

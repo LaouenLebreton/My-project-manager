@@ -81,6 +81,8 @@ pub struct ResourceRow {
     /// Highest load as a percentage of full time (work resources).
     pub peak_percent: u32,
     pub task_count: u32,
+    /// The tasks it works on, as typed in the Tasks column: "Survey, 7[50%]".
+    pub tasks_text: String,
     pub overloads: Vec<OverloadView>,
     /// Cost per hour (work) or per unit (material), in cents.
     #[ts(type = "number")]
@@ -305,6 +307,7 @@ fn hours(minutes: i64) -> String {
 
 fn resource_rows(doc: &Document) -> Vec<ResourceRow> {
     let p = &doc.project;
+    let outline_rows = outline(p);
     let mut list: Vec<&pm_core::Resource> = p.resources.values().collect();
     list.sort_by(|a, b| a.sort_key.cmp(&b.sort_key).then(a.id.cmp(&b.id)));
     list.into_iter()
@@ -326,6 +329,7 @@ fn resource_rows(doc: &Document) -> Vec<ResourceRow> {
                 total_text: if material { format!("{} {}", number(total), r.material_label).trim().to_owned() } else { hours(total) },
                 peak_percent: load.map_or(0, |l| l.peak.0),
                 task_count: p.assignments.values().filter(|a| a.resource == r.id).count() as u32,
+                tasks_text: crate::edits::resource_tasks_text(p, &outline_rows, r.id),
                 rate_cents: r.rate.0,
                 cost_cents: doc.loads.resource_cost.get(&r.id).copied().unwrap_or(0),
                 overloads: load

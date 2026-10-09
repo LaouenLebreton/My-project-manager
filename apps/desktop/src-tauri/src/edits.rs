@@ -76,6 +76,9 @@ pub enum Edit {
         rate: Option<String>,
     },
     DeleteResources { ids: Vec<String> },
+    /// Typed in the Resource Sheet's Tasks column: `Survey, 7[50%]` (task names or row
+    /// numbers), replacing the resource's assignments.
+    SetResourceTasks { id: String, text: String },
     /// Project Info: the currency symbol shown with costs.
     SetCurrency { symbol: String },
     /// WBS chart: a new task as the last subtask of `parentId` (Tab in the chart).
@@ -342,6 +345,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             plain(Command::SetProject { change: ProjectChange::Calendar(calendar) })
         }
         Edit::SetTaskResources { id, text } => set_task_resources(p, task_id(&id)?, &text),
+        Edit::SetResourceTasks { id, text } => set_resource_tasks(p, resource_id(&id)?, &text),
         Edit::AddResource { after_id, name } => {
             check_resource_name(p, &name, None)?;
             let after = after_id.as_deref().map(resource_id).transpose()?.and_then(|a| p.resources.get(&a));
@@ -630,6 +634,73 @@ fn set_task_resources(p: &Project, task: TaskId, text: &str) -> Result<Option<Pl
         1 => commands.pop().map(|command| Planned { command, created: None, message: None }),
         _ => Some(Planned { command: Command::Batch { label: "Change Resources".into(), commands }, created: None, message: None }),
     })
+}
+
+/// How a task is named in the Resource Sheet's Tasks column: its name when that is unique and
+/// reads back unambiguously, otherwise its row number.
+fn task_ref(p: &Project, rows: &[pm_core::OutlineRow], row: usize) -> String {
+    let name = p.tasks[&rows[row].id].name.trim();
+    let plain = !name.is_empty() && !name.contains([',', '[', ']']) && !name.chars().all(|c| c.is_ascii_digit());
+    let unique = || p.tasks.values().filter(|t| t.name.trim().eq_ignore_ascii_case(name)).count() == 1;
+    if plain && unique() { name.to_owned() } else { (row + 1).to_string() }
+}
+
+/// The Resource Sheet's Tasks column for one resource, in outline order: `Survey, 7[50%]`.
+pub fn resource_tasks_text(p: &Project, rows: &[pm_core::OutlineRow], resource: ResourceId) -> String {
+    let Some(r) = p.resources.get(&resource) else { return String::new() };
+    let material = (r.kind == ResourceKind::Material).then_some(r.material_label.as_str());
+    rows.iter()
+        .enumerate()
+        .filter_map(|(i, row)| {
+            let a = p.assignments.values().find(|a| a.task == row.id && a.resource == resource)?;
+            Some(pm_core::format_resource(&task_ref(p, rows, i), material, a.units.0))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The Tasks column typed in the Resource Sheet: the resource works on exactly these tasks.
+fn set_resource_tasks(p: &Project, resource: ResourceId, text: &str) -> Result<Option<Planned>, IpcError> {
+    let r = p.resources.get(&resource).ok_or_else(|| err("this resource no longer exists"))?;
+    let rows = outline(p);
+    let mut wanted: Vec<(TaskId, u32)> = Vec::new();
+    for e in parse_resource_list(text)? {
+        let name = e.name.trim();
+        let id = if let Ok(n) = name.parse::<usize>() {
+            rows.get(n.wrapping_sub(1)).map(|r| r.id).ok_or_else(|| err(format!("there is no task {n}")))?
+        } else {
+            let matches: Vec<TaskId> = rows.iter().map(|r| r.id).filter(|id| p.tasks[id].name.trim().eq_ignore_ascii_case(name)).collect();
+            match matches[..] {
+                [id] => id,
+                [] => return Err(err(format!("there is no task called “{name}”"))),
+                _ => return Err(err(format!("several tasks are called “{name}”; type its row number instead"))),
+            }
+        };
+        if is_summary(p, id) {
+            return Err(err(format!("resources work on the tasks inside “{}”, not on the summary itself", p.tasks[&id].name)));
+        }
+        if wanted.iter().any(|(w, _)| *w == id) {
+            return Err(err(format!("“{}” is listed twice", p.tasks[&id].name)));
+        }
+        wanted.push((id, e.units.unwrap_or(100)));
+    }
+    let existing: Vec<&Assignment> = p.assignments.values().filter(|a| a.resource == resource).collect();
+    let mut commands = Vec::new();
+    for a in &existing {
+        if !wanted.iter().any(|(t, _)| *t == a.task) {
+            commands.push(Command::DeleteAssignment { id: a.id });
+        }
+    }
+    for (task, units) in wanted {
+        match existing.iter().find(|a| a.task == task) {
+            Some(a) if a.units.0 != units => commands.push(Command::SetAssignmentUnits { id: a.id, units: ResourceUnits(units) }),
+            Some(_) => {}
+            None => commands.push(Command::InsertAssignment {
+                assignment: Assignment { id: AssignmentId(new_id()), task, resource, units: ResourceUnits(units) },
+            }),
+        }
+    }
+    Ok(batch(&format!("Assign {}", r.name), commands).map(|command| Planned { command, created: None, message: None }))
 }
 
 /// Leveling as one undo step, with a plain-words summary of what happened.
@@ -1344,6 +1415,30 @@ mod tests {
         assert_eq!(p.tasks[&id[2]].actual, Actual::NotStarted);
         let s = pm_core::schedule(&p).unwrap();
         assert!(!s.tasks[&id[0]].critical, "finished work is never critical");
+    }
+
+    #[test]
+    fn tasks_can_be_assigned_from_the_resource_sheet() {
+        let (mut p, id) = project(&[("Phase", 0), ("Survey", 1), ("Build", 1), ("Build", 1)]);
+        run(&mut p, Edit::AddResource { after_id: None, name: "Alex".into() });
+        let alex = *p.resources.keys().next().unwrap();
+        let set = |text: &str| Edit::SetResourceTasks { id: alex.0.to_string(), text: text.into() };
+        run(&mut p, set("survey, 4[50%]"));
+        let rows = outline(&p);
+        assert_eq!(resource_tasks_text(&p, &rows, alex), "Survey, 4[50%]", "duplicate names show as row numbers");
+        assert_eq!(p.tasks[&id[3]].name, "Build");
+        // The text reads back to the same assignments, and editing it changes them in one step.
+        run(&mut p, set("Survey, 4[50%]"));
+        assert_eq!(p.assignments.len(), 2);
+        run(&mut p, set("3"));
+        assert_eq!(resource_tasks_text(&p, &outline(&p), alex), "3");
+        let msg = |p: &Project, e| plan(p, None, &Units::default(), e).err().unwrap().message;
+        assert_eq!(msg(&p, set("Build")), "several tasks are called “Build”; type its row number instead");
+        assert_eq!(msg(&p, set("Paint")), "there is no task called “Paint”");
+        assert_eq!(msg(&p, set("9")), "there is no task 9");
+        assert_eq!(msg(&p, set("Phase")), "resources work on the tasks inside “Phase”, not on the summary itself");
+        run(&mut p, set(""));
+        assert!(p.assignments.is_empty());
     }
 
     #[test]
