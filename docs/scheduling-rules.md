@@ -50,7 +50,11 @@ Rules marked *verify* must be checked against the owner's Microsoft Project refe
 
 - R24. Only leaf tasks are scheduled. Summary start = min child ES, finish = max child EF; summary duration is derived and not stored as input.
 - R24a. Summary late dates: min child LS, max child LF. Summary total slack = the **smallest child slack**, so a summary is critical when it contains critical work. *verify*: MS Project may compute it from the summary's own dates.
-- R25. Links on summary tasks: **iteration 1 rejects them** with a clear message. *Proposal to owner:* MS Project allows them (they apply to all children); support them in iteration 2 once MSPDI import needs them.
+- R25. Links may start or end at a summary task (owner decision 2026-10-09, as in Microsoft Project).
+  - R25a. A link *from* a summary uses the summary's rolled-up dates: it waits for every task inside. Finish-type limits in the backward pass apply to every task inside; start-type limits (SS, SF out of a summary) apply only to the tasks that start the summary, because a summary's start is its earliest task's start. *verify*
+  - R25b. A link *into* a summary holds back every task inside it, at any depth. Only finish-to-start and start-to-start links may point into a summary; finish-to-finish and start-to-finish are refused, as Microsoft Project refuses them.
+  - R25c. A summary cannot be linked to a task inside it (that would be a loop). Moving or inserting tasks that would cause this is refused too.
+  - R25d. A summary's own Start No Earlier Than or Must Start On holds back every task inside it, like a link into it. *verify*
 - R26. An empty summary (all children deleted) becomes a normal task with its last derived duration.
 
 ## Errors

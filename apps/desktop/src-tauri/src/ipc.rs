@@ -260,7 +260,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 format!(" Tasks in the loop: {}. Remove one of the highlighted links to fix it.", tasks.iter().map(name_of).collect::<Vec<_>>().join(" → ")),
             ),
             ScheduleError::MissingTask { link, .. } | ScheduleError::SelfLink { link } => (vec![], vec![*link], String::new()),
-            ScheduleError::LinkOnSummary { link, task } => (vec![*task], vec![*link], String::new()),
+            ScheduleError::FinishLinkToSummary { link, task } => (vec![*task], vec![*link], String::new()),
             ScheduleError::OutlineLoop { task } | ScheduleError::MissingParent { task, .. } => (vec![*task], vec![], String::new()),
         };
         Problem {

@@ -90,7 +90,10 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     assert_eq!(link("Visual design", "Templates").map(|d| (d.kind, d.lag)), Some((LinkType::StartToStart, 480)));
     assert_eq!(link("Templates", "Content migration").map(|d| (d.kind, d.lag)), Some((LinkType::FinishToFinish, -480)));
     assert_eq!(link("Wireframes & sitemap", "Content migration").map(|d| d.lag), Some(480));
-    assert_eq!(p.dependencies.len(), 5, "links on summary tasks and to other projects are not imported");
+    // Links on summary tasks are kept (R25); the link to another project is not.
+    assert_eq!(p.dependencies.len(), 7);
+    assert!(link("Design", "Build").is_some(), "summary to summary");
+    assert!(link("Build", "Go live 🚀").is_some(), "summary to milestone");
     assert!(schedule(&p).is_ok());
 
     let reported = lines(&report).join("\n");
@@ -102,7 +105,6 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
         "Milestones with a duration",
         "Lags given as a percentage",
         "Elapsed lags",
-        "Links that Super PM cannot hold yet (summary tasks cannot have links yet",
         "Links to tasks in other projects",
         "Blank rows",
         "Baselines",
@@ -128,6 +130,7 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     assert!(options.examples.contains(&"CurrencySymbol".to_owned()));
     assert!(report.recalculated.contains(&"TotalSlack".to_owned()) || report.recalculated.contains(&"Critical".to_owned()));
     assert!(report.imported.iter().any(|l| l.what.starts_with("Tasks") && l.count == 7));
+    assert!(report.imported.iter().any(|l| l.what.starts_with("Links") && l.count == 7));
 }
 
 #[test]

@@ -1,7 +1,13 @@
 //! The scheduling engine: `schedule(project) -> Schedule` (spec 4.5, rules R10 to R29).
 //!
-//! Only leaf tasks are scheduled; summary tasks roll up from their children. Time-valued
-//! results are start-type for starts and finish-type for finishes (see [`crate::calendar`]).
+//! Leaf tasks are scheduled; summary tasks roll up from their children. Links may start or
+//! end at a summary (R25): a link into a summary holds back every task inside it, and a link
+//! out of a summary waits for every task inside it. Time-valued results are start-type for
+//! starts and finish-type for finishes (see [`crate::calendar`]).
+//!
+//! The graph has one node per leaf and two per summary: its *entry* (links into the summary
+//! arrive here and pass down to the children) and its *exit* (rolls up the children; links out
+//! of the summary leave from here). This keeps the graph linear in the size of the project.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
@@ -44,8 +50,9 @@ pub enum ScheduleError {
     Cycle { tasks: Vec<TaskId>, links: Vec<DependencyId> },
     #[error("a link points to a task that does not exist")]
     MissingTask { link: DependencyId, task: TaskId },
-    #[error("links to or from summary tasks are not supported yet; link the tasks inside it instead")]
-    LinkOnSummary { link: DependencyId, task: TaskId },
+    /// R25b: only finish-to-start and start-to-start links may point to a summary.
+    #[error("finish-to-finish and start-to-finish links cannot point to a summary task; link to a task inside it instead")]
+    FinishLinkToSummary { link: DependencyId, task: TaskId },
     #[error("a task cannot be its own predecessor")]
     SelfLink { link: DependencyId },
     #[error("a task is inside itself in the outline")]
@@ -53,6 +60,9 @@ pub enum ScheduleError {
     #[error("a task's parent does not exist")]
     MissingParent { task: TaskId, parent: TaskId },
 }
+
+/// No date at all: the identity for `min`.
+const NEVER: Moment = Moment(i64::MAX);
 
 /// Schedules every task. Pure and deterministic (R29): same input, same output.
 pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
@@ -63,15 +73,25 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
     let start = cal.next_working(project.start);
     let snap = |m: Moment| cal.next_working(m);
 
-    // Forward pass (R10 to R18).
-    let mut early = vec![(start, start); n];
+    // Forward pass (R10 to R18, R25). Per node: a leaf's (ES, EF); a summary entry's floor
+    // (the earliest any task inside may start); a summary exit's rolled-up (ES, EF).
+    let mut early = vec![(start, start); 2 * n];
     let mut conflicts = Vec::new();
-    for &i in &order {
+    for &node in &order {
+        let i = node % n;
         let task = g.tasks[i];
-        let dur = g.duration(i);
-        let mut es = start;
-        for &(p, link) in &g.preds[i] {
-            let (pes, pef) = early[p];
+        let inherited = g.parent[i].map_or(start, |p| early[p].0);
+        if node >= n {
+            // Summary exit: roll up the children.
+            let kids = g.children[i].iter().map(|&c| early[g.exit(c)]);
+            early[node] = kids.fold((NEVER, Moment(i64::MIN)), |(es, ef), (ces, cef)| (es.min(ces), ef.max(cef)));
+            continue;
+        }
+        let summary = !g.children[i].is_empty();
+        let dur = if summary { 0 } else { g.duration(i) };
+        let mut es = start.max(inherited);
+        for &(from, link) in &g.preds[node] {
+            let (pes, pef) = early[from];
             let candidate = match link.kind {
                 LinkType::FinishToStart => cal.add_working(pef, link.lag),
                 LinkType::StartToStart => cal.add_working(pes, link.lag),
@@ -79,6 +99,14 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
                 LinkType::StartToFinish => cal.add_working(cal.add_working(pes, link.lag), -dur),
             };
             es = es.max(candidate);
+        }
+        if summary {
+            // A summary's own constraint holds back everything inside it.
+            if let Constraint::StartNoEarlierThan(d) | Constraint::MustStartOn(d) = task.constraint {
+                es = es.max(snap(d));
+            }
+            early[node] = (es, es);
+            continue;
         }
         // Milestones keep a finish-type instant such as 17:00 (R14); tasks with work
         // start at the next working minute (R5).
@@ -96,25 +124,51 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
                 es = target;
             }
         }
-        early[i] = (es, cal.add_working(es, dur));
+        early[node] = (es, cal.add_working(es, dur));
     }
 
-    let project_finish = order.iter().map(|&i| early[i].1).max().unwrap_or(start);
+    let project_finish = (0..n).filter(|&i| g.children[i].is_empty()).map(|i| early[i].1).max().unwrap_or(start);
 
-    // Backward pass (R19 to R21): the mirror image of the forward pass.
-    let mut late = vec![(project_finish, project_finish); n];
-    for &i in order.iter().rev() {
-        let dur = g.duration(i);
-        let mut lf = project_finish;
-        for &(s, link) in &g.succs[i] {
-            let (sls, slf) = late[s];
-            let candidate = match link.kind {
-                LinkType::FinishToStart => cal.add_working(sls, -link.lag),
-                LinkType::StartToStart => cal.add_working(cal.add_working(sls, -link.lag), dur),
-                LinkType::FinishToFinish => cal.add_working(slf, -link.lag),
-                LinkType::StartToFinish => cal.add_working(cal.add_working(slf, -link.lag), dur),
-            };
-            lf = lf.min(candidate);
+    // Backward pass (R19 to R21, R25), the mirror image. Per node: a leaf's (LS, LF); a
+    // summary exit's ceilings (latest start for the tasks that start it, latest finish for
+    // all tasks inside); a summary entry's rolled-up late start.
+    let mut late = vec![(project_finish, project_finish); 2 * n];
+    for &node in order.iter().rev() {
+        let i = node % n;
+        let summary = !g.children[i].is_empty();
+        if summary && node < n {
+            // Summary entry: the latest it can start is when its first task must start.
+            let ls = g.children[i].iter().map(|&c| late[c].0).min().unwrap_or(project_finish);
+            late[node] = (ls, ls);
+            continue;
+        }
+        // Ceilings handed down from the enclosing summary's exit.
+        let (mut start_ceiling, mut lf) = (NEVER, project_finish);
+        if let Some(p) = g.parent[i] {
+            let (sc, fc) = late[n + p];
+            lf = lf.min(fc);
+            // A summary's start is its earliest task's start, so a limit on the summary's
+            // start binds only the tasks that start it.
+            if early[g.exit(i)].0 == early[n + p].0 {
+                start_ceiling = sc;
+            }
+        }
+        let dur = if summary { 0 } else { g.duration(i) };
+        for &(to, link) in &g.succs[node] {
+            let (sls, slf) = late[to];
+            match link.kind {
+                LinkType::FinishToStart => lf = lf.min(cal.add_working(sls, -link.lag)),
+                LinkType::FinishToFinish => lf = lf.min(cal.add_working(slf, -link.lag)),
+                LinkType::StartToStart => start_ceiling = start_ceiling.min(cal.add_working(sls, -link.lag)),
+                LinkType::StartToFinish => start_ceiling = start_ceiling.min(cal.add_working(slf, -link.lag)),
+            }
+        }
+        if summary {
+            late[node] = (start_ceiling, lf);
+            continue;
+        }
+        if start_ceiling != NEVER {
+            lf = lf.min(cal.add_working(start_ceiling, dur));
         }
         if dur > 0 {
             lf = cal.prev_working_end(lf);
@@ -122,11 +176,11 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         if let Constraint::MustStartOn(d) = g.tasks[i].constraint {
             lf = cal.add_working(snap(d), dur);
         }
-        late[i] = (cal.add_working(lf, -dur), lf);
+        late[node] = (cal.add_working(lf, -dur), lf);
     }
 
     let mut result = vec![None; n];
-    for &i in &order {
+    for i in (0..n).filter(|&i| g.children[i].is_empty()) {
         let ((es, ef), (ls, lf)) = (early[i], late[i]);
         let total_slack = cal.working_between(ef, lf);
         result[i] = Some(TaskSchedule {
@@ -162,17 +216,32 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
     })
 }
 
-/// Tasks indexed in id order, with validated outline and links.
+/// Checks that the links and outline can be scheduled: no loops (through links or through
+/// summaries), no finish links into summaries. The command layer uses this to refuse edits.
+pub fn check(project: &Project) -> Result<(), ScheduleError> {
+    Graph::build(project)?.topological_order().map(|_| ())
+}
+
+/// Tasks indexed in id order. Node `i` is task `i` (a leaf, or a summary's entry); node
+/// `n + i` is summary `i`'s exit.
 struct Graph<'a> {
     tasks: Vec<&'a Task>,
+    parent: Vec<Option<usize>>,
     children: Vec<Vec<usize>>,
     depth: Vec<usize>,
-    /// Per leaf task, incoming and outgoing links in dependency-id order.
+    /// Per node, incoming and outgoing links in dependency-id order.
     preds: Vec<Vec<(usize, &'a Dependency)>>,
     succs: Vec<Vec<(usize, &'a Dependency)>>,
+    /// Per node, every node that must come before it (links and outline), for ordering.
+    after: Vec<Vec<usize>>,
+    before_count: Vec<usize>,
 }
 
 impl<'a> Graph<'a> {
+    fn exit(&self, i: usize) -> usize {
+        if self.children[i].is_empty() { i } else { self.tasks.len() + i }
+    }
+
     fn build(project: &'a Project) -> Result<Self, ScheduleError> {
         let tasks: Vec<&Task> = project.tasks.values().collect();
         let n = tasks.len();
@@ -199,25 +268,42 @@ impl<'a> Graph<'a> {
             }
         }
 
-        let mut preds = vec![Vec::new(); n];
-        let mut succs = vec![Vec::new(); n];
+        let mut g = Graph {
+            tasks,
+            parent,
+            children,
+            depth,
+            preds: vec![Vec::new(); 2 * n],
+            succs: vec![Vec::new(); 2 * n],
+            after: vec![Vec::new(); 2 * n],
+            before_count: vec![0; 2 * n],
+        };
+        let edge = |g: &mut Graph, from: usize, to: usize| {
+            g.after[from].push(to);
+            g.before_count[to] += 1;
+        };
+        for i in 0..n {
+            if let Some(p) = g.parent[i] {
+                edge(&mut g, p, i); // the summary's entry before the task's (floors flow down)
+                let exit = g.exit(i);
+                edge(&mut g, exit, n + p); // the task's exit before the summary's (roll-up)
+            }
+        }
         for d in project.dependencies.values() {
             if d.predecessor == d.successor {
                 return Err(ScheduleError::SelfLink { link: d.id });
             }
-            let lookup = |task: TaskId| -> Result<usize, ScheduleError> {
-                let &i = index.get(&task).ok_or(ScheduleError::MissingTask { link: d.id, task })?;
-                if children[i].is_empty() {
-                    Ok(i)
-                } else {
-                    Err(ScheduleError::LinkOnSummary { link: d.id, task })
-                }
-            };
+            let lookup = |task: TaskId| index.get(&task).copied().ok_or(ScheduleError::MissingTask { link: d.id, task });
             let (p, s) = (lookup(d.predecessor)?, lookup(d.successor)?);
-            preds[s].push((p, d));
-            succs[p].push((s, d));
+            if !g.children[s].is_empty() && matches!(d.kind, LinkType::FinishToFinish | LinkType::StartToFinish) {
+                return Err(ScheduleError::FinishLinkToSummary { link: d.id, task: d.successor });
+            }
+            let from = g.exit(p);
+            g.preds[s].push((from, d));
+            g.succs[from].push((s, d));
+            edge(&mut g, from, s);
         }
-        Ok(Graph { tasks, children, depth, preds, succs })
+        Ok(g)
     }
 
     fn duration(&self, i: usize) -> i64 {
@@ -225,56 +311,76 @@ impl<'a> Graph<'a> {
         if t.is_milestone { 0 } else { t.duration.get() }
     }
 
-    /// Leaf tasks in an order where every predecessor comes first (Kahn's algorithm).
-    fn topological_order(&self) -> Result<Vec<usize>, ScheduleError> {
+    fn nodes(&self) -> impl Iterator<Item = usize> + '_ {
         let n = self.tasks.len();
-        let leaves: Vec<usize> = (0..n).filter(|&i| self.children[i].is_empty()).collect();
-        let mut indegree: Vec<usize> = self.preds.iter().map(Vec::len).collect();
-        let mut queue: VecDeque<usize> = leaves.iter().copied().filter(|&i| indegree[i] == 0).collect();
-        let mut order = Vec::with_capacity(leaves.len());
-        while let Some(i) = queue.pop_front() {
-            order.push(i);
-            for &(s, _) in &self.succs[i] {
-                indegree[s] -= 1;
-                if indegree[s] == 0 {
-                    queue.push_back(s);
+        (0..n).chain((0..n).filter(|&i| !self.children[i].is_empty()).map(move |i| n + i))
+    }
+
+    /// Nodes in an order where everything a node depends on comes first (Kahn's algorithm).
+    fn topological_order(&self) -> Result<Vec<usize>, ScheduleError> {
+        let mut indegree = self.before_count.clone();
+        let mut queue: VecDeque<usize> = self.nodes().filter(|&v| indegree[v] == 0).collect();
+        let total = self.nodes().count();
+        let mut order = Vec::with_capacity(total);
+        while let Some(v) = queue.pop_front() {
+            order.push(v);
+            for &w in &self.after[v] {
+                indegree[w] -= 1;
+                if indegree[w] == 0 {
+                    queue.push_back(w);
                 }
             }
         }
-        if order.len() == leaves.len() {
-            Ok(order)
-        } else {
-            Err(self.find_cycle(&indegree))
-        }
+        if order.len() == total { Ok(order) } else { Err(self.find_cycle(&indegree)) }
     }
 
-    /// Every task left with a nonzero in-degree after Kahn's algorithm has a predecessor
-    /// that is also left, so walking predecessors from any of them must revisit a task.
+    /// Every node left with a nonzero in-degree after Kahn's algorithm has a predecessor
+    /// that is also left, so walking predecessors from any of them must revisit a node.
     fn find_cycle(&self, indegree: &[usize]) -> ScheduleError {
-        let remaining = |i: usize| indegree[i] > 0;
-        let first = (0..self.tasks.len()).find(|&i| remaining(i)).expect("a cycle exists");
+        let n = self.tasks.len();
+        let mut before: Vec<Vec<usize>> = vec![Vec::new(); 2 * n];
+        for v in self.nodes() {
+            for &w in &self.after[v] {
+                before[w].push(v);
+            }
+        }
+        let remaining = |v: usize| indegree[v] > 0;
+        let first = self.nodes().find(|&v| remaining(v)).expect("a cycle exists");
         let mut path = vec![first];
         let mut seen_at = HashMap::from([(first, 0)]);
         let cycle_start = loop {
             let cur = *path.last().unwrap();
-            let &(p, _) = self.preds[cur].iter().find(|&&(p, _)| remaining(p)).expect("remaining predecessor");
+            let &p = before[cur].iter().find(|&&p| remaining(p)).expect("remaining predecessor");
             if let Some(&at) = seen_at.get(&p) {
                 break at;
             }
             seen_at.insert(p, path.len());
             path.push(p);
         };
-        // The walk went backwards along links; reverse it and start at the smallest id.
-        let mut cycle: Vec<usize> = path[cycle_start..].iter().rev().copied().collect();
-        let min_pos = cycle.iter().enumerate().min_by_key(|&(_, &i)| i).map(|(pos, _)| pos).unwrap();
-        cycle.rotate_left(min_pos);
-        let links = (0..cycle.len())
-            .map(|k| {
-                let (a, b) = (cycle[k], cycle[(k + 1) % cycle.len()]);
-                self.succs[a].iter().find(|&&(s, _)| s == b).expect("link on cycle").1.id
-            })
-            .collect();
-        ScheduleError::Cycle { tasks: cycle.iter().map(|&i| self.tasks[i].id).collect(), links }
+        // The walk went backwards; reverse it. Then name tasks (an entry and an exit are the
+        // same summary) and the links on the loop, starting at the smallest task.
+        let nodes: Vec<usize> = path[cycle_start..].iter().rev().copied().collect();
+        let mut links = Vec::new();
+        for k in 0..nodes.len() {
+            let (a, b) = (nodes[k], nodes[(k + 1) % nodes.len()]);
+            if let Some(&(_, d)) = self.succs[a].iter().find(|&&(s, _)| s == b) {
+                links.push(d.id);
+            }
+        }
+        let mut tasks: Vec<usize> = Vec::new();
+        for v in &nodes {
+            let t = v % n;
+            if tasks.last() != Some(&t) && !tasks.contains(&t) {
+                tasks.push(t);
+            }
+        }
+        let min_pos = tasks.iter().enumerate().min_by_key(|&(_, &i)| i).map(|(pos, _)| pos).unwrap_or(0);
+        tasks.rotate_left(min_pos);
+        links.sort_by_key(|id| {
+            let d = self.succs.iter().flatten().find(|(_, d)| d.id == *id).expect("link").1;
+            tasks.iter().position(|&t| self.tasks[t].id == d.predecessor).unwrap_or(usize::MAX)
+        });
+        ScheduleError::Cycle { tasks: tasks.iter().map(|&i| self.tasks[i].id).collect(), links }
     }
 }
 
@@ -573,9 +679,96 @@ mod tests {
     }
 
     #[test]
-    fn r25_link_on_summary_is_rejected() {
-        let p = P::new().task(10, 0).task(1, DAY).task(2, DAY).child_of(1, 10).fs(10, 2);
-        assert!(matches!(schedule(&p.0), Err(ScheduleError::LinkOnSummary { task, .. }) if task == tid(10)));
+    fn r25a_link_from_a_summary_waits_for_everything_inside() {
+        // Summary 10 holds 1 (1d) and 2 (2d, after 1). Task 3 follows the summary.
+        let s = P::new()
+            .task(10, 0)
+            .task(1, DAY)
+            .task(2, 2 * DAY)
+            .child_of(1, 10)
+            .child_of(2, 10)
+            .fs(1, 2)
+            .task(3, DAY)
+            .fs(10, 3)
+            .run();
+        assert_eq!(dates(&s, 3), (at(8, 8, 0), at(8, 17, 0)));
+        assert!(s.tasks[&tid(3)].critical);
+        assert!(s.tasks[&tid(1)].critical && s.tasks[&tid(2)].critical);
+    }
+
+    #[test]
+    fn r25b_link_into_a_summary_holds_back_every_task_inside_at_any_depth() {
+        // 1 (2d) -> summary 10 { 2 (1d), summary 20 { 3 (1d) } }.
+        let s = P::new()
+            .task(1, 2 * DAY)
+            .task(10, 0)
+            .task(2, DAY)
+            .task(20, 0)
+            .task(3, DAY)
+            .child_of(2, 10)
+            .child_of(20, 10)
+            .child_of(3, 20)
+            .fs(1, 10)
+            .run();
+        assert_eq!(dates(&s, 2), (at(7, 8, 0), at(7, 17, 0)));
+        assert_eq!(dates(&s, 3), (at(7, 8, 0), at(7, 17, 0)));
+        assert_eq!(dates(&s, 10), (at(7, 8, 0), at(7, 17, 0)));
+        assert!(s.tasks[&tid(1)].critical, "the predecessor of a critical summary is critical");
+    }
+
+    #[test]
+    fn r25b_start_to_start_into_a_summary_with_lag() {
+        let s = P::new().task(1, 3 * DAY).task(10, 0).task(2, DAY).child_of(2, 10).link(1, 10, StartToStart, DAY).run();
+        assert_eq!(dates(&s, 2), (at(6, 8, 0), at(6, 17, 0)));
+    }
+
+    #[test]
+    fn r25_slack_through_a_summary() {
+        // 1 (1d) -> summary 10 { 2 (1d) }; 3 (4d) runs in parallel and finishes last.
+        let s = P::new().task(1, DAY).task(10, 0).task(2, DAY).child_of(2, 10).fs(1, 10).task(3, 4 * DAY).run();
+        assert_eq!(s.tasks[&tid(1)].total_slack, 2 * DAY);
+        assert_eq!(s.tasks[&tid(2)].total_slack, 2 * DAY);
+        assert!(s.tasks[&tid(3)].critical);
+    }
+
+    #[test]
+    fn r25a_start_to_start_from_a_summary_binds_only_the_tasks_that_start_it() {
+        // Summary 10 { 1 (1d), 2 (1d, waits 3 days for task 5) }; 3 starts with the summary.
+        // Task 2 starts later than the summary, so the SS link must not squeeze its slack.
+        let s = P::new()
+            .task(10, 0)
+            .task(1, DAY)
+            .task(2, DAY)
+            .child_of(1, 10)
+            .child_of(2, 10)
+            .task(5, 3 * DAY)
+            .fs(5, 2)
+            .task(3, DAY)
+            .link(10, 3, StartToStart, 0)
+            .run();
+        assert_eq!(dates(&s, 3), (at(5, 8, 0), at(5, 17, 0)));
+        assert!(s.tasks.values().all(|t| t.total_slack >= 0), "{:?}", s.tasks);
+    }
+
+    #[test]
+    fn r25c_a_link_between_a_summary_and_a_task_inside_it_is_a_loop() {
+        let p = P::new().task(10, 0).task(1, DAY).child_of(1, 10).fs(10, 1);
+        match schedule(&p.0) {
+            Err(ScheduleError::Cycle { tasks, links }) => {
+                assert_eq!(tasks, vec![tid(1), tid(10)]);
+                assert_eq!(links.len(), 1);
+            }
+            other => panic!("expected a loop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn r25b_finish_links_into_a_summary_are_refused() {
+        let p = P::new().task(1, DAY).task(10, 0).task(2, DAY).child_of(2, 10).link(1, 10, FinishToFinish, 0);
+        assert!(matches!(schedule(&p.0), Err(ScheduleError::FinishLinkToSummary { task, .. }) if task == tid(10)));
+        // Out of a summary, any type is fine.
+        let p = P::new().task(1, DAY).task(10, 0).task(2, DAY).child_of(2, 10).link(10, 1, FinishToFinish, 0);
+        assert!(schedule(&p.0).is_ok());
     }
 
     #[test]
@@ -638,7 +831,59 @@ mod tests {
         })
     }
 
+    /// Random outlines with links between any tasks, summaries included. Links that cannot
+    /// be held (loops, finish links into summaries) are left out, as the command layer would.
+    fn outlined_projects() -> impl Strategy<Value = Project> {
+        let kinds = prop_oneof![Just(FinishToStart), Just(StartToStart), Just(FinishToFinish), Just(StartToFinish)];
+        let tasks = prop::collection::vec((0i64..4 * DAY, 0usize..3), 2..25);
+        let links = prop::collection::vec((0usize..25, 0usize..25, kinds, -DAY..DAY), 0..30);
+        (tasks, links).prop_map(|(tasks, links)| {
+            let mut p = P::new();
+            let mut depths: Vec<usize> = Vec::new();
+            for (i, &(d, depth)) in tasks.iter().enumerate() {
+                let depth = depth.min(depths.last().map_or(0, |&x| x + 1));
+                p = p.task(i as u128, d);
+                if depth > 0 {
+                    let parent = (0..i).rev().find(|&j| depths[j] == depth - 1).unwrap();
+                    p = p.child_of(i as u128, parent as u128);
+                }
+                depths.push(depth);
+            }
+            for (a, b, kind, lag) in links {
+                let (a, b) = (a % tasks.len(), b % tasks.len());
+                if a == b {
+                    continue;
+                }
+                let before = p.0.dependencies.clone();
+                p = p.link(a as u128, b as u128, kind, lag);
+                if check(&p.0).is_err() {
+                    p.0.dependencies = before;
+                }
+            }
+            p.0
+        })
+    }
+
     proptest! {
+        #[test]
+        fn links_with_summaries_are_respected_and_slack_is_never_negative(p in outlined_projects()) {
+            let s = schedule(&p).unwrap();
+            let cal = &p.calendar;
+            for d in p.dependencies.values() {
+                let (a, b) = (s.tasks[&d.predecessor], s.tasks[&d.successor]);
+                let (required, actual) = match d.kind {
+                    FinishToStart => (cal.add_working(a.early_finish, d.lag), b.early_start),
+                    StartToStart => (cal.add_working(a.early_start, d.lag), b.early_start),
+                    FinishToFinish => (cal.add_working(a.early_finish, d.lag), b.early_finish),
+                    StartToFinish => (cal.add_working(a.early_start, d.lag), b.early_finish),
+                };
+                prop_assert!(cal.working_between(required, actual) >= 0, "{:?} violated: {:?} -> {:?}", d, a, b);
+            }
+            for t in s.tasks.values() {
+                prop_assert!(t.total_slack >= 0, "{:?}", t);
+            }
+        }
+
         #[test]
         fn every_link_is_respected(p in projects()) {
             let s = schedule(&p).unwrap();

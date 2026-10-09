@@ -4,11 +4,12 @@
 //! error and leaves the project untouched. Applying the inverse restores the project
 //! exactly, which is what undo, redo and later sync are built on.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::Calendar;
+use crate::schedule::ScheduleError;
 use crate::model::{
     Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, SortKey, Task, TaskId,
 };
@@ -76,8 +77,12 @@ pub enum CommandError {
     DuplicateLink { existing: DependencyId },
     #[error("this link would make the tasks wait for each other in a loop")]
     WouldCreateCycle { path: Vec<TaskId> },
-    #[error("summary tasks cannot have links yet; link the tasks inside it instead")]
-    LinkOnSummary { task: TaskId },
+    #[error("finish-to-finish and start-to-finish links cannot point to a summary task; link to a task inside it instead")]
+    FinishLinkToSummary { task: TaskId },
+    #[error("a summary task cannot be linked to a task inside it")]
+    LinkInsideSummary,
+    #[error("this change would leave a project that cannot be scheduled: {reason}")]
+    Unschedulable { reason: String },
     #[error("a task cannot be moved inside itself")]
     OutlineLoop { id: TaskId },
 }
@@ -156,6 +161,10 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
         Command::InsertLink { dependency } => {
             check_link(p, dependency)?;
             p.dependencies.insert(dependency.id, dependency.clone());
+            if let Err(e) = validate(p) {
+                p.dependencies.remove(&dependency.id);
+                return Err(e);
+            }
             Ok(Command::DeleteLink { id: dependency.id })
         }
         Command::DeleteLink { id } => {
@@ -168,6 +177,10 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
                 LinkChange::Kind(k) => LinkChange::Kind(std::mem::replace(&mut link.kind, *k)),
                 LinkChange::Lag(l) => LinkChange::Lag(std::mem::replace(&mut link.lag, *l)),
             };
+            if let Err(e) = validate(p) {
+                apply(p, &Command::SetLink { id: *id, change: old }).expect("restoring the old value");
+                return Err(e);
+            }
             Ok(Command::SetLink { id: *id, change: old })
         }
         Command::SetProject { change } => {
@@ -197,15 +210,21 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
     }
 }
 
-fn has_children(p: &Project, id: TaskId) -> bool {
-    p.tasks.values().any(|t| t.parent == Some(id))
+/// After an edit that touches links or the outline: the project must still be schedulable
+/// (R25: no link between a summary and a task inside it, no finish link into a summary, no
+/// loops through links or summaries). The engine's own check decides, so the two agree.
+fn validate(p: &Project) -> Result<(), CommandError> {
+    if p.dependencies.values().any(|d| is_inside(p, d.successor, d.predecessor) || is_inside(p, d.predecessor, d.successor)) {
+        return Err(CommandError::LinkInsideSummary);
+    }
+    crate::schedule::check(p).map_err(|e| match e {
+        ScheduleError::Cycle { tasks, .. } => CommandError::WouldCreateCycle { path: tasks },
+        ScheduleError::FinishLinkToSummary { task, .. } => CommandError::FinishLinkToSummary { task },
+        other => CommandError::Unschedulable { reason: other.to_string() },
+    })
 }
 
-fn has_links(p: &Project, id: TaskId) -> bool {
-    p.dependencies.values().any(|d| d.predecessor == id || d.successor == id)
-}
-
-/// Checks a new link against the project as it is now.
+/// Checks a new link against the project as it is now; [`validate`] runs after it is added.
 fn check_link(p: &Project, d: &Dependency) -> Result<(), CommandError> {
     if p.dependencies.contains_key(&d.id) {
         return Err(CommandError::LinkExists { id: d.id });
@@ -217,9 +236,6 @@ fn check_link(p: &Project, d: &Dependency) -> Result<(), CommandError> {
         if !p.tasks.contains_key(&id) {
             return Err(CommandError::NoSuchTask { id });
         }
-        if has_children(p, id) {
-            return Err(CommandError::LinkOnSummary { task: id });
-        }
     }
     if let Some(existing) = p.dependencies.values().find(|x| {
         (x.predecessor, x.successor) == (d.predecessor, d.successor)
@@ -227,37 +243,7 @@ fn check_link(p: &Project, d: &Dependency) -> Result<(), CommandError> {
     }) {
         return Err(CommandError::DuplicateLink { existing: existing.id });
     }
-    if let Some(path) = path_between(p, d.successor, d.predecessor) {
-        return Err(CommandError::WouldCreateCycle { path });
-    }
     Ok(())
-}
-
-/// A chain of links from `from` to `to`, if there is one.
-fn path_between(p: &Project, from: TaskId, to: TaskId) -> Option<Vec<TaskId>> {
-    let mut succs: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
-    for d in p.dependencies.values() {
-        succs.entry(d.predecessor).or_default().push(d.successor);
-    }
-    let mut came_from: HashMap<TaskId, TaskId> = HashMap::new();
-    let mut stack = vec![from];
-    while let Some(cur) = stack.pop() {
-        if cur == to {
-            let mut path = vec![to];
-            while let Some(&prev) = came_from.get(path.last().unwrap()) {
-                path.push(prev);
-            }
-            path.reverse();
-            return Some(path);
-        }
-        for &next in succs.get(&cur).into_iter().flatten() {
-            if next != from && !came_from.contains_key(&next) {
-                came_from.insert(next, cur);
-                stack.push(next);
-            }
-        }
-    }
-    None
 }
 
 fn is_inside(p: &Project, id: TaskId, ancestor: TaskId) -> bool {
@@ -281,9 +267,6 @@ fn insert_tasks(p: &mut Project, tasks: &[Task], links: &[Dependency]) -> Result
             if !p.tasks.contains_key(&parent) && !new_ids.contains(&parent) {
                 return Err(CommandError::NoSuchTask { id: parent });
             }
-            if p.tasks.contains_key(&parent) && has_links(p, parent) {
-                return Err(CommandError::LinkOnSummary { task: parent });
-            }
         }
     }
     for t in tasks {
@@ -301,6 +284,16 @@ fn insert_tasks(p: &mut Project, tasks: &[Task], links: &[Dependency]) -> Result
             return Err(e);
         }
         p.dependencies.insert(d.id, d.clone());
+    }
+    // A new task under a linked task turns it into a linked summary; check that still works.
+    if let Err(e) = validate(p) {
+        for d in links {
+            p.dependencies.remove(&d.id);
+        }
+        for t in tasks {
+            p.tasks.remove(&t.id);
+        }
+        return Err(e);
     }
     Ok(inverse)
 }
@@ -344,9 +337,6 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
         if is_inside(p, *parent, id) {
             return Err(CommandError::OutlineLoop { id });
         }
-        if has_links(p, *parent) {
-            return Err(CommandError::LinkOnSummary { task: *parent });
-        }
     }
     let t = p.tasks.get_mut(&id).expect("checked above");
     let old = match change {
@@ -361,6 +351,13 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
             sort_key: std::mem::replace(&mut t.sort_key, sort_key.clone()),
         },
     };
+    // Moving a task can put it inside a task it is linked to; refuse that.
+    if matches!(change, TaskChange::Position { .. }) {
+        if let Err(e) = validate(p) {
+            set_task(p, id, &old).expect("restoring the old position");
+            return Err(e);
+        }
+    }
     Ok(Command::SetTask { id, change: old })
 }
 
@@ -489,29 +486,47 @@ mod tests {
             apply(&mut p, &Command::InsertLink { dependency: link(9, 4, 2) }),
             Err(CommandError::WouldCreateCycle { path: vec![tid(2), tid(3), tid(4)] })
         );
-        assert_eq!(
-            apply(&mut p, &Command::InsertLink { dependency: link(9, 1, 4) }),
-            Err(CommandError::LinkOnSummary { task: tid(1) })
-        );
+        assert_eq!(apply(&mut p, &Command::InsertLink { dependency: link(9, 1, 2) }), Err(CommandError::LinkInsideSummary));
         assert_eq!(p, before);
+        // R25: a summary may be linked, but finish links may not point into one.
+        let mut ff = link(9, 4, 1);
+        ff.kind = LinkType::FinishToFinish;
+        let mut q = sample();
+        apply(&mut q, &Command::DeleteLink { id: lid(2) }).unwrap(); // so 4 -> 1 is not a loop
+        assert_eq!(apply(&mut q, &Command::InsertLink { dependency: ff }), Err(CommandError::FinishLinkToSummary { task: tid(1) }));
+        assert!(apply(&mut q, &Command::InsertLink { dependency: link(10, 4, 1) }).is_ok(), "finish-to-start into a summary is fine");
     }
 
     #[test]
-    fn cannot_move_into_itself_or_under_a_linked_task() {
+    fn summary_links_are_allowed_and_changing_one_to_a_finish_link_is_refused() {
+        let mut p = sample();
+        apply(&mut p, &Command::InsertTasks { tasks: vec![task(5, None)], dependencies: vec![] }).unwrap();
+        apply(&mut p, &Command::InsertLink { dependency: link(9, 5, 1) }).unwrap();
+        let before = p.clone();
+        let change = Command::SetLink { id: lid(9), change: LinkChange::Kind(LinkType::FinishToFinish) };
+        assert_eq!(apply(&mut p, &change), Err(CommandError::FinishLinkToSummary { task: tid(1) }));
+        assert_eq!(p, before, "the link type is restored");
+    }
+
+    #[test]
+    fn cannot_move_into_itself_or_inside_a_task_it_is_linked_to() {
         let mut p = sample();
         let pos = |parent| TaskChange::Position { parent: Some(tid(parent)), sort_key: SortKey("x".into()) };
         assert_eq!(apply(&mut p, &Command::SetTask { id: tid(1), change: pos(2) }), Err(CommandError::OutlineLoop { id: tid(1) }));
         assert_eq!(apply(&mut p, &Command::SetTask { id: tid(1), change: pos(1) }), Err(CommandError::OutlineLoop { id: tid(1) }));
-        assert_eq!(apply(&mut p, &Command::SetTask { id: tid(1), change: pos(4) }), Err(CommandError::LinkOnSummary { task: tid(4) }));
+        // 4 is linked from 3, which is inside 1: putting 1 under 4 would link 4 to a task inside it.
+        assert_eq!(apply(&mut p, &Command::SetTask { id: tid(1), change: pos(4) }), Err(CommandError::LinkInsideSummary));
+        assert_eq!(p, sample(), "the move is undone");
     }
 
     #[test]
-    fn insert_under_linked_task_is_refused_and_leaves_nothing() {
+    fn inserting_under_a_linked_task_makes_a_linked_summary() {
         let mut p = sample();
-        let before = p.clone();
         let cmd = Command::InsertTasks { tasks: vec![task(7, Some(4))], dependencies: vec![] };
-        assert_eq!(apply(&mut p, &cmd), Err(CommandError::LinkOnSummary { task: tid(4) }));
-        let cmd = Command::InsertTasks { tasks: vec![task(7, None)], dependencies: vec![link(7, 7, 7)] };
+        assert!(apply(&mut p, &cmd).is_ok(), "4 becomes a summary with its incoming link");
+        assert!(crate::schedule::schedule(&p).is_ok());
+        let before = p.clone();
+        let cmd = Command::InsertTasks { tasks: vec![task(8, None)], dependencies: vec![link(7, 8, 8)] };
         assert_eq!(apply(&mut p, &cmd), Err(CommandError::SelfLink));
         assert_eq!(p, before);
     }

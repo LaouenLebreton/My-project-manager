@@ -418,11 +418,12 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
     const r = rows[row];
     const g = r && barGeometry(r);
     let zone: "bar" | "edge" | null = null;
-    if (g && !r.isSummary) {
+    if (g) {
       const right = r.isMilestone ? g.x1 + 7 : g.x2;
       const left = r.isMilestone ? g.x1 - 7 : g.x1;
       if (px >= left - 3 && px <= right + 3) {
-        zone = !r.isMilestone && px >= right - EDGE && right - left > 2 * EDGE ? "edge" : "bar";
+        // A summary's dates come from its tasks: it can only be dragged onto another bar to link.
+        zone = !r.isMilestone && !r.isSummary && px >= right - EDGE && right - left > 2 * EDGE ? "edge" : "bar";
       }
     }
     return { px, py, row, zone };
@@ -460,7 +461,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
       // Mostly vertical: draw a link. Mostly horizontal: move the bar.
       const dx = h.px - drag.startX;
       const dy = h.py - drag.startY;
-      if (!drag.linking && Math.abs(dx) > 4 && Math.abs(dx) > Math.abs(dy)) {
+      if (!drag.linking && !r.isSummary && Math.abs(dx) > 4 && Math.abs(dx) > Math.abs(dy)) {
         setDrag({ kind: "move", row: drag.row, startX: drag.startX, dx });
       } else if (drag.linking || Math.abs(dy) > ROW_HEIGHT * 0.6) {
         setDrag({ ...drag, x: h.px, y: h.py, linking: true });
