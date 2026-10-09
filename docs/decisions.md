@@ -93,3 +93,8 @@ Short notes, newest last. Owner-approved product decisions (D1–D9) are in the 
 - **Return selects the cell's text** when editing starts, so typing replaces it, as Finder does with names. Typing a character directly still starts fresh with that character.
 - **Dragging a bar earlier than its links allow** now explains itself in the status bar ("cannot start before … : its predecessors finish later"), instead of leaving the bar where it was without a word.
 - **Edit > Find (⌘F)**: a find field above the grid; matches task names as you type (from the current row), Return jumps to the next match, Escape closes.
+
+## 2026-10-09, owner decisions applied
+
+- **Links on summary tasks** (R25 in `scheduling-rules.md`): allowed, as in Microsoft Project. The engine gives each summary an entry node (links into it hold back every task inside) and an exit node (rolls up its tasks; links out of it start there), so the graph stays linear in project size. Finish-to-finish and start-to-finish links into a summary are refused, as Project refuses them. The command layer validates every link and outline change with the engine's own check, so the two can never disagree. Imported summary links are kept.
+- **Outdent like Microsoft Project:** the outdented task moves out of its summary, and the tasks after it in that summary become its subtasks. One undo step.

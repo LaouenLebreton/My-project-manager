@@ -400,7 +400,9 @@ fn indent(p: &Project, selected: &HashSet<TaskId>) -> Option<Command> {
     batch("Indent", commands)
 }
 
-/// Each selected task moves out of its summary, to just below it.
+/// Each selected task moves out of its summary, to just below it, and the tasks after it in
+/// that summary become its subtasks, as in Microsoft Project. With several selected, each
+/// takes the tasks between it and the next selected one.
 fn outdent(p: &Project, selected: &HashSet<TaskId>) -> Option<Command> {
     let mut groups: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
     let mut order = Vec::new();
@@ -416,9 +418,29 @@ fn outdent(p: &Project, selected: &HashSet<TaskId>) -> Option<Command> {
     for parent in order {
         let pt = &p.tasks[&parent];
         let after = child_keys(p, pt.parent).into_iter().find(|k| **k > pt.sort_key).cloned();
-        let ids = &groups[&parent];
-        for (id, key) in ids.iter().zip(SortKey::n_between(Some(&pt.sort_key), after.as_ref(), ids.len())) {
+        let moving = &groups[&parent];
+        let moving_set: HashSet<TaskId> = moving.iter().copied().collect();
+        // The parent's other children, in order: each goes under the nearest moving task above it.
+        let mut siblings: Vec<&Task> = p.tasks.values().filter(|t| t.parent == Some(parent)).collect();
+        siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+        for (id, key) in moving.iter().zip(SortKey::n_between(Some(&pt.sort_key), after.as_ref(), moving.len())) {
             commands.push(Command::SetTask { id: *id, change: TaskChange::Position { parent: pt.parent, sort_key: key } });
+        }
+        let mut adopted: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
+        let mut current: Option<TaskId> = None;
+        for t in siblings {
+            if moving_set.contains(&t.id) {
+                current = Some(t.id);
+            } else if let Some(new_parent) = current {
+                adopted.entry(new_parent).or_default().push(t.id);
+            }
+        }
+        for id in moving {
+            let Some(kids) = adopted.get(id) else { continue };
+            let last = child_keys(p, Some(*id)).last().copied().cloned();
+            for (kid, key) in kids.iter().zip(SortKey::n_between(last.as_ref(), None, kids.len())) {
+                commands.push(Command::SetTask { id: *kid, change: TaskChange::Position { parent: Some(*id), sort_key: key } });
+            }
         }
     }
     batch("Outdent", commands)
@@ -508,10 +530,27 @@ mod tests {
     }
 
     #[test]
-    fn outdent_lands_between_parent_and_its_next_sibling() {
-        let (mut p, id) = project(&[("A", 0), ("A1", 1), ("A2", 1), ("B", 0)]);
+    fn outdent_takes_the_tasks_below_along_like_microsoft_project() {
+        // Phase with A, B, C; outdenting B makes C a subtask of B.
+        let (mut p, id) = project(&[("Phase", 0), ("A", 1), ("B", 1), ("C", 1), ("Next", 0)]);
+        run(&mut p, Edit::Outdent { ids: ids(&[id[2]]) });
+        assert_eq!(shape(&p), s(&[("Phase", 0), ("A", 1), ("B", 0), ("C", 1), ("Next", 0)]));
+        // Undo puts everything back as one step.
+        let (mut q, id) = project(&[("Phase", 0), ("A", 1), ("B", 1), ("C", 1), ("D", 1)]);
+        let before = q.clone();
+        let planned = plan(&q, None, &Units::default(), Edit::Outdent { ids: ids(&[id[2], id[3]]) }).unwrap().unwrap();
+        let inverse = apply(&mut q, &planned.command).unwrap();
+        // B and C both come out; D, after C, goes under C.
+        assert_eq!(shape(&q), s(&[("Phase", 0), ("A", 1), ("B", 0), ("C", 0), ("D", 1)]));
+        apply(&mut q, &inverse).unwrap();
+        assert_eq!(q, before);
+    }
+
+    #[test]
+    fn outdent_keeps_existing_subtasks_first() {
+        let (mut p, id) = project(&[("Phase", 0), ("B", 1), ("B1", 2), ("C", 1)]);
         run(&mut p, Edit::Outdent { ids: ids(&[id[1]]) });
-        assert_eq!(shape(&p), s(&[("A", 0), ("A2", 1), ("A1", 0), ("B", 0)]));
+        assert_eq!(shape(&p), s(&[("Phase", 0), ("B", 0), ("B1", 1), ("C", 1)]));
     }
 
     #[test]

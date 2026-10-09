@@ -263,10 +263,11 @@ fn insert_tasks(p: &mut Project, tasks: &[Task], links: &[Dependency]) -> Result
         if p.tasks.contains_key(&t.id) || !new_ids.insert(t.id) {
             return Err(CommandError::TaskExists { id: t.id });
         }
-        if let Some(parent) = t.parent {
-            if !p.tasks.contains_key(&parent) && !new_ids.contains(&parent) {
-                return Err(CommandError::NoSuchTask { id: parent });
-            }
+        if let Some(parent) = t.parent
+            && !p.tasks.contains_key(&parent)
+            && !new_ids.contains(&parent)
+        {
+            return Err(CommandError::NoSuchTask { id: parent });
         }
     }
     for t in tasks {
@@ -352,11 +353,11 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
         },
     };
     // Moving a task can put it inside a task it is linked to; refuse that.
-    if matches!(change, TaskChange::Position { .. }) {
-        if let Err(e) = validate(p) {
-            set_task(p, id, &old).expect("restoring the old position");
-            return Err(e);
-        }
+    if matches!(change, TaskChange::Position { .. })
+        && let Err(e) = validate(p)
+    {
+        set_task(p, id, &old).expect("restoring the old position");
+        return Err(e);
     }
     Ok(Command::SetTask { id, change: old })
 }
