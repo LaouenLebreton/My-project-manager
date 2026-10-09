@@ -12,6 +12,8 @@ import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { WbsChart } from "./WbsChart";
 import { Workload } from "./Workload";
+import { Board } from "./Board";
+import { CalendarView } from "./CalendarView";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
 import type { ReportView } from "./bindings/ReportView";
@@ -34,7 +36,7 @@ export function App() {
   const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
-  const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload">("tasks");
+  const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload" | "calendar" | "board">("tasks");
   const [notice, setNotice] = useState<string | null>(null);
   const ganttRef = useRef<GanttHandle>(null);
 
@@ -145,6 +147,8 @@ export function App() {
         if (e.payload === "view.resources") setView("resources");
         if (e.payload === "view.wbs") setView("wbs");
         if (e.payload === "view.workload") setView("workload");
+        if (e.payload === "view.calendar") setView("calendar");
+        if (e.payload === "view.board") setView("board");
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
@@ -180,6 +184,8 @@ export function App() {
       { name: "Show Resource Sheet", shortcut: "⌘2", run: () => setView("resources") },
       { name: "Show Work Breakdown Structure (WBS)", shortcut: "⌘3", run: () => setView("wbs") },
       { name: "Show Workload (hours per person per day)", shortcut: "⌘4", run: () => setView("workload") },
+      { name: "Show Calendar", shortcut: "⌘5", run: () => setView("calendar") },
+      { name: "Show Board (Not started / In progress / Done)", shortcut: "⌘6", run: () => setView("board") },
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
@@ -283,6 +289,12 @@ export function App() {
           <button role="tab" aria-selected={view === "workload"} className={view === "workload" ? "on" : undefined} onClick={() => setView("workload")}>
             Workload
           </button>
+          <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "on" : undefined} onClick={() => setView("calendar")}>
+            Calendar
+          </button>
+          <button role="tab" aria-selected={view === "board"} className={view === "board" ? "on" : undefined} onClick={() => setView("board")}>
+            Board
+          </button>
         </div>
       </header>
       {error && (
@@ -308,7 +320,11 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
-      {view === "workload" ? (
+      {view === "board" ? (
+        <Board snapshot={snapshot} onEdit={edit} onShowTask={showTask} />
+      ) : view === "calendar" ? (
+        <CalendarView snapshot={snapshot} onShowTask={showTask} />
+      ) : view === "workload" ? (
         <Workload snapshot={snapshot} onShowTask={showTask} />
       ) : view === "wbs" ? (
         <WbsChart snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />

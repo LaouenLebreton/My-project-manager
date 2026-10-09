@@ -50,6 +50,10 @@ export const GLOSSARY = {
     term: "Earned value",
     text: "Compares the work done with the baseline, in money, as of the status date. Planned value is what should be done by then, earned value what is done, actual cost what it cost. An SPI or CPI below 1 means behind schedule or over budget. Keep % Done up to date for meaningful numbers.",
   },
+  board: {
+    term: "Board",
+    text: "Work tasks as cards. Drag a card (or use its arrows) to In progress or Done: that sets % Done to 50% or 100% and records the actual dates, as typing it in the task list does.",
+  },
   workload: {
     term: "Workload",
     text: "Hours each person is asked to work, day by day or week by week, with the tasks underneath. Red means more than they have that day (their working time × Max Units). Click a task to find it in the task list.",
@@ -76,7 +80,7 @@ export const SHORTCUTS: [string, string][] = [
   ["⌘Z / ⇧⌘Z", "Undo / redo any change"],
   ["⌘I", "Task Info: constraint, % complete, notes"],
   ["⌘F", "Find a task by name; Return for the next match"],
-  ["⌘1 / ⌘2 / ⌘3 / ⌘4", "Tasks / Resource Sheet / Work breakdown structure / Workload"],
+  ["⌘1 … ⌘6", "Tasks / Resource Sheet / Work breakdown structure / Workload / Calendar / Board"],
   ["Return / Tab (WBS)", "Add a task / a subtask in the WBS chart; Space renames"],
   ["⌘K", "Command bar: run any command by name"],
   ["⌘N / ⌘O", "New project / open a project"],

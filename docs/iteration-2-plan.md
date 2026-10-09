@@ -60,7 +60,7 @@ resolve over-allocation) and **costs** (rates, fixed costs, task and project tot
 12. **[Done]** **Baselines:** save the plan as a baseline; show baseline bars and variances.
 13. **Progress:** status date, actual start and finish, % complete driving remaining work. *Done:* R35, % Done column, Task menu 0–100%, Task Info actual dates, Project > Update Project…, status date line; MSPDI ActualStart/ActualFinish/StatusDate.
 14. **Earned value:** planned value, earned value, actual cost, variances and indices. *Done:* `pm_core::earned_value` (BCWS spread evenly over the baseline working time; BCWP = baseline cost × % complete; ACWP = current cost × % complete), Project > Project Statistics…
-15. **Views:** workload (resource usage over time), calendar, board.
+15. **Views:** workload (resource usage over time), calendar, board. *Done:* Workload (⌘4, hours per person per day/week, red when over capacity), Calendar (⌘5, month of task bars), Board (⌘6, Not started / In progress / Done; moving a card sets % complete 0/50/100 as Microsoft Project's Task Board does).
 
 Later iterations: team server, sync and chat (3); automation, portfolio, and `.mpp` reading (4,
 last, as the owner asked).

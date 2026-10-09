@@ -969,3 +969,214 @@ table.stats td {
   padding: 0;
   cursor: pointer;
 }
+
+/* Board: cards in Not started / In progress / Done. */
+.board {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.board-columns {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 0 16px 16px;
+  overflow: auto;
+}
+.board-column {
+  background: color-mix(in srgb, CanvasText 4%, Canvas);
+  border-radius: 10px;
+  padding: 8px;
+  min-height: 0;
+  overflow: auto;
+  border: 2px solid transparent;
+}
+.board-column.drop {
+  border-color: var(--gantt-accent);
+}
+.board-column h3 {
+  font-size: 13px;
+  margin: 4px 4px 8px;
+}
+.board-column ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.card {
+  background: Canvas;
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  border-left: 3px solid var(--gantt-bar);
+  cursor: grab;
+  position: relative;
+  touch-action: none;
+}
+.card.lifted {
+  opacity: 0.35;
+  cursor: grabbing;
+  user-select: none;
+}
+.card.ghost {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  transform: rotate(1.5deg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.card.critical {
+  border-left-color: var(--gantt-critical);
+}
+.card-name {
+  font-weight: 600;
+  text-align: left;
+  padding: 0;
+}
+.card .small {
+  margin-top: 2px;
+}
+.card-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, CanvasText 10%, Canvas);
+  margin-top: 6px;
+  overflow: hidden;
+}
+.card-progress span {
+  display: block;
+  height: 100%;
+  background: var(--gantt-bar);
+}
+.card-moves {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+}
+.card:hover .card-moves,
+.card:focus-within .card-moves {
+  opacity: 1;
+}
+.card-moves button {
+  font-size: 11px;
+  padding: 0 5px;
+}
+
+/* Calendar: a month of weeks; bars sit on top of the day cells. */
+.calendar {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.calendar-nav h2 {
+  font-size: 15px;
+  margin: 0 0 0 8px;
+}
+.calendar-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 16px;
+}
+.calendar-week {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: 22px;
+  grid-auto-rows: 22px;
+  row-gap: 2px;
+  min-height: 112px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--gantt-grid);
+}
+.calendar-head {
+  min-height: 0;
+  grid-template-rows: auto;
+}
+.calendar-dayname {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 4px 6px;
+}
+.calendar-days {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.calendar-day {
+  border-left: 1px solid var(--gantt-grid);
+  padding: 3px 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.calendar-day.off {
+  background: var(--gantt-nonworking);
+}
+.calendar-day.outside .calendar-date {
+  opacity: 0.4;
+}
+.calendar-day.today .calendar-date {
+  background: var(--gantt-accent);
+  color: white;
+  border-radius: 9px;
+  padding: 1px 5px;
+}
+.calendar-bar {
+  position: relative;
+  margin: 0 3px;
+  border: none;
+  border-radius: 4px;
+  background: var(--gantt-bar);
+  color: white;
+  font-size: 11px;
+  text-align: left;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.calendar-bar.critical {
+  background: var(--gantt-critical);
+}
+.calendar-bar.done {
+  opacity: 0.55;
+}
+.calendar-bar.milestone {
+  background: none;
+  color: var(--text);
+  padding-left: 2px;
+}
+.calendar-bar.cont-left {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: 0;
+}
+.calendar-bar.cont-right {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-right: 0;
+}
+.calendar-more {
+  position: relative;
+  grid-column: 1 / -1;
+  font-size: 11px;
+  justify-self: start;
+  margin-left: 6px;
+}

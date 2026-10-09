@@ -28,6 +28,8 @@ pub mod id {
     pub const VIEW_RESOURCES: &str = "view.resources";
     pub const VIEW_WBS: &str = "view.wbs";
     pub const VIEW_WORKLOAD: &str = "view.workload";
+    pub const VIEW_CALENDAR: &str = "view.calendar";
+    pub const VIEW_BOARD: &str = "view.board";
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
     pub const TASK_INFO: &str = "task.info";
@@ -171,11 +173,15 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let view_resources = item(app, id::VIEW_RESOURCES, "Resource Sheet", Some("CmdOrCtrl+2"))?;
     let view_wbs = item(app, id::VIEW_WBS, "Work Breakdown Structure", Some("CmdOrCtrl+3"))?;
     let view_workload = item(app, id::VIEW_WORKLOAD, "Workload", Some("CmdOrCtrl+4"))?;
+    let view_calendar = item(app, id::VIEW_CALENDAR, "Calendar", Some("CmdOrCtrl+5"))?;
+    let view_board = item(app, id::VIEW_BOARD, "Board", Some("CmdOrCtrl+6"))?;
     let view = SubmenuBuilder::new(app, "View")
         .item(&view_tasks)
         .item(&view_resources)
         .item(&view_wbs)
         .item(&view_workload)
+        .item(&view_calendar)
+        .item(&view_board)
         .separator()
         .item(&enabled(id::COMMAND_BAR, "Show Command Bar", Some("CmdOrCtrl+K"))?)
         .separator()
@@ -242,7 +248,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics];
+    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }
