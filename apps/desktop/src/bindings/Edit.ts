@@ -20,4 +20,4 @@ maxUnits: string | null, materialLabel: string | null,
 /**
  * Typed cost per hour (work) or per unit (material).
  */
-rate: string | null, } | { "kind": "DeleteResources", ids: Array<string>, } | { "kind": "SetCurrency", symbol: string, } | { "kind": "LevelResources" } | { "kind": "ClearLeveling" };
+rate: string | null, } | { "kind": "DeleteResources", ids: Array<string>, } | { "kind": "SetCurrency", symbol: string, } | { "kind": "AddSubtask", parentId: string, name: string, } | { "kind": "MoveUnder", id: string, parentId: string | null, } | { "kind": "LevelResources" } | { "kind": "ClearLeveling" };

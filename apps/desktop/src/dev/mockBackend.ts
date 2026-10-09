@@ -24,6 +24,7 @@ function row(name: string, depth = 0): Row {
     id: `t${++next}`,
     parentId: null,
     depth,
+    wbs: "",
     isSummary: false,
     isMilestone: false,
     name,
@@ -82,6 +83,17 @@ function generate(n: number): { rows: Row[]; links: Link[] } {
     const phase = rows[phaseStart];
     phase.start ??= r.start;
     phase.finish = r.finish;
+  }
+  // Parents and WBS codes from the generated outline.
+  const stack: Row[] = [];
+  const counters: number[] = [];
+  for (const r of rows) {
+    stack.length = r.depth;
+    r.parentId = stack[r.depth - 1]?.id ?? null;
+    stack[r.depth] = r;
+    counters.length = r.depth + 1;
+    counters[r.depth] = (counters[r.depth] ?? 0) + 1;
+    r.wbs = counters.join(".");
   }
   return { rows, links };
 }
@@ -208,7 +220,8 @@ export function install() {
           let createdId: string | null = null;
           switch (e.kind) {
             case "AddTask": {
-              const r = row(e.name);
+              const after = e.afterId ? state.rows[at(e.afterId)] : null;
+              const r = { ...row(e.name, after?.depth ?? 0), parentId: after?.parentId ?? null, wbs: "new" };
               state.rows.splice(e.afterId ? at(e.afterId) + 1 : state.rows.length, 0, r);
               createdId = r.id;
               break;
@@ -265,6 +278,19 @@ export function install() {
               break;
             case "SetTaskResources":
               state.rows[at(e.id)].resourceNames = e.text;
+              break;
+            case "AddSubtask": {
+              const parent = state.rows[at(e.parentId)];
+              const r = { ...row(e.name, parent.depth + 1), parentId: parent.id, wbs: `${parent.wbs}.${state.rows.filter((x) => x.parentId === parent.id).length + 1}` };
+              let i = at(e.parentId) + 1;
+              while (i < state.rows.length && state.rows[i].depth > parent.depth) i++;
+              state.rows.splice(i, 0, r);
+              parent.isSummary = true;
+              createdId = r.id;
+              break;
+            }
+            case "MoveUnder":
+              state.rows[at(e.id)].parentId = e.parentId;
               break;
             case "SetCalendar":
               if (e.week.every((d) => d.length === 0)) fail("the working week has no working time, so no task could ever be scheduled");

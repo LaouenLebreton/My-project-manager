@@ -10,6 +10,7 @@ import { ResourceSheet } from "./ResourceSheet";
 import { ProjectInfo, TaskInfo, WorkingTime } from "./Sheets";
 import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
+import { WbsChart } from "./WbsChart";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
 import type { ReportView } from "./bindings/ReportView";
@@ -29,7 +30,7 @@ export function App() {
   const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
-  const [view, setView] = useState<"tasks" | "resources">("tasks");
+  const [view, setView] = useState<"tasks" | "resources" | "wbs">("tasks");
   const [notice, setNotice] = useState<string | null>(null);
   const ganttRef = useRef<GanttHandle>(null);
 
@@ -125,6 +126,7 @@ export function App() {
         if (e.payload === "edit.find") setFinding(true);
         if (e.payload === "view.tasks") setView("tasks");
         if (e.payload === "view.resources") setView("resources");
+        if (e.payload === "view.wbs") setView("wbs");
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
@@ -151,6 +153,7 @@ export function App() {
     commands.push(
       { name: "Show Tasks", shortcut: "⌘1", run: () => setView("tasks") },
       { name: "Show Resource Sheet", shortcut: "⌘2", run: () => setView("resources") },
+      { name: "Show Work Breakdown Structure (WBS)", shortcut: "⌘3", run: () => setView("wbs") },
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
@@ -238,6 +241,9 @@ export function App() {
               </span>
             )}
           </button>
+          <button role="tab" aria-selected={view === "wbs"} className={view === "wbs" ? "on" : undefined} onClick={() => setView("wbs")}>
+            WBS
+          </button>
         </div>
       </header>
       {error && (
@@ -263,7 +269,9 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
-      {view === "resources" ? (
+      {view === "wbs" ? (
+        <WbsChart snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
+      ) : view === "resources" ? (
         <ResourceSheet snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
       ) : (
         <>

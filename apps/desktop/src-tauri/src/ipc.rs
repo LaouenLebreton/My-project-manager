@@ -138,6 +138,8 @@ pub struct Row {
     pub id: String,
     pub parent_id: Option<String>,
     pub depth: u32,
+    /// Work breakdown structure code: "1", "1.2", "1.2.3".
+    pub wbs: String,
     pub is_summary: bool,
     pub is_milestone: bool,
     pub name: String,
@@ -316,9 +318,14 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             incoming.entry(d.successor).or_default().push(PredecessorEntry { row, kind: d.kind, lag: d.lag });
         }
     }
+    let mut counters: Vec<usize> = Vec::new();
     let rows = outline_rows
         .into_iter()
         .map(|r| {
+            counters.truncate(r.depth + 1);
+            counters.resize(r.depth + 1, 0);
+            counters[r.depth] += 1;
+            let wbs = counters.iter().map(usize::to_string).collect::<Vec<_>>().join(".");
             let t = &p.tasks[&r.id];
             let s = sched.and_then(|s| s.tasks.get(&r.id));
             let duration_minutes = match (r.has_children, s) {
@@ -330,6 +337,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 id: r.id.0.to_string(),
                 parent_id: t.parent.map(|x| x.0.to_string()),
                 depth: r.depth as u32,
+                wbs,
                 is_summary: r.has_children,
                 is_milestone: t.is_milestone,
                 name: t.name.clone(),
@@ -806,6 +814,13 @@ mod tests {
         assert!(row(&snapshot(&doc), "Book movers").overloaded);
         doc.undo().unwrap();
         assert!(!row(&snapshot(&doc), "Book movers").overloaded, "undo of Clear Leveling restores the delays");
+    }
+
+    #[test]
+    fn wbs_codes_follow_the_outline() {
+        let s = snapshot(&sample_doc());
+        let code = |name: &str| row(&s, name).wbs.clone();
+        assert_eq!((code("Planning"), code("Choose new office"), code("Preparation"), code("Pack offices")), ("1".into(), "1.2".into(), "2".into(), "2.4".into()));
     }
 
     #[test]

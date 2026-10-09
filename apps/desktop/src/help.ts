@@ -30,6 +30,10 @@ export const GLOSSARY = {
     term: "Resources",
     text: "Who (or what) works on a task. Type names separated by commas: Alex, Sam. Add a share of their time in brackets, Sam[50%], or a quantity for materials, Concrete[2.5 tons]. A new name adds that resource to the Resource Sheet.",
   },
+  wbs: {
+    term: "Work breakdown structure (WBS)",
+    text: "The project broken down into phases and the work inside them, drawn as a tree. The codes (1, 1.2, 1.2.3) show where each task sits. Build it in the WBS view with Return (new task) and Tab (subtask), or drag boxes to reorganise.",
+  },
   cost: {
     term: "Cost",
     text: "What a task costs: its resources' work times their rates (Rate in the Resource Sheet), plus any fixed cost (Task Info). Summaries add up the tasks inside them. Set the currency in Project Info.",
@@ -56,7 +60,8 @@ export const SHORTCUTS: [string, string][] = [
   ["⌘Z / ⇧⌘Z", "Undo / redo any change"],
   ["⌘I", "Task Info: constraint, % complete, notes"],
   ["⌘F", "Find a task by name; Return for the next match"],
-  ["⌘1 / ⌘2", "Tasks / Resource Sheet"],
+  ["⌘1 / ⌘2 / ⌘3", "Tasks / Resource Sheet / Work breakdown structure"],
+  ["Return / Tab (WBS)", "Add a task / a subtask in the WBS chart; Space renames"],
   ["⌘K", "Command bar: run any command by name"],
   ["⌘N / ⌘O", "New project / open a project"],
   ["⌘-scroll or pinch", "Zoom the chart"],

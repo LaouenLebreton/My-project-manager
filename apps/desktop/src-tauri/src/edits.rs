@@ -73,6 +73,10 @@ pub enum Edit {
     DeleteResources { ids: Vec<String> },
     /// Project Info: the currency symbol shown with costs.
     SetCurrency { symbol: String },
+    /// WBS chart: a new task as the last subtask of `parentId` (Tab in the chart).
+    AddSubtask { parent_id: String, name: String },
+    /// WBS chart: drag a box onto another (or onto the project) to move it underneath, at the end.
+    MoveUnder { id: String, parent_id: Option<String> },
     /// Project > Level Resources: delay tasks so nobody is over-allocated.
     LevelResources,
     /// Project > Clear Leveling: remove every leveling delay.
@@ -361,6 +365,43 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 return Ok(None);
             }
             plain(Command::SetProject { change: ProjectChange::Currency(symbol) })
+        }
+        Edit::AddSubtask { parent_id, name } => {
+            let parent = task_id(&parent_id)?;
+            task(p, parent)?;
+            let last = child_keys(p, Some(parent)).last().copied().cloned();
+            let id = TaskId(new_id());
+            let command = Command::InsertTasks {
+                tasks: vec![Task {
+                    id,
+                    parent: Some(parent),
+                    sort_key: SortKey::between(last.as_ref(), None),
+                    name,
+                    duration: Duration::minutes(units.minutes_per_day).expect("positive"),
+                    is_milestone: false,
+                    constraint: Constraint::AsSoonAsPossible,
+                    percent_complete: Percent::default(),
+                    notes: String::new(),
+                    leveling_delay: Duration::ZERO,
+                    fixed_cost: Money(0),
+                }],
+                dependencies: vec![],
+            };
+            Ok(Some(Planned { command, created: Some(id), message: None }))
+        }
+        Edit::MoveUnder { id, parent_id } => {
+            let id = task_id(&id)?;
+            let t = task(p, id)?;
+            let parent = parent_id.as_deref().map(task_id).transpose()?;
+            if let Some(parent) = parent {
+                task(p, parent)?;
+            }
+            if t.parent == parent {
+                return Ok(None);
+            }
+            let last = child_keys(p, parent).last().copied().cloned();
+            let change = TaskChange::Position { parent, sort_key: SortKey::between(last.as_ref(), None) };
+            plain(Command::SetTask { id, change })
         }
         Edit::LevelResources => level_resources(p),
         Edit::ClearLeveling => {
@@ -1005,6 +1046,24 @@ mod tests {
         assert_eq!(msg(&p, upd("lots")), "type maximum units like 100% or 3");
         run(&mut p, upd("3"));
         assert_eq!(p.resources.values().next().unwrap().max_units.0, 300);
+    }
+
+    #[test]
+    fn building_a_wbs_from_the_chart() {
+        let (mut p, id) = project(&[("Website", 0), ("Launch", 0)]);
+        let web = id[0].0.to_string();
+        run(&mut p, Edit::AddSubtask { parent_id: web.clone(), name: "Design".into() });
+        run(&mut p, Edit::AddSubtask { parent_id: web.clone(), name: "Build".into() });
+        assert_eq!(shape(&p), s(&[("Website", 0), ("Design", 1), ("Build", 1), ("Launch", 0)]));
+        // Drag "Launch" onto "Website", then "Design" back to the top.
+        run(&mut p, Edit::MoveUnder { id: id[1].0.to_string(), parent_id: Some(web) });
+        let design = p.tasks.values().find(|t| t.name == "Design").unwrap().id.0.to_string();
+        run(&mut p, Edit::MoveUnder { id: design, parent_id: None });
+        assert_eq!(shape(&p), s(&[("Website", 0), ("Build", 1), ("Launch", 1), ("Design", 0)]));
+        // A box cannot go inside itself.
+        let e = plan(&p, None, &Units::default(), Edit::MoveUnder { id: id[0].0.to_string(), parent_id: Some(id[1].0.to_string()) });
+        let planned = e.unwrap().unwrap();
+        assert!(pm_core::apply(&mut p.clone(), &planned.command).is_err());
     }
 
     #[test]

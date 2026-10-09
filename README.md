@@ -17,6 +17,10 @@ for scope and `docs/` for decisions.
   "start no earlier than" and "must start on", critical path and slack, loop detection.
 - Task > Task Info (⌘I) for constraints, % complete and notes; Project > Project Info for the
   start date; Project > Working Time for working hours, holidays and changed days.
+- Resources (⌘2): people, equipment and materials with rates; assignments typed as
+  `Alex, Sam[50%]`; over-allocation shown in words; Project > Level Resources; costs per task,
+  summary and project.
+- Work breakdown structure (⌘3): the outline as a tree diagram, built with Return and Tab.
 - Microsoft Project XML import and export, with a report of anything not imported exactly.
 - File > New, Open, Open Recent, Save a Copy, Open Backup; `.pmproj` opens from Finder.
 - First run opens a sample project with a short tour; Help explains every term; ⌘K runs any command.
