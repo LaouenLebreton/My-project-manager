@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, errorMessage, type Edit, type IpcError, type RecentFile, type Snapshot } from "./api";
-import { formatDate } from "./format";
+import { formatDate, formatMoney } from "./format";
 import { CommandBar, type CommandItem } from "./CommandBar";
 import { Gantt, type GanttHandle } from "./Gantt";
 import { FindBar } from "./FindBar";
@@ -223,6 +223,7 @@ export function App() {
           <h1>{snapshot.project.name}</h1>
           <p className="secondary">
             {formatDate(snapshot.project.start)} – {formatDate(snapshot.project.finish)} · {snapshot.rows.length} tasks
+            {snapshot.project.costCents !== 0 && ` · ${formatMoney(snapshot.project.costCents, snapshot.project.currency)}`}
           </p>
         </div>
         <div className="segmented" role="tablist" aria-label="View">

@@ -123,7 +123,7 @@
     </Task>
     <Task>
       <UID>7</UID><ID>7</ID><Name>Content migration</Name><Active>1</Active><Manual>0</Manual><Type>1</Type><IsNull>0</IsNull>
-      <OutlineNumber>2.2</OutlineNumber><OutlineLevel>2</OutlineLevel><Duration>PT24H0M0S</Duration><DurationFormat>7</DurationFormat>
+      <OutlineNumber>2.2</OutlineNumber><OutlineLevel>2</OutlineLevel><Duration>PT24H0M0S</Duration><DurationFormat>7</DurationFormat><FixedCost>1250.5</FixedCost>
       <Milestone>0</Milestone><Summary>0</Summary><ConstraintType>3</ConstraintType><ConstraintDate>2026-11-06T17:00:00</ConstraintDate>
       <CalendarUID>2</CalendarUID><Deadline>2026-11-06T17:00:00</Deadline>
       <PredecessorLink><PredecessorUID>6</PredecessorUID><Type>0</Type><CrossProject>0</CrossProject><LinkLag>-4800</LinkLag><LagFormat>7</LagFormat></PredecessorLink>
@@ -141,7 +141,7 @@
   <Resources>
     <Resource><UID>0</UID><ID>0</ID><Type>1</Type><IsNull>0</IsNull></Resource>
     <Resource><UID>1</UID><ID>1</ID><Name>Sam</Name><Type>1</Type><CalendarUID>2</CalendarUID></Resource>
-    <Resource><UID>2</UID><ID>2</ID><Name>Alex</Name><Type>1</Type><Initials>AL</Initials><MaxUnits>0.5</MaxUnits></Resource>
+    <Resource><UID>2</UID><ID>2</ID><Name>Alex</Name><Type>1</Type><Initials>AL</Initials><MaxUnits>0.5</MaxUnits><StandardRate>85</StandardRate><StandardRateFormat>2</StandardRateFormat><OvertimeRate>120</OvertimeRate></Resource>
     <Resource><UID>3</UID><ID>3</ID><Name>Paper</Name><Type>0</Type><MaterialLabel>reams</MaterialLabel></Resource>
     <Resource><UID>4</UID><ID>4</ID><Name>Travel</Name><Type>2</Type></Resource>
   </Resources>

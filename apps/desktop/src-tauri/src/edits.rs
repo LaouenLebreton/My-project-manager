@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pm_core::{
-    outline, parse_resource_list, Assignment, AssignmentId, Calendar, Command, Constraint, DayPattern, Dependency,
+    outline, parse_money, parse_resource_list, Money, Assignment, AssignmentId, Calendar, Command, Constraint, DayPattern, Dependency,
     DependencyId, Duration, LinkChange, LinkType, Moment, Percent, Project, ProjectChange, Resource, ResourceChange,
     ResourceId, ResourceKind, ResourceUnits, Schedule, SortKey, Task, TaskChange, TaskId, Units, WorkRange,
     MINUTES_PER_DAY,
@@ -46,6 +46,8 @@ pub enum Edit {
         notes: Option<String>,
         /// Typed resources, as in the Resources column.
         resources: Option<String>,
+        /// Typed amount, e.g. "1,500".
+        fixed_cost: Option<String>,
     },
     /// Project Info: the day the project starts (`YYYY-MM-DD`).
     SetProjectStart { date: String },
@@ -65,8 +67,12 @@ pub enum Edit {
         /// Typed maximum: `100%`, `300%` or `3` (people).
         max_units: Option<String>,
         material_label: Option<String>,
+        /// Typed cost per hour (work) or per unit (material).
+        rate: Option<String>,
     },
     DeleteResources { ids: Vec<String> },
+    /// Project Info: the currency symbol shown with costs.
+    SetCurrency { symbol: String },
     /// Project > Level Resources: delay tasks so nobody is over-allocated.
     LevelResources,
     /// Project > Clear Leveling: remove every leveling delay.
@@ -174,6 +180,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     constraint: Constraint::AsSoonAsPossible,
                     percent_complete: Percent::default(),
                     leveling_delay: Duration::ZERO,
+                    fixed_cost: Money(0),
                     notes: String::new(),
                 }],
                 dependencies: vec![],
@@ -201,7 +208,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
         Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
-        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources } => {
+        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
             let set = |change| Command::SetTask { id, change };
@@ -250,6 +257,12 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             {
                 commands.push(planned.command);
             }
+            if let Some(text) = fixed_cost {
+                let cents = if text.trim().is_empty() { 0 } else { parse_money(&text)? };
+                if cents != t.fixed_cost.0 {
+                    commands.push(set(TaskChange::FixedCost(Money(cents))));
+                }
+            }
             Ok(batch("Change Task Info", commands).map(|command| Planned { command, created: None, message: None }))
         }
         Edit::SetProjectStart { date } => {
@@ -294,7 +307,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             let command = Command::InsertResources { resources: vec![resource], assignments: vec![] };
             Ok(Some(Planned { command, created: None, message: None }))
         }
-        Edit::UpdateResource { id, name, initials, resource_type, max_units, material_label } => {
+        Edit::UpdateResource { id, name, initials, resource_type, max_units, material_label, rate } => {
             let id = resource_id(&id)?;
             let r = p.resources.get(&id).ok_or_else(|| err("this resource no longer exists"))?;
             let set = |change| Command::SetResource { id, change };
@@ -324,6 +337,15 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             if let Some(l) = material_label.filter(|l| *l != r.material_label) {
                 commands.push(set(ResourceChange::MaterialLabel(l)));
             }
+            if let Some(text) = rate {
+                let cents = if text.trim().is_empty() { 0 } else { parse_money(&text)? };
+                if cents < 0 {
+                    return Err(err("a rate cannot be negative"));
+                }
+                if cents != r.rate.0 {
+                    commands.push(set(ResourceChange::Rate(Money(cents))));
+                }
+            }
             Ok(batch("Change Resource", commands).map(|command| Planned { command, created: None, message: None }))
         }
         Edit::DeleteResources { ids } => {
@@ -332,6 +354,13 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 return Ok(None);
             }
             plain(Command::DeleteResources { ids })
+        }
+        Edit::SetCurrency { symbol } => {
+            let symbol = symbol.trim().to_owned();
+            if symbol == p.currency {
+                return Ok(None);
+            }
+            plain(Command::SetProject { change: ProjectChange::Currency(symbol) })
         }
         Edit::LevelResources => level_resources(p),
         Edit::ClearLeveling => {
@@ -403,6 +432,7 @@ fn new_resource(name: &str, sort_key: SortKey) -> Resource {
         kind: ResourceKind::Work,
         max_units: ResourceUnits::FULL_TIME,
         material_label: String::new(),
+        rate: Money(0),
         notes: String::new(),
     }
 }
@@ -710,6 +740,7 @@ mod tests {
             dependencies: Default::default(),
             resources: Default::default(),
             assignments: Default::default(),
+            currency: String::new(),
         };
         let mut ids = Vec::new();
         let mut stack: Vec<TaskId> = Vec::new();
@@ -731,6 +762,7 @@ mod tests {
                     constraint: Constraint::AsSoonAsPossible,
                     percent_complete: Percent::default(),
                     leveling_delay: Duration::ZERO,
+                    fixed_cost: Money(0),
                     notes: String::new(),
                 },
             );
@@ -890,6 +922,7 @@ mod tests {
             percent_complete: Some(25),
             notes: Some("Bring the drone".into()),
             resources: Some("Robin[50%]".into()),
+            fixed_cost: Some("1.250,00".into()),
         };
         let planned = plan(&p, None, &Units::default(), edit).unwrap().unwrap();
         assert_eq!(planned.command.label(), "Change Task Info");
@@ -901,7 +934,8 @@ mod tests {
         assert_eq!(t.constraint, Constraint::MustStartOn(monday));
 
         assert_eq!(p.assignments.values().next().map(|a| a.units.0), Some(50), "resources set in the same step");
-        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()) };
+        assert_eq!(p.tasks[&id[0]].fixed_cost, Money(125_000));
+        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()) };
         assert!(plan(&p, None, &Units::default(), unchanged).unwrap().is_none(), "nothing to undo when nothing changed");
         let no_date = Edit::UpdateTask {
             id: id[0].0.to_string(),
@@ -912,6 +946,7 @@ mod tests {
             percent_complete: None,
             notes: None,
             resources: None,
+            fixed_cost: None,
         };
         assert_eq!(plan(&p, None, &Units::default(), no_date).err().unwrap().message, "choose a date for “Start no earlier than”");
     }
@@ -966,7 +1001,7 @@ mod tests {
         run(&mut p, Edit::AddResource { after_id: None, name: "Alex".into() });
         assert_eq!(msg(&p, Edit::AddResource { after_id: None, name: "ALEX".into() }), "there is already a resource called “ALEX”");
         let r = p.resources.values().next().unwrap().id.0.to_string();
-        let upd = |max: &str| Edit::UpdateResource { id: r.clone(), name: None, initials: None, resource_type: None, max_units: Some(max.into()), material_label: None };
+        let upd = |max: &str| Edit::UpdateResource { id: r.clone(), name: None, initials: None, resource_type: None, max_units: Some(max.into()), material_label: None, rate: None };
         assert_eq!(msg(&p, upd("lots")), "type maximum units like 100% or 3");
         run(&mut p, upd("3"));
         assert_eq!(p.resources.values().next().unwrap().max_units.0, 300);

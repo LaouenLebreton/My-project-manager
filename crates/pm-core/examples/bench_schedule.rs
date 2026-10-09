@@ -42,6 +42,7 @@ fn generate(n: usize) -> Project {
                 constraint: Constraint::AsSoonAsPossible,
                 percent_complete: Percent::default(),
                 leveling_delay: Duration::ZERO,
+                fixed_cost: Money(0),
                 notes: String::new(),
             },
         );
@@ -79,6 +80,7 @@ fn generate(n: usize) -> Project {
         dependencies,
         resources: Default::default(),
         assignments: Default::default(),
+        currency: String::new(),
     }
 }
 

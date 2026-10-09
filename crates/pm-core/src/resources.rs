@@ -40,6 +40,19 @@ pub struct Loads {
     pub work: BTreeMap<AssignmentId, i64>,
     /// Tasks during which one of their resources is over-allocated.
     pub overloaded_tasks: BTreeSet<TaskId>,
+    /// Costs in cents: per assignment (work × rate, or quantity × price), per task (fixed cost
+    /// plus its assignments; summaries add up their tasks), per resource, and in total.
+    pub assignment_cost: BTreeMap<AssignmentId, i64>,
+    pub task_cost: BTreeMap<TaskId, i64>,
+    pub resource_cost: BTreeMap<ResourceId, i64>,
+    pub project_cost: i64,
+}
+
+/// `a × b / c`, rounded half away from zero, without overflow.
+fn mul_div(a: i64, b: i64, c: i64) -> i64 {
+    let n = i128::from(a) * i128::from(b);
+    let c = i128::from(c);
+    ((n + n.signum() * c / 2) / c) as i64
 }
 
 /// Works out resource loads for a scheduled project. Pure and deterministic.
@@ -114,7 +127,45 @@ pub fn loads(p: &Project, s: &Schedule) -> Loads {
         }
         out.resources.insert(*id, ResourceLoad { peak: ResourceUnits(peak), total, overloads });
     }
+    costs(p, &mut out);
     out
+}
+
+fn costs(p: &Project, out: &mut Loads) {
+    for a in p.assignments.values() {
+        let Some(r) = p.resources.get(&a.resource) else { continue };
+        let cost = match r.kind {
+            ResourceKind::Work => mul_div(out.work.get(&a.id).copied().unwrap_or(0), r.rate.0, 60),
+            ResourceKind::Material => mul_div(i64::from(a.units.0), r.rate.0, 100),
+        };
+        out.assignment_cost.insert(a.id, cost);
+        *out.resource_cost.entry(a.resource).or_default() += cost;
+        *out.task_cost.entry(a.task).or_default() += cost;
+    }
+    // Fixed costs, then roll up from the deepest tasks so every summary includes everything
+    // inside it.
+    let depth = |mut id: TaskId| {
+        let mut d = 0;
+        while let Some(parent) = p.tasks.get(&id).and_then(|t| t.parent) {
+            d += 1;
+            id = parent;
+            if d > p.tasks.len() {
+                break;
+            }
+        }
+        d
+    };
+    let mut order: Vec<(usize, TaskId)> = p.tasks.keys().map(|id| (depth(*id), *id)).collect();
+    order.sort_by(|a, b| b.cmp(a));
+    for (_, id) in order {
+        let t = &p.tasks[&id];
+        let own = out.task_cost.get(&id).copied().unwrap_or(0) + t.fixed_cost.0;
+        out.task_cost.insert(id, own);
+        match t.parent {
+            Some(parent) => *out.task_cost.entry(parent).or_default() += own,
+            None => out.project_cost += own,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -157,6 +208,7 @@ mod tests {
                     dependencies: Default::default(),
                     resources: Default::default(),
                     assignments: Default::default(),
+                    currency: String::new(),
                 },
                 900,
             )
@@ -173,6 +225,7 @@ mod tests {
                 constraint: Constraint::AsSoonAsPossible,
                 percent_complete: Percent::default(),
                 leveling_delay: Duration::ZERO,
+                fixed_cost: Money(0),
                 notes: String::new(),
             };
             apply(&mut self.0, &Command::InsertTasks { tasks: vec![t], dependencies: vec![] }).unwrap();
@@ -195,6 +248,7 @@ mod tests {
                 kind,
                 max_units: ResourceUnits(max),
                 material_label: String::new(),
+                rate: Money(0),
                 notes: String::new(),
             };
             apply(&mut self.0, &Command::InsertResources { resources: vec![r], assignments: vec![] }).unwrap();
@@ -275,6 +329,42 @@ mod tests {
         let o = &l.resources[&rid(1)].overloads;
         assert_eq!(o.len(), 1);
         assert_eq!((o[0].start, o[0].finish), (at(9, 8), at(12, 17)));
+    }
+
+    #[test]
+    fn costs_add_up_from_assignments_to_the_project() {
+        // Alex: €45.50 an hour; concrete: €120 a ton. Task 1: 2 days at 50% = 8h → €364.
+        // Task 2: 2.5 tons → €300, plus a €99.99 fixed cost.
+        let mut p = P::new().task(1, 2 * DAY).task(2, DAY).resource(1, Work, 100).resource(2, Material, 0).assign(1, 1, 50).assign(2, 2, 250);
+        p.0.resources.get_mut(&rid(1)).unwrap().rate = Money(4_550);
+        p.0.resources.get_mut(&rid(2)).unwrap().rate = Money(12_000);
+        p.0.tasks.get_mut(&tid(2)).unwrap().fixed_cost = Money(9_999);
+        let l = p.loads();
+        assert_eq!(l.task_cost[&tid(1)], 36_400);
+        assert_eq!(l.task_cost[&tid(2)], 30_000 + 9_999);
+        assert_eq!(l.resource_cost[&rid(1)], 36_400);
+        assert_eq!(l.project_cost, 36_400 + 39_999);
+    }
+
+    #[test]
+    fn summaries_add_up_their_tasks_and_their_own_fixed_cost() {
+        let mut p = P::new().task(10, DAY).task(1, DAY).task(2, DAY);
+        for c in [1, 2] {
+            p.0.tasks.get_mut(&tid(c)).unwrap().parent = Some(tid(10));
+            p.0.tasks.get_mut(&tid(c)).unwrap().fixed_cost = Money(100);
+        }
+        p.0.tasks.get_mut(&tid(10)).unwrap().fixed_cost = Money(5);
+        let l = p.loads();
+        assert_eq!(l.task_cost[&tid(10)], 205);
+        assert_eq!(l.project_cost, 205);
+    }
+
+    #[test]
+    fn cost_rounding_is_to_the_nearest_cent() {
+        assert_eq!(mul_div(1, 1, 60), 0);
+        assert_eq!(mul_div(30, 1, 60), 1, "half a cent rounds up");
+        assert_eq!(mul_div(-30, 1, 60), -1);
+        assert_eq!(mul_div(i64::MAX / 2, 4, 4), i64::MAX / 2, "no overflow");
     }
 
     proptest! {

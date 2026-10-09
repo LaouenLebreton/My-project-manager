@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import { errorMessage, type Edit, type Snapshot } from "./api";
 import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
-import { formatDate, formatDateTime, formatDays } from "./format";
+import { formatDate, formatDateTime, formatDays, formatMoney } from "./format";
 import { GLOSSARY, type Term } from "./help";
 
 import { HEADER_HEIGHT, ROW_HEIGHT } from "./Gantt";
@@ -14,7 +14,7 @@ interface Column {
   width: string;
   align?: "right";
   /** Text shown in the cell. */
-  text: (r: Row, perDay: number) => string;
+  text: (r: Row, perDay: number, currency: string) => string;
   /** Text placed in the editor, and the edit to send. Absent for read-only columns. */
   edit?: { initial: (r: Row) => string; make: (r: Row, text: string) => Edit };
   title?: (r: Row) => string;
@@ -59,6 +59,7 @@ const COLUMNS: Column[] = [
     text: (r) => r.resourceNames,
     edit: { initial: (r) => r.resourceNames, make: (r, text) => ({ kind: "SetTaskResources", id: r.id, text }) },
   },
+  { label: "Cost", width: "96px", align: "right", help: "cost", text: (r, _perDay, currency) => (r.costCents ? formatMoney(r.costCents, currency) : "") },
   { label: "Slack", width: "76px", align: "right", help: "slack", text: (r, perDay) => formatDays(r.totalSlackMinutes, perDay) },
 ];
 const NAME_COL = 2;
@@ -450,7 +451,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                           )}
                         </>
                       ) : (
-                        cellContent(r, i, ci, c, perDay)
+                        cellContent(r, i, ci, c, perDay, snapshot.project.currency)
                       )}
                     </div>
                   );
@@ -464,7 +465,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
   );
 });
 
-function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDay: number) {
+function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDay: number, currency: string) {
   if (!r) {
     return ci === NAME_COL ? <span className="placeholder">Type a task name</span> : null;
   }
@@ -507,7 +508,7 @@ function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDa
       </>
     );
   }
-  return c.text(r, perDay);
+  return c.text(r, perDay, currency);
 }
 
 /** A small "?" next to a column name that explains the term in plain words. */

@@ -26,6 +26,32 @@ pub enum TextError {
     BadPredecessor,
     #[error("type resources as names, like Alex, Sam[50%], Concrete[2.5 tons]")]
     BadResource,
+    #[error("type an amount like 1500 or 1,500.50")]
+    BadMoney,
+}
+
+/// Reads an amount as people type it: `1500`, `1,500.50`, `1.500,50`, `€ 45`, `45.5`.
+/// The last `.` or `,` followed by one or two digits is the decimal point; other separators
+/// group thousands. Returns cents.
+pub fn parse_money(text: &str) -> Result<i64, TextError> {
+    let t: String = text.chars().filter(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-')).collect();
+    let negative = t.starts_with('-');
+    let t = t.trim_start_matches('-');
+    if t.is_empty() || t.contains('-') {
+        return Err(TextError::BadMoney);
+    }
+    let (whole, cents) = match t.rfind(['.', ',']) {
+        Some(i) if (1..=2).contains(&(t.len() - i - 1)) => {
+            let frac = &t[i + 1..];
+            (&t[..i], if frac.len() == 1 { format!("{frac}0") } else { frac.to_owned() })
+        }
+        _ => (t, "00".to_owned()),
+    };
+    let digits: String = whole.chars().filter(char::is_ascii_digit).collect();
+    let whole: i64 = if digits.is_empty() { 0 } else { digits.parse().map_err(|_| TextError::BadMoney)? };
+    let cents: i64 = cents.parse().map_err(|_| TextError::BadMoney)?;
+    let total = whole.checked_mul(100).and_then(|w| w.checked_add(cents)).ok_or(TextError::BadMoney)?;
+    Ok(if negative { -total } else { total })
 }
 
 /// One entry of a typed resource list: a name and, if given, units in hundredths (50% = 50,
@@ -249,6 +275,26 @@ mod tests {
         assert_eq!(u.parse_predecessors("4+2d"), Ok(vec![PredecessorEntry { row: 4, kind: FinishToStart, lag: 960 }]));
         for bad in ["x", "3XX", "3SS 2d", "SS", "3SS+q"] {
             assert_eq!(u.parse_predecessors(bad), Err(TextError::BadPredecessor), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn money() {
+        for (text, cents) in [
+            ("1500", 150_000),
+            ("1,500.50", 150_050),
+            ("1.500,50", 150_050),
+            ("€ 45", 4_500),
+            ("45.5", 4_550),
+            ("0,99", 99),
+            ("12,345,678", 1_234_567_800),
+            ("CHF 1'200.00", 120_000),
+            ("-20", -2_000),
+        ] {
+            assert_eq!(parse_money(text), Ok(cents), "{text}");
+        }
+        for bad in ["", "abc", "1-2"] {
+            assert_eq!(parse_money(bad), Err(TextError::BadMoney), "{bad:?}");
         }
     }
 

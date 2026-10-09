@@ -40,6 +40,13 @@ fn iso_duration(minutes: i64) -> String {
     format!("PT{}H{}M0S", minutes / 60, minutes % 60)
 }
 
+/// Cents as a decimal amount: 150050 → "1500.5".
+fn cents(c: i64) -> String {
+    let s = format!("{}.{:02}", c / 100, (c % 100).abs());
+    let s = if c < 0 && c > -100 { format!("-{s}") } else { s };
+    s.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
 fn working_times(w: &mut W, pattern: &DayPattern) {
     if pattern.is_working() {
         open(w, "WorkingTimes");
@@ -77,6 +84,9 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
     leaf(&mut w, "MinutesPerDay", "480");
     leaf(&mut w, "MinutesPerWeek", "2400");
     leaf(&mut w, "DaysPerMonth", "20");
+    if !p.currency.is_empty() {
+        leaf(&mut w, "CurrencySymbol", &p.currency);
+    }
 
     // Calendar: one base calendar.
     open(&mut w, "Calendars");
@@ -170,6 +180,9 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
             leaf(&mut w, "ConstraintDate", &datetime(d));
         }
         leaf(&mut w, "CalendarUID", "-1");
+        if t.fixed_cost.0 != 0 {
+            leaf(&mut w, "FixedCost", &cents(t.fixed_cost.0));
+        }
         if !t.notes.is_empty() {
             leaf(&mut w, "Notes", &t.notes);
         }
@@ -215,6 +228,10 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
                 leaf(&mut w, "MaterialLabel", &r.material_label);
             } else {
                 leaf(&mut w, "MaxUnits", &decimal(r.max_units.0));
+            }
+            if r.rate.0 != 0 {
+                leaf(&mut w, "StandardRate", &cents(r.rate.0));
+                leaf(&mut w, "StandardRateFormat", "2"); // per hour
             }
             if !r.notes.is_empty() {
                 leaf(&mut w, "Notes", &r.notes);

@@ -35,6 +35,7 @@ fn task(n: u128) -> Task {
         constraint: Constraint::AsSoonAsPossible,
         percent_complete: Percent::default(),
         leveling_delay: Duration::ZERO,
+        fixed_cost: Money(0),
         notes: String::new(),
     }
 }
@@ -49,6 +50,7 @@ fn rich_project() -> Project {
     let mut p = Project {
         id: ProjectId(Uuid::from_u128(7)),
         name: "Office move".into(),
+        currency: "€".into(),
         start: Moment(29_000_000),
         calendar_id: CalendarId(Uuid::from_u128(8)),
         calendar,
@@ -69,6 +71,7 @@ fn rich_project() -> Project {
     let mut late = task(4);
     late.constraint = Constraint::StartNoEarlierThan(Moment(29_002_000));
     late.leveling_delay = Duration::minutes(240).unwrap();
+    late.fixed_cost = Money(150_000);
     for t in [summary, child, milestone, late] {
         p.tasks.insert(t.id, t);
     }
@@ -87,6 +90,7 @@ fn staff(p: &mut Project) {
         max_units: ResourceUnits(150),
         material_label: String::new(),
         notes: "Part-time Fridays".into(),
+        rate: Money(4_550),
     };
     let m = Resource {
         id: ResourceId(Uuid::from_u128(71)),
@@ -96,6 +100,7 @@ fn staff(p: &mut Project) {
         kind: ResourceKind::Material,
         max_units: ResourceUnits(0),
         material_label: "tons".into(),
+        rate: Money(0),
         notes: String::new(),
     };
     let a = Assignment { id: AssignmentId(Uuid::from_u128(80)), task: tid(4), resource: r.id, units: ResourceUnits(50) };
@@ -129,14 +134,16 @@ fn version_1_files_are_upgraded() {
     drop(Store::create(&path, &p).unwrap());
     // Turn it back into a version 1 file, as an iteration 1 build would have written it.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; PRAGMA user_version = 1;").unwrap();
     drop(conn);
     let (mut s, mut loaded) = Store::open(&path).unwrap();
     // Version 1 had no leveling delays; they come back as zero.
     let mut expected = p.clone();
     for t in expected.tasks.values_mut() {
         t.leveling_delay = Duration::ZERO;
+        t.fixed_cost = Money(0);
     }
+    expected.currency = String::new();
     assert_eq!(loaded, expected, "everything from version 1 is still there");
     let v: i64 = s.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     assert_eq!(v, CURRENT_VERSION);
@@ -149,6 +156,7 @@ fn version_1_files_are_upgraded() {
         kind: ResourceKind::Work,
         max_units: ResourceUnits::FULL_TIME,
         material_label: String::new(),
+        rate: Money(0),
         notes: String::new(),
     };
     s.apply(&mut loaded, &Command::InsertResources { resources: vec![r], assignments: vec![] }, &meta(1)).unwrap();

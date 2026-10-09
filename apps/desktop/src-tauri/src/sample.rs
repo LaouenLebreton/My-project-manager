@@ -28,6 +28,7 @@ pub fn office_move(start: Moment) -> Project {
                 constraint: Constraint::AsSoonAsPossible,
                 percent_complete: Percent::default(),
                 leveling_delay: Duration::ZERO,
+                fixed_cost: Money(0),
                 notes: String::new(),
             },
         );
@@ -77,6 +78,7 @@ pub fn office_move(start: Moment) -> Project {
         dependencies,
         resources: Default::default(),
         assignments: Default::default(),
+        currency: String::new(),
     }
 }
 
@@ -123,6 +125,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
                 constraint: Constraint::AsSoonAsPossible,
                 percent_complete: Percent::default(),
                 leveling_delay: Duration::ZERO,
+                fixed_cost: Money(0),
                 notes: String::new(),
             },
         );
@@ -158,6 +161,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
         dependencies,
         resources: Default::default(),
         assignments: Default::default(),
+        currency: String::new(),
     }
 }
 

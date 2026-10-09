@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use jiff::civil::{Date, DateTime};
-use pm_core::{
+use pm_core::{Money, 
     apply, Assignment, AssignmentId, Calendar, CalendarId, Command, Constraint, DayPattern, Dependency, DependencyId,
     Duration, LinkType, Moment, Percent, Project, ProjectId, Resource, ResourceId, ResourceKind, ResourceUnits, SortKey,
     Task, TaskId, WorkRange,
@@ -26,7 +26,7 @@ pub enum ImportError {
 /// Task fields that Super PM calculates itself. Listed once in the report, not as losses.
 const RECALCULATED: &[&str] = &[
     "Start", "Finish", "EarlyStart", "EarlyFinish", "LateStart", "LateFinish", "TotalSlack", "FreeSlack",
-    "StartSlack", "FinishSlack", "Critical", "OutlineNumber", "WBS", "Summary", "RemainingDuration", "Work",
+    "StartSlack", "FinishSlack", "Critical", "OutlineNumber", "WBS", "Summary", "RemainingDuration", "Work", "Cost",
     "StartVariance", "FinishVariance", "DurationVariance", "PreLeveledStart", "PreLeveledFinish",
 ];
 
@@ -93,6 +93,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         dependencies: BTreeMap::new(),
         resources: Default::default(),
         assignments: Default::default(),
+        currency: root.raw_of("CurrencySymbol").unwrap_or("").trim().to_owned(),
     };
 
     // Tasks, in file order (ID). The outline comes from OutlineLevel.
@@ -161,6 +162,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
                 constraint,
                 percent_complete: Percent::new(percent).expect("clamped"),
                 leveling_delay: Duration::ZERO,
+                fixed_cost: Money(money(t.text_of("FixedCost"))),
                 notes: t.raw_of("Notes").unwrap_or("").to_owned(),
             },
         );
@@ -256,8 +258,6 @@ fn report_task_extras(t: &Element, label: &str, r: &mut ReportBuilder) {
         ("ExtendedAttribute", "Custom fields"),
         ("Hyperlink", "Hyperlinks"),
         ("HyperlinkAddress", "Hyperlinks"),
-        ("Cost", "Costs (arrive in iteration 2)"),
-        ("FixedCost", "Costs (arrive in iteration 2)"),
         ("TimephasedData", "Timephased data"),
         ("Contact", "Task contacts"),
     ];
@@ -315,6 +315,10 @@ fn import_resources(root: &Element, p: &mut Project, tasks: &HashMap<i64, TaskId
             clean = format!("{clean} ({uid})");
             r.approximated("Resources with the same name got their file number added", Some(&clean));
         }
+        let extra_rates = ["OvertimeRate", "CostPerUse"].iter().any(|f| res.child(f).is_some_and(Element::has_content));
+        if extra_rates {
+            r.ignored("Overtime rates and cost per use (only the standard rate is used)", Some(&name));
+        }
         let max = res.text_of("MaxUnits").and_then(|t| t.parse::<f64>().ok()).unwrap_or(1.0);
         let key = SortKey::between(last_key.as_ref(), None);
         last_key = Some(key.clone());
@@ -328,6 +332,9 @@ fn import_resources(root: &Element, p: &mut Project, tasks: &HashMap<i64, TaskId
             kind,
             max_units: ResourceUnits(if kind == ResourceKind::Work { (max * 100.0).round().max(0.0) as u32 } else { 0 }),
             material_label: res.raw_of("MaterialLabel").unwrap_or("").trim().to_owned(),
+            // StandardRate is read as an amount per hour whatever unit Project displays it in.
+            // *verify* with a real file (docs/scheduling-rules.md, costs).
+            rate: Money(money(res.text_of("StandardRate")).max(0)),
             notes: res.raw_of("Notes").unwrap_or("").to_owned(),
         });
     }
@@ -365,7 +372,8 @@ fn report_project_options(root: &Element, r: &mut ReportBuilder) {
         "CreationDate", "LastSaved", "Author", "Company", "Manager", "Subject", "Category", "Keywords",
         "Comments", "BuildNumber", "UID", "GUID", "CurrentDate", "StatusDate", "DefaultStartTime",
         "DefaultFinishTime", "ExtendedAttributes", "OutlineCodes", "WBSMasks", "Views", "Filters", "Groups",
-        "Tables", "Maps", "Reports", "Drawings", "DataLinks", "VBAProjects",
+        "Tables", "Maps", "Reports", "Drawings", "DataLinks", "VBAProjects", "CurrencySymbol", "CurrencyCode",
+        "CurrencyDigits", "CurrencySymbolPosition",
     ];
     for c in &root.children {
         if !HANDLED.contains(&c.name.as_str()) && c.has_content() {
@@ -504,6 +512,11 @@ fn apply_exception(calendar: &mut Calendar, ex: &Element, r: &mut ReportBuilder)
 }
 
 // Values ------------------------------------------------------------------------------------
+
+/// A decimal currency amount ("1500.5") in cents; 0 if absent or unreadable.
+fn money(text: Option<&str>) -> i64 {
+    text.and_then(|t| t.trim().parse::<f64>().ok()).filter(|v| v.is_finite()).map_or(0, |v| (v * 100.0).round() as i64)
+}
 
 pub(crate) fn parse_datetime(s: &str) -> Option<Moment> {
     let dt: DateTime = s.trim().get(..19).unwrap_or(s).parse().ok()?;

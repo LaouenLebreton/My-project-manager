@@ -43,6 +43,8 @@ function row(name: string, depth = 0): Row {
     overloaded: false,
     levelingDelayMinutes: 0,
     leveledFrom: null,
+    costCents: 36_400,
+    fixedCostCents: 0,
   };
 }
 
@@ -117,6 +119,8 @@ export function install() {
     totalText: "40h",
     peakPercent: overloaded ? 200 : 100,
     taskCount: 2,
+    rateCents: 4_550,
+    costCents: 182_000,
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
   });
   const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)] };
@@ -135,6 +139,8 @@ export function install() {
       workingWeekdays: [true, true, true, true, true, false, false],
       calendarExceptions: [{ date: "2026-10-14", working: false, ranges: [] }],
       workingWeek: [0, 1, 2, 3, 4].map(() => [{ start: 480, end: 720 }, { start: 780, end: 1020 }]).concat([[], []]),
+      currency: "€",
+      costCents: 1_234_550,
     },
     rows: state.rows.map((r) => ({ ...r })),
     links: state.links.map((l) => ({ ...l })),

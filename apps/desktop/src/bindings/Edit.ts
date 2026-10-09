@@ -8,8 +8,16 @@ export type Edit = { "kind": "AddTask", afterId: string | null, name: string, } 
 /**
  * Typed resources, as in the Resources column.
  */
-resources: string | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
+resources: string | null, 
+/**
+ * Typed amount, e.g. "1,500".
+ */
+fixedCost: string | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
 /**
  * Typed maximum: `100%`, `300%` or `3` (people).
  */
-maxUnits: string | null, materialLabel: string | null, } | { "kind": "DeleteResources", ids: Array<string>, } | { "kind": "LevelResources" } | { "kind": "ClearLeveling" };
+maxUnits: string | null, materialLabel: string | null, 
+/**
+ * Typed cost per hour (work) or per unit (material).
+ */
+rate: string | null, } | { "kind": "DeleteResources", ids: Array<string>, } | { "kind": "SetCurrency", symbol: string, } | { "kind": "LevelResources" } | { "kind": "ClearLeveling" };

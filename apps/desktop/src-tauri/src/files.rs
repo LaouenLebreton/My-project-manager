@@ -43,6 +43,7 @@ pub fn empty_project(path: &Path) -> Project {
         dependencies: Default::default(),
         resources: Default::default(),
         assignments: Default::default(),
+        currency: String::new(),
     }
 }
 

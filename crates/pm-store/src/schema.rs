@@ -89,6 +89,12 @@ pub const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE task ADD COLUMN leveling_delay_min INTEGER NOT NULL DEFAULT 0 CHECK (leveling_delay_min >= 0);
     "#,
+    // 3 -> 4: costs (iteration 2). Money in cents.
+    r#"
+    ALTER TABLE project ADD COLUMN currency TEXT NOT NULL DEFAULT '';
+    ALTER TABLE task ADD COLUMN fixed_cost_cents INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE resource ADD COLUMN rate_cents INTEGER NOT NULL DEFAULT 0 CHECK (rate_cents >= 0);
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

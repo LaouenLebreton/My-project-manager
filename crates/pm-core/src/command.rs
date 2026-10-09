@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::Calendar;
 use crate::schedule::ScheduleError;
 use crate::model::{
-    Assignment, AssignmentId, Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, Resource,
+    Money, Assignment, AssignmentId, Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, Resource,
     ResourceId, ResourceKind, ResourceUnits, SortKey, Task, TaskId,
 };
 use crate::time::Moment;
@@ -53,6 +53,7 @@ pub enum TaskChange {
     Position { parent: Option<TaskId>, sort_key: SortKey },
     /// Set by Level Resources and Clear Leveling.
     LevelingDelay(Duration),
+    FixedCost(Money),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +73,7 @@ pub enum ResourceChange {
     MaterialLabel(String),
     Notes(String),
     Position(SortKey),
+    Rate(Money),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +82,7 @@ pub enum ProjectChange {
     Name(String),
     Start(Moment),
     Calendar(Calendar),
+    Currency(String),
 }
 
 /// Why a command was refused. Messages are written for the person using the app.
@@ -152,6 +155,7 @@ impl Command {
                 TaskChange::Notes(_) => "Edit Notes",
                 TaskChange::Position { .. } => "Move Task",
                 TaskChange::LevelingDelay(_) => "Change Leveling Delay",
+                TaskChange::FixedCost(_) => "Change Fixed Cost",
             }
             .into(),
             Command::InsertLink { .. } => "Add Link".into(),
@@ -162,6 +166,7 @@ impl Command {
                 ProjectChange::Name(_) => "Rename Project",
                 ProjectChange::Start(_) => "Change Project Start",
                 ProjectChange::Calendar(_) => "Change Calendar",
+                ProjectChange::Currency(_) => "Change Currency",
             }
             .into(),
             Command::InsertResources { resources, .. } if resources.len() == 1 => "Add Resource".into(),
@@ -176,6 +181,7 @@ impl Command {
                 ResourceChange::MaterialLabel(_) => "Change Material Label",
                 ResourceChange::Notes(_) => "Edit Resource Notes",
                 ResourceChange::Position(_) => "Move Resource",
+                ResourceChange::Rate(_) => "Change Rate",
             }
             .into(),
             Command::InsertAssignment { .. } => "Assign Resource".into(),
@@ -259,6 +265,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
                 ProjectChange::Name(n) => ProjectChange::Name(std::mem::replace(&mut p.name, n.clone())),
                 ProjectChange::Start(s) => ProjectChange::Start(std::mem::replace(&mut p.start, *s)),
                 ProjectChange::Calendar(c) => ProjectChange::Calendar(std::mem::replace(&mut p.calendar, c.clone())),
+                ProjectChange::Currency(c) => ProjectChange::Currency(std::mem::replace(&mut p.currency, c.clone())),
             };
             Ok(Command::SetProject { change: old })
         }
@@ -274,6 +281,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
                 ResourceChange::MaterialLabel(v) => ResourceChange::MaterialLabel(std::mem::replace(&mut r.material_label, v.clone())),
                 ResourceChange::Notes(v) => ResourceChange::Notes(std::mem::replace(&mut r.notes, v.clone())),
                 ResourceChange::Position(v) => ResourceChange::Position(std::mem::replace(&mut r.sort_key, v.clone())),
+                ResourceChange::Rate(v) => ResourceChange::Rate(std::mem::replace(&mut r.rate, *v)),
             };
             Ok(Command::SetResource { id: *id, change: old })
         }
@@ -524,6 +532,7 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
         TaskChange::PercentComplete(v) => TaskChange::PercentComplete(std::mem::replace(&mut t.percent_complete, *v)),
         TaskChange::Notes(v) => TaskChange::Notes(std::mem::replace(&mut t.notes, v.clone())),
         TaskChange::LevelingDelay(v) => TaskChange::LevelingDelay(std::mem::replace(&mut t.leveling_delay, *v)),
+        TaskChange::FixedCost(v) => TaskChange::FixedCost(std::mem::replace(&mut t.fixed_cost, *v)),
         TaskChange::Position { parent, sort_key } => TaskChange::Position {
             parent: std::mem::replace(&mut t.parent, *parent),
             sort_key: std::mem::replace(&mut t.sort_key, sort_key.clone()),
@@ -566,6 +575,7 @@ mod tests {
             constraint: Constraint::AsSoonAsPossible,
             percent_complete: Percent::default(),
             leveling_delay: Duration::ZERO,
+            fixed_cost: Money(0),
             notes: String::new(),
         }
     }
@@ -585,6 +595,7 @@ mod tests {
             dependencies: BTreeMap::new(),
             resources: Default::default(),
             assignments: Default::default(),
+            currency: String::new(),
         }
     }
 
@@ -729,6 +740,7 @@ mod tests {
             kind: ResourceKind::Work,
             max_units: ResourceUnits::FULL_TIME,
             material_label: String::new(),
+            rate: Money(0),
             notes: String::new(),
         }
     }

@@ -178,6 +178,7 @@ mod tests {
             constraint: Constraint::AsSoonAsPossible,
             percent_complete: Percent::default(),
             leveling_delay: Duration::ZERO,
+            fixed_cost: Money(0),
             notes: String::new(),
         }
     }
@@ -193,6 +194,7 @@ mod tests {
             dependencies: Default::default(),
             resources: Default::default(),
             assignments: Default::default(),
+            currency: String::new(),
         }
     }
 

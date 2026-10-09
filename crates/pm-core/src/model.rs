@@ -123,7 +123,16 @@ pub struct Task {
     /// Delay"). Set by Level Resources, cleared by Clear Leveling.
     #[serde(default)]
     pub leveling_delay: Duration,
+    /// A one-off cost on top of the resources' cost (a venue fee, a permit).
+    #[serde(default)]
+    pub fixed_cost: Money,
 }
+
+/// An amount in hundredths of the project's currency (cents), so totals never pick up
+/// floating-point rounding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Money(pub i64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LinkType {
@@ -172,6 +181,9 @@ pub struct Resource {
     pub max_units: ResourceUnits,
     /// What a material is counted in ("tons", "licences"). Empty for work resources.
     pub material_label: String,
+    /// Cost per working hour (work resources) or per unit (materials).
+    #[serde(default)]
+    pub rate: Money,
     pub notes: String,
 }
 
@@ -201,6 +213,9 @@ pub struct Project {
     pub resources: BTreeMap<ResourceId, Resource>,
     #[serde(default)]
     pub assignments: BTreeMap<AssignmentId, Assignment>,
+    /// Currency symbol for costs ("€", "$", "CHF"); empty until the user sets one.
+    #[serde(default)]
+    pub currency: String,
 }
 
 #[cfg(test)]

@@ -10,4 +10,8 @@ workingWeekdays: Array<boolean>, calendarExceptions: Array<CalendarException>,
 /**
  * Working hours per weekday, Monday first, for the Working Time window.
  */
-workingWeek: Array<Array<TimeRange>>, };
+workingWeek: Array<Array<TimeRange>>, 
+/**
+ * Currency symbol for costs; empty if not set.
+ */
+currency: string, costCents: number, };

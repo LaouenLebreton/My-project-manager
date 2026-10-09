@@ -74,6 +74,7 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
   const [percent, setPercent] = useState(String(row.percentComplete));
   const [notes, setNotes] = useState(row.notes);
   const [resources, setResources] = useState(row.resourceNames);
+  const [fixedCost, setFixedCost] = useState(row.fixedCostCents ? (row.fixedCostCents / 100).toFixed(2) : "");
   return (
     <Sheet
       title="Task Info"
@@ -89,6 +90,7 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           percentComplete: Math.max(0, Math.min(100, Math.round(Number(percent) || 0))),
           notes,
           resources: row.isSummary ? null : resources,
+          fixedCost,
         })
       }
     >
@@ -145,6 +147,12 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           </>
         )}
 
+        <label htmlFor="ti-fixed-cost">Fixed cost</label>
+        <div>
+          <input id="ti-fixed-cost" value={fixedCost} onChange={(e) => setFixedCost(e.target.value)} placeholder="0.00" size={12} />
+          <p className="secondary small">A one-off cost on top of the resources, such as a venue fee or a permit.</p>
+        </div>
+
         <label htmlFor="ti-percent">% complete</label>
         <input id="ti-percent" type="number" min={0} max={100} value={percent} onChange={(e) => setPercent(e.target.value)} />
 
@@ -157,13 +165,24 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
 
 export function ProjectInfo({ snapshot, send, onClose }: { snapshot: Snapshot; send: Send; onClose: () => void }) {
   const [start, setStart] = useState(snapshot.project.start.slice(0, 10));
+  const [currency, setCurrency] = useState(snapshot.project.currency);
+  const save = async () => {
+    const problem = await attempt(send, { kind: "SetProjectStart", date: start });
+    if (problem || currency.trim() === snapshot.project.currency) return problem;
+    return attempt(send, { kind: "SetCurrency", symbol: currency });
+  };
   return (
-    <Sheet title="Project Info" onClose={onClose} onSave={() => attempt(send, { kind: "SetProjectStart", date: start })}>
+    <Sheet title="Project Info" onClose={onClose} onSave={save}>
       <div className="form">
         <label htmlFor="pi-start">Project starts</label>
         <div>
           <input id="pi-start" type="date" value={start} onChange={(e) => setStart(e.target.value)} required autoFocus />
           <p className="secondary small">Tasks without predecessors start here, at the first working hour on or after this day.</p>
+        </div>
+        <label htmlFor="pi-currency">Currency</label>
+        <div>
+          <input id="pi-currency" value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="€, $, £, CHF" size={6} />
+          <p className="secondary small">Shown with every cost in this project.</p>
         </div>
       </div>
     </Sheet>

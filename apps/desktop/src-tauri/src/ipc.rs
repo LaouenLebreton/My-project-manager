@@ -82,6 +82,12 @@ pub struct ResourceRow {
     pub peak_percent: u32,
     pub task_count: u32,
     pub overloads: Vec<OverloadView>,
+    /// Cost per hour (work) or per unit (material), in cents.
+    #[ts(type = "number")]
+    pub rate_cents: i64,
+    /// Total cost of the resource's assignments, in cents.
+    #[ts(type = "number")]
+    pub cost_cents: i64,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -109,6 +115,10 @@ pub struct ProjectInfo {
     pub calendar_exceptions: Vec<CalendarException>,
     /// Working hours per weekday, Monday first, for the Working Time window.
     pub working_week: Vec<Vec<crate::edits::TimeRange>>,
+    /// Currency symbol for costs; empty if not set.
+    pub currency: String,
+    #[ts(type = "number")]
+    pub cost_cents: i64,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -157,6 +167,11 @@ pub struct Row {
     pub leveling_delay_minutes: i64,
     /// Where the task would start without its leveling delay; drawn as a line before the bar.
     pub leveled_from: Option<String>,
+    /// Total cost in cents (fixed cost plus resources; summaries add up their tasks).
+    #[ts(type = "number")]
+    pub cost_cents: i64,
+    #[ts(type = "number")]
+    pub fixed_cost_cents: i64,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -255,6 +270,8 @@ fn resource_rows(doc: &Document) -> Vec<ResourceRow> {
                 total_text: if material { format!("{} {}", number(total), r.material_label).trim().to_owned() } else { hours(total) },
                 peak_percent: load.map_or(0, |l| l.peak.0),
                 task_count: p.assignments.values().filter(|a| a.resource == r.id).count() as u32,
+                rate_cents: r.rate.0,
+                cost_cents: doc.loads.resource_cost.get(&r.id).copied().unwrap_or(0),
                 overloads: load
                     .map(|l| {
                         l.overloads
@@ -337,6 +354,8 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 resource_names: resource_names(p, r.id),
                 overloaded: doc.loads.overloaded_tasks.contains(&r.id),
                 leveling_delay_minutes: t.leveling_delay.get(),
+                cost_cents: doc.loads.task_cost.get(&r.id).copied().unwrap_or(0),
+                fixed_cost_cents: t.fixed_cost.0,
                 leveled_from: s
                     .filter(|_| t.leveling_delay.get() > 0)
                     .map(|s| iso(p.calendar.add_working(s.early_start, -t.leveling_delay.get()))),
@@ -401,6 +420,8 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 .map(|(date, pattern)| CalendarException { date: date.to_string(), working: pattern.is_working(), ranges: ranges(pattern) })
                 .collect(),
             working_week: p.calendar.week().iter().map(ranges).collect(),
+            currency: p.currency.clone(),
+            cost_cents: doc.loads.project_cost,
         },
         rows,
         links,

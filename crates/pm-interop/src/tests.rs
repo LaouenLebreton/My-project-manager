@@ -29,6 +29,9 @@ struct Canon {
     resources: Vec<(String, String, ResourceKind, u32, String, String)>,
     /// Task row, resource name, units.
     assignments: Vec<(usize, String, u32)>,
+    currency: String,
+    /// Fixed cost per task row, and rate per resource name.
+    costs: (Vec<i64>, Vec<(String, i64)>),
 }
 
 fn canon(p: &Project) -> Canon {
@@ -66,6 +69,15 @@ fn canon(p: &Project) -> Canon {
             list.sort();
             list
         },
+        currency: p.currency.clone(),
+        costs: (
+            rows.iter().map(|r| p.tasks[&r.id].fixed_cost.0).collect(),
+            {
+                let mut v: Vec<(String, i64)> = p.resources.values().map(|r| (r.name.clone(), r.rate.0)).collect();
+                v.sort();
+                v
+            },
+        ),
     }
 }
 
@@ -79,6 +91,9 @@ const FIXTURE: &str = include_str!("../../../fixtures/mspdi/handwritten-msp2016-
 fn fixture_imports_what_it_can_and_reports_the_rest() {
     let (p, report) = import_mspdi(FIXTURE, &mut ids()).unwrap();
     assert_eq!(p.name, "Website Relaunch");
+    assert_eq!(p.currency, "€");
+    assert_eq!(p.tasks.values().find(|t| t.name == "Content migration").unwrap().fixed_cost, Money(125_050));
+    assert_eq!(p.resources.values().find(|r| r.name == "Alex").unwrap().rate, Money(8_500));
     let names: Vec<(usize, String)> = outline(&p).iter().map(|r| (r.depth, p.tasks[&r.id].name.clone())).collect();
     assert_eq!(
         names,
@@ -144,6 +159,7 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
         "Task calendars",
         "Task priorities",
         "Cost resources",
+        "Overtime rates and cost per use",
         "Assignments that Super PM cannot hold (resources work on the tasks inside a summary",
         "Other calendars",
         "Recurring calendar exceptions",
@@ -156,7 +172,8 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     assert!(report.imported.iter().any(|l| l.what.starts_with("Resources") && l.count == 3));
     assert!(report.imported.iter().any(|l| l.what.starts_with("Assignments") && l.count == 2));
     let options = report.ignored.iter().find(|l| l.what.starts_with("Project options")).unwrap();
-    assert!(options.examples.contains(&"CurrencySymbol".to_owned()));
+    assert!(options.examples.contains(&"HonorConstraints".to_owned()));
+    assert!(!options.examples.contains(&"CurrencySymbol".to_owned()), "the currency is imported now");
     assert!(report.recalculated.contains(&"TotalSlack".to_owned()) || report.recalculated.contains(&"Critical".to_owned()));
     assert!(report.imported.iter().any(|l| l.what.starts_with("Tasks") && l.count == 7));
     assert!(report.imported.iter().any(|l| l.what.starts_with("Links") && l.count == 7));
@@ -191,7 +208,8 @@ fn random_project() -> impl Strategy<Value = Project> {
     let holidays = prop::collection::vec((0i64..120, prop::bool::ANY), 0..6);
     let people = prop::collection::vec((prop::sample::select(vec!["Alex", "Ana María", "O'Brien", "Team <A>", "Crane & Co"]), 1u32..400, any::<bool>()), 0..5);
     let staffing = prop::collection::vec((0usize..30, 0usize..5, 1u32..300), 0..30);
-    (tasks, links, holidays, people, staffing).prop_map(|(tasks, links, holidays, people, staffing)| {
+    let money = (prop::sample::select(vec!["", "€", "$", "CHF"]), prop::collection::vec(-100_000i64..10_000_000, 30), prop::collection::vec(0i64..50_000, 5));
+    (tasks, links, holidays, people, staffing, money).prop_map(|(tasks, links, holidays, people, staffing, (currency, fixed, rates))| {
         let mut next = ids();
         let mut p = Project {
             id: ProjectId(next()),
@@ -203,6 +221,7 @@ fn random_project() -> impl Strategy<Value = Project> {
             dependencies: BTreeMap::new(),
             resources: Default::default(),
             assignments: Default::default(),
+            currency: String::new(),
         };
         for (offset, working) in holidays {
             let date = jiff::civil::date(2026, 10, 5).checked_add(jiff::Span::new().days(offset)).unwrap();
@@ -229,6 +248,7 @@ fn random_project() -> impl Strategy<Value = Project> {
                 constraint: [Constraint::AsSoonAsPossible, Constraint::StartNoEarlierThan(date), Constraint::MustStartOn(date)][constraint],
                 percent_complete: Percent::new(percent).unwrap(),
                 leveling_delay: Duration::ZERO,
+                fixed_cost: Money(0),
                 notes: if k % 3 == 0 { format!("Note {k}: <b>&amp;</b>\nline two") } else { String::new() },
             };
             // Through the command layer, so the project is one the app could hold.
@@ -258,8 +278,16 @@ fn random_project() -> impl Strategy<Value = Project> {
                 kind: if material { ResourceKind::Material } else { ResourceKind::Work },
                 max_units: ResourceUnits(if material { 0 } else { max }),
                 material_label: if material { "tons".into() } else { String::new() },
+                rate: Money(0),
                 notes: String::new(),
             });
+        }
+        for (r, rate) in resources.iter_mut().zip(&rates) {
+            r.rate = Money(*rate);
+        }
+        p.currency = currency.to_owned();
+        for (t, cost) in p.tasks.values_mut().zip(&fixed) {
+            t.fixed_cost = Money(*cost);
         }
         let ids: Vec<ResourceId> = resources.iter().map(|r| r.id).collect();
         let _ = apply(&mut p, &Command::InsertResources { resources, assignments: vec![] });

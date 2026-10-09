@@ -18,7 +18,7 @@ pub use calendar::{Calendar, CalendarError, DayPattern, WorkRange};
 pub use command::{apply, Command, CommandError, LinkChange, ProjectChange, ResourceChange, TaskChange, Touched};
 pub use model::*;
 pub use outline::{outline, OutlineRow};
-pub use text::{format_resource, parse_resource_list, PredecessorEntry, ResourceEntry, TextError, Units};
+pub use text::{format_resource, parse_money, parse_resource_list, PredecessorEntry, ResourceEntry, TextError, Units};
 pub use leveling::{level, Leveled, Unresolved};
 pub use resources::{loads, Loads, Overload, ResourceLoad};
 pub use schedule::{check, schedule, ConstraintConflict, Schedule, ScheduleError, TaskSchedule};

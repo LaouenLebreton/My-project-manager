@@ -14,4 +14,12 @@ totalText: string,
 /**
  * Highest load as a percentage of full time (work resources).
  */
-peakPercent: number, taskCount: number, overloads: Array<OverloadView>, };
+peakPercent: number, taskCount: number, overloads: Array<OverloadView>, 
+/**
+ * Cost per hour (work) or per unit (material), in cents.
+ */
+rateCents: number, 
+/**
+ * Total cost of the resource's assignments, in cents.
+ */
+costCents: number, };

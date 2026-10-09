@@ -2,14 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { errorMessage, type Edit, type EditResult } from "./api";
 import type { ResourceRow } from "./bindings/ResourceRow";
 import type { Snapshot } from "./bindings/Snapshot";
-import { formatDate } from "./format";
+import { formatDate, formatMoney } from "./format";
 import { GLOSSARY } from "./help";
 
 interface Column {
   label: string;
   width: string;
   align?: "right";
-  text: (r: ResourceRow) => string;
+  text: (r: ResourceRow, currency: string) => string;
   /** Editable columns: what the editor starts with, and the edit to send. */
   edit?: (r: ResourceRow) => { initial: string; make: (text: string) => Edit } | null;
 }
@@ -22,6 +22,7 @@ const update = (r: ResourceRow, fields: Partial<Extract<Edit, { kind: "UpdateRes
   resourceType: null,
   maxUnits: null,
   materialLabel: null,
+  rate: null,
   ...fields,
 });
 
@@ -61,7 +62,15 @@ const COLUMNS: Column[] = [
     text: (r) => r.materialLabel,
     edit: (r) => (r.resourceType === "Material" ? { initial: r.materialLabel, make: (t) => update(r, { materialLabel: t }) } : null),
   },
+  {
+    label: "Rate",
+    width: "110px",
+    align: "right",
+    text: (r, currency) => (r.rateCents ? `${formatMoney(r.rateCents, currency)}${r.resourceType === "Work" ? "/h" : ""}` : ""),
+    edit: (r) => ({ initial: r.rateCents ? (r.rateCents / 100).toFixed(2) : "", make: (t) => update(r, { rate: t }) }),
+  },
   { label: "Work", width: "90px", align: "right", text: (r) => r.totalText },
+  { label: "Cost", width: "100px", align: "right", text: (r, currency) => (r.costCents ? formatMoney(r.costCents, currency) : "") },
   { label: "Peak", width: "70px", align: "right", text: (r) => (r.resourceType === "Work" ? `${r.peakPercent}%` : "") },
   { label: "Tasks", width: "60px", align: "right", text: (r) => String(r.taskCount) },
 ];
@@ -243,7 +252,7 @@ export function ResourceSheet({ snapshot, onEdit, onTextEditing }: { snapshot: S
                         </span>
                       ) : null
                     ) : (
-                      c.text(r)
+                      c.text(r, snapshot.project.currency)
                     )}
                   </div>
                 );

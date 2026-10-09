@@ -30,6 +30,10 @@ export const GLOSSARY = {
     term: "Resources",
     text: "Who (or what) works on a task. Type names separated by commas: Alex, Sam. Add a share of their time in brackets, Sam[50%], or a quantity for materials, Concrete[2.5 tons]. A new name adds that resource to the Resource Sheet.",
   },
+  cost: {
+    term: "Cost",
+    text: "What a task costs: its resources' work times their rates (Rate in the Resource Sheet), plus any fixed cost (Task Info). Summaries add up the tasks inside them. Set the currency in Project Info.",
+  },
   overallocated: {
     term: "Over-allocated",
     text: "A resource asked for more than it has at the same time, such as one person on two full-time tasks at once. Marked ⚠. Move a task, share the work, or lower the units to fix it.",

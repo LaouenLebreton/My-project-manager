@@ -29,4 +29,8 @@ levelingDelayMinutes: number,
 /**
  * Where the task would start without its leveling delay; drawn as a line before the bar.
  */
-leveledFrom: string | null, };
+leveledFrom: string | null, 
+/**
+ * Total cost in cents (fixed cost plus resources; summaries add up their tasks).
+ */
+costCents: number, fixedCostCents: number, };

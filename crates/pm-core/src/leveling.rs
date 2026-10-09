@@ -136,6 +136,7 @@ mod tests {
                     dependencies: Default::default(),
                     resources: Default::default(),
                     assignments: Default::default(),
+                    currency: String::new(),
                 },
                 900,
             )
@@ -153,6 +154,7 @@ mod tests {
                 percent_complete: Percent::default(),
                 notes: String::new(),
                 leveling_delay: Duration::ZERO,
+                fixed_cost: Money(0),
             };
             apply(&mut self.0, &Command::InsertTasks { tasks: vec![t], dependencies: vec![] }).unwrap();
             self
@@ -174,6 +176,7 @@ mod tests {
                 kind: ResourceKind::Work,
                 max_units: ResourceUnits(max),
                 material_label: String::new(),
+                rate: Money(0),
                 notes: String::new(),
             };
             apply(&mut self.0, &Command::InsertResources { resources: vec![r], assignments: vec![] }).unwrap();

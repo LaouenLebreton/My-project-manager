@@ -27,3 +27,13 @@ export function formatDays(minutes: number | null, minutesPerDay: number): strin
   const days = minutes / minutesPerDay;
   return `${numberFmt.format(days)} ${Math.abs(days) === 1 ? "day" : "days"}`;
 }
+
+const moneyFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Cents as an amount with the project's currency symbol: "€1,500.00" (or "1,500.00"). */
+export function formatMoney(cents: number, symbol: string): string {
+  const amount = moneyFmt.format(cents / 100);
+  if (!symbol) return amount;
+  // Letter codes (CHF, USD) read better with a space.
+  return /^[A-Za-z]+$/.test(symbol) ? `${symbol} ${amount}` : `${symbol}${amount}`;
+}
