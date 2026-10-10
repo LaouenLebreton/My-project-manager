@@ -96,6 +96,12 @@ fn bearer(parts: &Parts) -> Option<String> {
     value.strip_prefix("Bearer ").map(|t| t.trim().to_owned())
 }
 
+/// Serves the API on `listener` until the task is dropped or the listener fails. Used by the
+/// `super-pm-server` binary and by the app when it hosts a team itself.
+pub async fn serve(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
+    axum::serve(listener, router(state)).await
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(|| async { Json(serde_json::json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") })) }))

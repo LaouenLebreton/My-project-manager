@@ -24,10 +24,11 @@ pm-core.workspace = true
 pm-store.workspace = true
 pm-interop.workspace = true
 pm-sync.workspace = true
+pm-server.workspace = true
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "json", "http2"] }
-tokio = { version = "1.53.2", features = ["sync", "time", "macros"] }
+tokio = { version = "1.53.2", features = ["sync", "time", "macros", "net"] }
 tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
 jiff = "0.2.36"
 ts-rs = "12.0.1"
-uuid = { version = "1.27", features = ["v7"] }
+uuid = { version = "1.27", features = ["v7", "v4"] }

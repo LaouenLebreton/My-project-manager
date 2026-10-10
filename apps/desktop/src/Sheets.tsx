@@ -27,7 +27,20 @@ export const CONSTRAINTS: Record<ConstraintKind, { label: string; dated: boolean
 
 /** A modal sheet: Escape or Cancel closes; Save sends the edit and closes unless refused.
  * Without `onSave` it only shows information, with a Done button. */
-export function Sheet({ title, onClose, onSave, children }: { title: string; onClose: () => void; onSave?: () => Promise<string | null>; children: React.ReactNode }) {
+export function Sheet({
+  title,
+  onClose,
+  onSave,
+  action = "Save",
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  onSave?: () => Promise<string | null>;
+  /** The main button's label when it does more than save. */
+  action?: string;
+  children: React.ReactNode;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => ref.current?.showModal(), []);
@@ -55,7 +68,7 @@ export function Sheet({ title, onClose, onSave, children }: { title: string; onC
             </button>
           )}
           <button className="primary" type="submit">
-            {onSave ? "Save" : "Done"}
+            {onSave ? action : "Done"}
           </button>
         </div>
       </form>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
-import { AddAccountSheet, OpenSharedSheet, ShareSheet, SignInSheet, SyncPill } from "./TeamSheets";
+import { AddAccountSheet, CreateTeamSheet, InvitePeopleSheet, InvitesSheet, JoinSheet, OpenSharedSheet, SignInSheet, SyncPill } from "./TeamSheets";
+import type { Invite } from "./api";
 import { formatDate, formatMoney } from "./format";
 import { CommandBar, type CommandItem } from "./CommandBar";
 import { Gantt, type GanttHandle } from "./Gantt";
@@ -42,7 +43,10 @@ export function App() {
   // The team server account, and this window's sync state (shared projects only).
   const [teamStatus, setTeamStatus] = useState<TeamStatus | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
-  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | "account" | null>(null);
+  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | "account" | "join" | "invite" | "invites" | null>(null);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  /** Closes a team sheet unless it has already been replaced by the next one. */
+  const closeTeamSheet = (which: string) => setTeamSheet((s) => (s === which ? null : s));
   const signOut = useCallback(() => {
     team.signOut().then(
       (s) => {
@@ -186,6 +190,8 @@ export function App() {
         if (e.payload === "team.share") setTeamSheet("share");
         if (e.payload === "team.sign_out") signOut();
         if (e.payload === "team.add_account") setTeamSheet("account");
+        if (e.payload === "team.join") setTeamSheet("join");
+        if (e.payload === "team.invite") setTeamSheet("invite");
         if (e.payload === "project.statistics") setOverlay("stats");
         const percent = /^task\.percent_(\d+)$/.exec(e.payload);
         if (percent && selectedRef.current.size)
@@ -206,7 +212,9 @@ export function App() {
     { name: "Show Help", shortcut: "⌘?", run: () => setOverlay("help") },
     { name: "Show Tour", run: () => setOverlay("tour") },
     { name: "Sign In to Team Server…", run: () => setTeamSheet("signin") },
-    { name: "Open Shared Project…", run: () => setTeamSheet("open") },
+    { name: "Open Team Project…", run: () => setTeamSheet("open") },
+    { name: "Join a Team…", run: () => setTeamSheet("join") },
+    { name: "Invite People to a Team…", run: () => setTeamSheet("invite") },
     { name: "Add Account to Team Server…", run: () => setTeamSheet("account") },
   ];
   if (snapshot) {
@@ -224,7 +232,7 @@ export function App() {
       { name: "Level Resources", run: () => void edit({ kind: "LevelResources" }).catch((e) => setError(errorMessage(e))) },
       { name: "Set Baseline", run: () => void edit({ kind: "SetBaseline" }).catch((e) => setError(errorMessage(e))) },
       { name: "Clear Baseline", run: () => void edit({ kind: "ClearBaseline" }).catch((e) => setError(errorMessage(e))) },
-      { name: "Share Project with Team…", run: () => setTeamSheet("share") },
+      { name: "Create Team Project…", run: () => setTeamSheet("share") },
       { name: "Project Statistics… (earned value)", run: () => setOverlay("stats") },
       { name: "Update Project… (progress up to a day)", run: () => setOverlay("update") },
       ...[0, 25, 50, 75, 100].map((n) => ({
@@ -260,16 +268,37 @@ export function App() {
         />
       )}
       {teamSheet === "account" && <AddAccountSheet status={teamStatus} onClose={() => setTeamSheet(null)} onAdded={setNotice} />}
-      {teamSheet === "open" && <OpenSharedSheet onClose={() => setTeamSheet(null)} onOpened={(snap) => snap && setSnapshot(snap)} onSignIn={() => setTeamSheet("signin")} />}
-      {teamSheet === "share" && snapshot && (
-        <ShareSheet
-          snapshot={snapshot}
-          onClose={() => setTeamSheet(null)}
-          onShared={(snap) => {
-            setSnapshot(snap);
-            setNotice("Shared. Your team can now open this project from Team > Open Shared Project, and changes sync as everyone works.");
+      {teamSheet === "open" && <OpenSharedSheet onClose={() => setTeamSheet(null)} onOpened={(snap) => snap && setSnapshot(snap)} onSignIn={() => setTeamSheet("join")} />}
+      {teamSheet === "join" && (
+        <JoinSheet
+          onClose={() => closeTeamSheet("join")}
+          onJoined={(st) => {
+            setTeamStatus(st);
+            setTeamSheet("open");
           }}
-          onSignIn={() => setTeamSheet("signin")}
+        />
+      )}
+      {teamSheet === "invite" && (
+        <InvitePeopleSheet
+          onClose={() => closeTeamSheet("invite")}
+          onInvited={(list) => {
+            setInvites(list);
+            setTeamSheet("invites");
+          }}
+        />
+      )}
+      {teamSheet === "invites" && <InvitesSheet invites={invites} hostedHere={teamStatus?.hostedHere ?? false} onClose={() => closeTeamSheet("invites")} />}
+      {teamSheet === "share" && snapshot && (
+        <CreateTeamSheet
+          snapshot={snapshot}
+          status={teamStatus}
+          onClose={() => closeTeamSheet("share")}
+          onCreated={(result) => {
+            setSnapshot(result.snapshot);
+            setInvites(result.invites);
+            team.status().then(setTeamStatus, () => {});
+            setTeamSheet("invites");
+          }}
         />
       )}
       {question && (
@@ -303,7 +332,7 @@ export function App() {
           </button>
           <button onClick={() => run(api.openProject)}>Open…</button>
           <button onClick={() => run(api.openSample)}>Open Sample Project</button>
-          <button onClick={() => setTeamSheet("open")}>Open Shared Project…</button>
+          <button onClick={() => setTeamSheet(teamStatus?.user ? "open" : "join")}>{teamStatus?.user ? "Open Team Project…" : "Join a Team…"}</button>
         </div>
         {recent.length > 0 && (
           <nav className="recent" aria-label="Recent projects">

@@ -23,6 +23,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::document::{Document, ReceiveError};
+use crate::hosting::{self, LOCAL};
 use crate::ipc::{changed, with_doc, IpcError, Snapshot};
 
 /// Sent to a window: whether its shared project is in touch with the server.
@@ -56,8 +57,32 @@ struct Account {
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamStatus {
+    /// Where the teams live, as shown to the user ("this Mac" or a server address).
     pub server: Option<String>,
     pub user: Option<TeamUser>,
+    /// The teams are hosted by this copy of the app (no separate server).
+    pub hosted_here: bool,
+}
+
+/// An invitation to send to one person.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct Invite {
+    pub email: String,
+    /// The text to send them; they paste it into Team > Join a Team. None if they already
+    /// have an account (they only needed adding to the team).
+    pub invite: Option<String>,
+    /// Anything to tell the user about this person, in plain words.
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamProject {
+    pub snapshot: Snapshot,
+    pub invites: Vec<Invite>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -95,7 +120,7 @@ pub struct SharedProject {
 }
 
 fn account_file(app: &AppHandle) -> Option<PathBuf> {
-    Some(app.path().app_config_dir().ok()?.join("team.json"))
+    Some(hosting::profiled(app.path().app_config_dir().ok()?).join("team.json"))
 }
 
 fn account(app: &AppHandle) -> Option<Account> {
@@ -147,14 +172,14 @@ fn normalized_server(server: &str) -> Result<String, IpcError> {
 
 /// One request to the server; failures come back as plain words.
 async fn call<T: DeserializeOwned>(method: reqwest::Method, server: &str, path: &str, token: Option<&str>, body: Option<serde_json::Value>) -> Result<T, CallError> {
-    let mut req = http().request(method, format!("{server}{path}"));
+    let mut req = http().request(method, format!("{}{path}", hosting::base(server)));
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
     if let Some(b) = body {
         req = req.json(&b);
     }
-    let res = req.send().await.map_err(|_| CallError::Offline(format!("the team server at {server} cannot be reached")))?;
+    let res = req.send().await.map_err(|_| CallError::Offline(if server == LOCAL { "the team on this Mac is not running; quit and reopen Super PM".to_owned() } else { format!("the team server at {server} cannot be reached") }))?;
     let status = res.status();
     if status.is_success() {
         if status == reqwest::StatusCode::NO_CONTENT {
@@ -187,13 +212,13 @@ impl From<CallError> for IpcError {
 }
 
 fn signed_in(app: &AppHandle) -> Result<Account, IpcError> {
-    account(app).ok_or_else(|| err("sign in to a team server first (Team > Sign In to Team Server)"))
+    account(app).ok_or_else(|| err("create a team (Team > Create Team Project) or join one (Team > Join a Team) first"))
 }
 
 fn status_of(app: &AppHandle) -> TeamStatus {
     match account(app) {
-        Some(a) => TeamStatus { server: Some(a.server), user: Some(a.user) },
-        None => TeamStatus { server: None, user: None },
+        Some(a) => TeamStatus { server: Some(hosting::display(&a.server)), hosted_here: a.server == LOCAL, user: Some(a.user) },
+        None => TeamStatus { server: None, user: None, hosted_here: false },
     }
 }
 
@@ -283,7 +308,160 @@ pub async fn team_projects(app: AppHandle) -> Result<Vec<SharedProject>, IpcErro
 #[tauri::command]
 pub async fn team_share(app: AppHandle, window: WebviewWindow, team_id: String) -> Result<Snapshot, IpcError> {
     let a = signed_in(&app)?;
-    let label = window.label().to_owned();
+    share(&app, window.label(), &a, &team_id).await
+}
+
+fn random_code(len: usize) -> String {
+    Uuid::new_v4().simple().to_string()[..len].to_owned()
+}
+
+/// "alex.martin@example.com" → "Alex Martin", until they are known by a better name.
+fn name_from_email(email: &str) -> String {
+    let local = email.split('@').next().unwrap_or(email);
+    let words: Vec<String> = local
+        .split(['.', '_', '-'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        })
+        .collect();
+    if words.is_empty() { email.to_owned() } else { words.join(" ") }
+}
+
+const INVITE_PREFIX: &str = "SuperPM-Invite";
+
+/// Adds people to a team by email. Whoever hosts the team (or administers the server) can
+/// create their accounts on the spot; each new person gets an invite to paste into Join a Team.
+async fn invite_people(a: &Account, team_id: &str, emails: &[String]) -> Vec<Invite> {
+    let address = if a.server == LOCAL { hosting::invite_address() } else { a.server.clone() };
+    let mut out = Vec::new();
+    for email in emails.iter().map(|e| e.trim().to_lowercase()).filter(|e| !e.is_empty()) {
+        let mut invite = None;
+        let mut note = None;
+        if a.user.is_admin {
+            let code = random_code(16);
+            let body = serde_json::json!({ "name": name_from_email(&email), "email": email, "password": code });
+            match call::<serde_json::Value>(reqwest::Method::POST, &a.server, "/api/users", Some(&a.token), Some(body)).await {
+                Ok(_) => invite = Some(format!("{INVITE_PREFIX}|{address}|{email}|{code}")),
+                Err(CallError::Refused(m)) if m.starts_with("there is already an account") => note = Some("Already has an account; added to the team.".to_owned()),
+                Err(CallError::Refused(m)) | Err(CallError::Offline(m)) => {
+                    out.push(Invite { email, invite: None, note: Some(format!("Could not be invited: {m}.")) });
+                    continue;
+                }
+            }
+        }
+        let added = call::<serde_json::Value>(reqwest::Method::POST, &a.server, &format!("/api/teams/{team_id}/members"), Some(&a.token), Some(serde_json::json!({ "email": email }))).await;
+        if let Err(CallError::Refused(m) | CallError::Offline(m)) = added {
+            invite = None;
+            note = Some(format!("Could not be added to the team: {m}."));
+        }
+        out.push(Invite { email, invite, note });
+    }
+    out
+}
+
+/// Team > Create Team Project: makes the project in this window a team project. The first time,
+/// the app starts hosting teams itself (no server to set up) with the given name and email.
+#[tauri::command]
+pub async fn team_create_project(
+    app: AppHandle,
+    window: WebviewWindow,
+    my_name: Option<String>,
+    my_email: Option<String>,
+    team_id: Option<String>,
+    team_name: String,
+    emails: Vec<String>,
+) -> Result<TeamProject, IpcError> {
+    let a = match account(&app) {
+        Some(a) => a,
+        None => {
+            let (name, email) = (my_name.unwrap_or_default(), my_email.unwrap_or_default());
+            if name.trim().is_empty() || !email.contains('@') {
+                return Err(err("type your name and email, so your team knows who changed what"));
+            }
+            hosting::ensure(&app).await?;
+            // Nobody types this password: the app keeps the session, and invites carry codes.
+            let body = serde_json::json!({ "name": name, "email": email, "password": Uuid::new_v4().simple().to_string() });
+            let reply: SessionReply = call(reqwest::Method::POST, LOCAL, "/api/setup", None, Some(body)).await.map_err(|e| match e {
+                CallError::Refused(m) if m.starts_with("this server is already set up") => err("teams were already created on this Mac under another sign-in; choose Team > Join a Team with an invite, or ask for help restoring the sign-in"),
+                other => other.into(),
+            })?;
+            let a = Account { server: LOCAL.to_owned(), token: reply.token, user: reply.user };
+            save_account(&app, Some(&a))?;
+            a
+        }
+    };
+    if a.server == LOCAL {
+        hosting::ensure(&app).await?;
+    }
+    let team_id = match team_id.filter(|t| !t.is_empty()) {
+        Some(id) => id,
+        None => {
+            let v: serde_json::Value = call(reqwest::Method::POST, &a.server, "/api/teams", Some(&a.token), Some(serde_json::json!({ "name": team_name }))).await?;
+            v["team"]["id"].as_str().unwrap_or_default().to_owned()
+        }
+    };
+    let invites = invite_people(&a, &team_id, &emails).await;
+    let snapshot = share(&app, window.label(), &a, &team_id).await?;
+    Ok(TeamProject { snapshot, invites })
+}
+
+/// Team > Invite People: adds more people to a team.
+#[tauri::command]
+pub async fn team_invite(app: AppHandle, team_id: String, emails: Vec<String>) -> Result<Vec<Invite>, IpcError> {
+    let a = signed_in(&app)?;
+    if a.server == LOCAL {
+        hosting::ensure(&app).await?;
+    }
+    Ok(invite_people(&a, &team_id, &emails).await)
+}
+
+/// Team > Join a Team: signs in with an invite someone sent.
+#[tauri::command]
+pub async fn team_join(app: AppHandle, invite: String) -> Result<TeamStatus, IpcError> {
+    let parts: Vec<&str> = invite.trim().split('|').map(str::trim).collect();
+    let [INVITE_PREFIX, address, email, code] = parts[..] else {
+        return Err(err("that does not look like a Super PM invite; copy the whole text you were sent, starting with SuperPM-Invite"));
+    };
+    let server = normalized_server(address)?;
+    let reply: SessionReply = call(reqwest::Method::POST, &server, "/api/sessions", None, Some(serde_json::json!({ "email": email, "password": code })))
+        .await
+        .map_err(|e| match e {
+            CallError::Offline(_) => err("the team cannot be reached right now. The person who invited you needs Super PM open, and you need to be on the same network."),
+            CallError::Refused(m) => err(format!("the invite was not accepted: {m}")),
+        })?;
+    save_account(&app, Some(&Account { server, token: reply.token, user: reply.user }))?;
+    restart_all(&app);
+    Ok(status_of(&app))
+}
+
+/// When the app starts: bring the teams hosted here back up, then sync open shared projects.
+pub fn on_launch(app: &AppHandle) {
+    if !account(app).is_some_and(|a| a.server == LOCAL) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = hosting::ensure(&app).await {
+            eprintln!("{}", e.message);
+        }
+        restart_all(&app);
+    });
+}
+
+/// Development only: a second copy of the app acting as another person, for trying teams on
+/// one Mac.
+#[tauri::command]
+pub fn open_second_user() -> Result<(), IpcError> {
+    let exe = std::env::current_exe().map_err(|e| err(e.to_string()))?;
+    std::process::Command::new(exe).env("SUPER_PM_PROFILE", "second-user").spawn().map_err(|e| err(format!("the second copy could not be started: {e}")))?;
+    Ok(())
+}
+
+async fn share(app: &AppHandle, label: &str, a: &Account, team_id: &str) -> Result<Snapshot, IpcError> {
+    let app = app.clone();
+    let label = label.to_owned();
     let project = with_doc(&app, &label, |doc| {
         if doc.team.is_some() {
             return Err(err("this project is already shared"));
@@ -310,7 +488,7 @@ struct Opened {
 #[tauri::command]
 pub async fn team_open(app: AppHandle, window: WebviewWindow, project_id: String) -> Result<Option<Snapshot>, IpcError> {
     let a = signed_in(&app)?;
-    let dir = app.path().app_data_dir().map_err(|e| err(e.to_string()))?.join("Shared");
+    let dir = hosting::profiled(app.path().app_data_dir().map_err(|e| err(e.to_string()))?).join("Shared");
     std::fs::create_dir_all(&dir).map_err(|e| err(format!("the Shared folder cannot be created: {e}")))?;
     let path = dir.join(format!("{project_id}.pmproj"));
     if path.exists() {
@@ -351,7 +529,7 @@ fn restart_all(app: &AppHandle) {
 pub fn start_sync(app: &AppHandle, label: &str) {
     let Ok(Some((server, project, wake))) = with_doc(app, label, |d| Ok(d.team.as_ref().map(|t| (t.server.clone(), d.project.id.0, t.wake.clone())))) else { return };
     let Some(a) = account(app).filter(|a| a.server == server) else {
-        emit_status(app, label, "stopped", Some(format!("Sign in to {server} to sync this project with your team.")));
+        emit_status(app, label, "stopped", Some(format!("Join the team again (Team > Join a Team) to sync this project. It is shared through {}.", hosting::display(&server))));
         return;
     };
     if !running().lock().expect("lock").insert(label.to_owned()) {
@@ -386,10 +564,10 @@ async fn sync_loop(app: &AppHandle, label: &str, a: &Account, project: Uuid, wak
 /// One connection: catch up, send the outbox, then follow changes until the connection drops.
 async fn session(app: &AppHandle, label: &str, a: &Account, project: Uuid, wake: &tokio::sync::Notify) -> Result<(), String> {
     let since = with_doc(app, label, |d| Ok(d.team.as_ref().map_or(0, |t| t.outbox.version))).map_err(|e| e.message)?;
-    let ws_base = a.server.replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
+    let ws_base = hosting::base(&a.server).replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
     let mut req = format!("{ws_base}/api/projects/{project}/live?since={since}").into_client_request().map_err(|e| e.to_string())?;
     req.headers_mut().insert("authorization", format!("Bearer {}", a.token).parse().map_err(|_| "bad token".to_owned())?);
-    let (ws, _) = tokio_tungstenite::connect_async(req).await.map_err(|_| format!("Offline: the team server at {} cannot be reached. Your edits are kept and will be sent later.", a.server))?;
+    let (ws, _) = tokio_tungstenite::connect_async(req).await.map_err(|_| format!("Offline: the team on {} cannot be reached. Your edits are kept and will be sent later.", hosting::display(&a.server)))?;
     let (mut write, mut read) = ws.split();
     emit_status(app, label, "online", None);
     let mut sent = HashSet::new();

@@ -56,6 +56,9 @@ pub mod id {
     pub const TEAM_SHARE: &str = "team.share";
     pub const TEAM_SIGN_OUT: &str = "team.sign_out";
     pub const TEAM_ADD_ACCOUNT: &str = "team.add_account";
+    pub const TEAM_JOIN: &str = "team.join";
+    pub const TEAM_INVITE: &str = "team.invite";
+    pub const SECOND_USER: &str = "dev.second_user";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
 }
@@ -232,14 +235,21 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .close_window()
         .build()?;
 
-    // Team: the team server (iteration 3). Signing in and opening work without a project.
-    let team_share = item(app, id::TEAM_SHARE, "Share Project with Team…", None)?;
-    let team = SubmenuBuilder::new(app, "Team")
-        .item(&enabled(id::TEAM_SIGN_IN, "Sign In to Team Server…", None)?)
-        .item(&enabled(id::TEAM_OPEN, "Open Shared Project…", None)?)
-        .item(&team_share)
-        .separator()
+    // Team (iteration 3). Creating a team needs no server: the app hosts it. Joining and
+    // opening work without a project; a separate server is the advanced route.
+    let team_share = item(app, id::TEAM_SHARE, "Create Team Project…", None)?;
+    let server = SubmenuBuilder::new(app, "Team Server")
+        .item(&enabled(id::TEAM_SIGN_IN, "Sign In to a Team Server…", None)?)
         .item(&enabled(id::TEAM_ADD_ACCOUNT, "Add Account to Server…", None)?)
+        .build()?;
+    let team = SubmenuBuilder::new(app, "Team")
+        .item(&team_share)
+        .item(&enabled(id::TEAM_INVITE, "Invite People…", None)?)
+        .separator()
+        .item(&enabled(id::TEAM_JOIN, "Join a Team…", None)?)
+        .item(&enabled(id::TEAM_OPEN, "Open Team Project…", None)?)
+        .separator()
+        .item(&server)
         .item(&enabled(id::TEAM_SIGN_OUT, "Sign Out", None)?)
         .build()?;
 
@@ -251,6 +261,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         let dev = |id, text| MenuItemBuilder::with_id(id, text).build(app);
         help = help
             .separator()
+            .item(&dev(id::SECOND_USER, "Open Second Test User Window")?)
             .item(&dev(id::OPEN_5K, "Open Test Project (5,000 Tasks)")?)
             .item(&dev(id::OPEN_20K, "Open Test Project (20,000 Tasks)")?);
     }

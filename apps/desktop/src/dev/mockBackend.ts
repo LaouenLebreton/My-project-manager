@@ -211,8 +211,14 @@ export function install() {
       if (cmd.startsWith("plugin:event")) return 1;
       const teamStatus = () =>
         state.account
-          ? { server: state.account.server, user: { id: "u1", name: state.account.name, email: state.account.email, isAdmin: true } }
-          : { server: null, user: null };
+          ? { server: state.account.server, hostedHere: state.account.server === "this Mac", user: { id: "u1", name: state.account.name, email: state.account.email, isAdmin: true } }
+          : { server: null, user: null, hostedHere: false };
+      const mockInvites = (emails: string[]) =>
+        emails.map((email) =>
+          email.includes("@")
+            ? { email, invite: `SuperPM-Invite|http://192.168.1.20:7878|${email}|3f9c2a7b1d4e5f60`, note: null }
+            : { email, invite: null, note: "Could not be invited: type an email address such as alex@example.com." },
+        );
       switch (cmd) {
         case "team_status":
           return teamStatus();
@@ -225,6 +231,20 @@ export function install() {
         case "team_create_account":
           if (String(args.password).length < 10) fail("choose a password of at least 10 characters");
           return { id: "u2", name: args.name, email: args.email, isAdmin: false };
+        case "team_create_project":
+          if (!state.account) {
+            if (!String(args.myEmail ?? "").includes("@")) fail("type your name and email, so your team knows who changed what");
+            state.account = { server: "this Mac", name: String(args.myName), email: String(args.myEmail) };
+          }
+          state.team = { server: "local", pending: 0 };
+          setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
+          return { snapshot: snapshot(), invites: mockInvites(args.emails as string[]) };
+        case "team_invite":
+          return mockInvites(args.emails as string[]);
+        case "team_join":
+          if (!String(args.invite).startsWith("SuperPM-Invite|")) fail("that does not look like a Super PM invite; copy the whole text you were sent, starting with SuperPM-Invite");
+          state.account = { server: "http://192.168.1.20:7878", name: "Alex", email: "alex@example.com" };
+          return teamStatus();
         case "team_sign_out":
           state.account = null;
           return teamStatus();

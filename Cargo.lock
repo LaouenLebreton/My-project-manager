@@ -3713,6 +3713,7 @@ dependencies = [
  "jiff",
  "pm-core",
  "pm-interop",
+ "pm-server",
  "pm-store",
  "pm-sync",
  "reqwest",

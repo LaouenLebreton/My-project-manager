@@ -119,3 +119,23 @@ Critical tasks look the same in every view (red, with a "critical" label where c
 would be the only cue). Dragging that would change a critical task's dates (moving or
 stretching its bar, or linking it) asks first; Cancel is the default. Typed edits (grid, Task
 Info) are deliberate and go straight in.
+
+## Teams without a server to set up (owner, 2026-10-10)
+
+The owner found connecting to a server too much to ask: "can't we just create a team and add
+people by email, just like in Teams?" So the app hosts teams itself: the team server runs
+inside the app (stored as server `local`), started the first time someone creates a team
+project and again at every launch. Team > Create Team Project asks for a team name and
+emails (and, once, the user's own name and email); there is no address, account form or
+password. Each invited person gets an invite text (address, email, one-time code as their
+password) to paste into Team > Join a Team.
+
+Limits, said in the app: the team lives on the host's Mac, which must be open, and the others
+must be on the same network. The built-in server listens on the local network over plain
+HTTP with sign-in required. Moving a team to a real server (and with it invite emails, HTTPS
+and access from anywhere) is the "connect it to a server afterwards" step, part of the cloud
+step in docs/iteration-3-plan.md. Signing in to a separate server stays available under
+Team > Team Server.
+
+For testing on one Mac: Help > Open Second Test User Window (development builds) starts a
+second copy with its own settings (`SUPER_PM_PROFILE`).

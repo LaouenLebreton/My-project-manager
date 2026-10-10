@@ -12,8 +12,10 @@ import type { SyncStatus } from "./bindings/SyncStatus";
 import type { TeamStatus } from "./bindings/TeamStatus";
 import type { TeamUser } from "./bindings/TeamUser";
 import type { TeamView } from "./bindings/TeamView";
+import type { Invite } from "./bindings/Invite";
+import type { TeamProject } from "./bindings/TeamProject";
 
-export type { Edit, EditResult, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamStatus, TeamView };
+export type { Edit, EditResult, Invite, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamProject, TeamStatus, TeamView };
 
 /** Rejects with an IpcError whose message can be shown to the user as is. */
 export const api = {
@@ -48,6 +50,13 @@ export const team = {
   addMember: (teamId: string, email: string) => invoke<void>("team_add_member", { teamId, email }),
   projects: () => invoke<SharedProject[]>("team_projects"),
   share: (teamId: string) => invoke<Snapshot>("team_share", { teamId }),
+  /** Makes the open project a team project. The first time, pass your name and email: the app
+   * then hosts teams itself. `teamId` null creates a team called `teamName`. */
+  createProject: (myName: string | null, myEmail: string | null, teamId: string | null, teamName: string, emails: string[]) =>
+    invoke<TeamProject>("team_create_project", { myName, myEmail, teamId, teamName, emails }),
+  invite: (teamId: string, emails: string[]) => invoke<Invite[]>("team_invite", { teamId, emails }),
+  /** With the invite text someone sent. */
+  join: (invite: string) => invoke<TeamStatus>("team_join", { invite }),
   open: (projectId: string) => invoke<Snapshot | null>("team_open", { projectId }),
 };
 

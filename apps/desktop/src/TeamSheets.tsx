@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { errorMessage, team, type SharedProject, type Snapshot, type TeamStatus, type TeamView } from "./api";
+import { errorMessage, team, type Invite, type SharedProject, type Snapshot, type TeamProject, type TeamStatus, type TeamView } from "./api";
 import type { SyncStatus } from "./bindings/SyncStatus";
 import { formatDateTime } from "./format";
 import { Sheet } from "./Sheets";
@@ -20,7 +20,7 @@ export function SignInSheet({ status, onClose, onSignedIn }: { status: TeamStatu
     }
   };
   return (
-    <Sheet title="Sign In to Team Server" onClose={onClose} onSave={save}>
+    <Sheet title="Sign In to Team Server" onClose={onClose} onSave={save} action="Sign In">
       {status?.user && (
         <p className="secondary small">
           Signed in as {status.user.name} on {status.server}. Signing in again replaces this account.
@@ -76,7 +76,7 @@ export function AddAccountSheet({ status, onClose, onAdded }: { status: TeamStat
     }
   };
   return (
-    <Sheet title="Add Account to Server" onClose={onClose} onSave={save}>
+    <Sheet title="Add Account to Server" onClose={onClose} onSave={save} action="Add Account">
       <p className="secondary small">A new person who can sign in to {status.server}. Then add them to a team when you share a project.</p>
       <div className="form">
         <label htmlFor="aa-name">Name</label>
@@ -93,82 +93,208 @@ export function AddAccountSheet({ status, onClose, onAdded }: { status: TeamStat
   );
 }
 
-/** Team > Share Project with Team: pick or create a team, optionally add people, share. */
-export function ShareSheet({ snapshot, onClose, onShared, onSignIn }: { snapshot: Snapshot; onClose: () => void; onShared: (s: Snapshot) => void; onSignIn: () => void }) {
-  const [teams, setTeams] = useState<TeamView[] | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+const splitEmails = (text: string) => text.split(/[\s,;]+/).filter(Boolean);
+
+/** Team > Create Team Project: a team name and people's emails. No server to set up: the app
+ * hosts the team; the first time it asks who you are. */
+export function CreateTeamSheet({
+  snapshot,
+  status,
+  onClose,
+  onCreated,
+}: {
+  snapshot: Snapshot;
+  status: TeamStatus | null;
+  onClose: () => void;
+  onCreated: (result: TeamProject) => void;
+}) {
+  const known = !!status?.user;
+  const [teams, setTeams] = useState<TeamView[]>([]);
   const [choice, setChoice] = useState<string>("new");
   const [newName, setNewName] = useState(snapshot.project.name);
+  const [myName, setMyName] = useState("");
+  const [myEmail, setMyEmail] = useState("");
   const [emails, setEmails] = useState("");
   useEffect(() => {
+    if (!known) return;
     team.teams().then(
       (t) => {
         setTeams(t);
         if (t.length) setChoice(t[0].id);
       },
-      (e) => setProblem(errorMessage(e)),
+      () => {},
     );
-  }, []);
+  }, [known]);
   if (snapshot.project.team) {
     return (
-      <Sheet title="Share Project with Team" onClose={onClose}>
-        <p>This project is already shared through {snapshot.project.team.server}. Changes sync with your team as you work.</p>
+      <Sheet title="Create Team Project" onClose={onClose}>
+        <p>This is already a team project. Changes sync with your team as you work. To add people, choose Team &gt; Invite People.</p>
       </Sheet>
     );
   }
   const save = async () => {
     try {
-      const teamId = choice === "new" ? (await team.createTeam(newName)).id : choice;
-      const failed: string[] = [];
-      for (const email of emails.split(/[\s,;]+/).filter(Boolean)) {
-        try {
-          await team.addMember(teamId, email);
-        } catch (e) {
-          failed.push(`${email}: ${errorMessage(e)}`);
-        }
-      }
-      onShared(await team.share(teamId));
-      return failed.length ? `Shared. These people could not be added: ${failed.join("; ")}` : null;
+      onCreated(await team.createProject(known ? null : myName, known ? null : myEmail, choice === "new" ? null : choice, newName, splitEmails(emails)));
+      return null;
     } catch (e) {
       return errorMessage(e);
     }
   };
-  if (problem && teams === null) {
-    return (
-      <Sheet title="Share Project with Team" onClose={onClose}>
-        <p role="alert">{problem}</p>
-        <button
-          type="button"
-          onClick={() => {
-            onClose();
-            onSignIn();
-          }}
-        >
-          Sign In…
-        </button>
-      </Sheet>
-    );
-  }
   return (
-    <Sheet title="Share Project with Team" onClose={onClose} onSave={save}>
-      <p className="secondary small">Everyone in the team can open the project and change it at the same time; every change is logged. As the owner you can limit what each person may change.</p>
+    <Sheet title="Create Team Project" onClose={onClose} onSave={save} action="Create Team">
+      <p className="secondary small">
+        Everyone in the team can open this project and change it at the same time; every change is logged, and as the owner you can limit what each person
+        may change.
+      </p>
       <div className="form">
+        {!known && (
+          <>
+            <label htmlFor="ct-name">Your name</label>
+            <input id="ct-name" className="wide" value={myName} onChange={(e) => setMyName(e.target.value)} autoFocus required />
+            <label htmlFor="ct-email">Your email</label>
+            <div>
+              <input id="ct-email" className="wide" type="email" value={myEmail} onChange={(e) => setMyEmail(e.target.value)} required />
+              <p className="secondary small">So your team sees who changed what. Asked once.</p>
+            </div>
+          </>
+        )}
         <span className="form-label">Team</span>
         <div role="radiogroup" aria-label="Team">
-          {(teams ?? []).map((t) => (
+          {teams.map((t) => (
             <label key={t.id} className="inline block">
               <input type="radio" name="team" checked={choice === t.id} onChange={() => setChoice(t.id)} /> {t.name}
             </label>
           ))}
           <label className="inline block">
-            <input type="radio" name="team" checked={choice === "new"} onChange={() => setChoice("new")} /> New team:{" "}
-            <input aria-label="New team name" value={newName} onChange={(e) => setNewName(e.target.value)} disabled={choice !== "new"} />
+            {teams.length > 0 && (
+              <>
+                <input type="radio" name="team" checked={choice === "new"} onChange={() => setChoice("new")} /> New team:{" "}
+              </>
+            )}
+            <input aria-label="Team name" value={newName} onChange={(e) => setNewName(e.target.value)} disabled={choice !== "new"} required={choice === "new"} />
           </label>
         </div>
-        <label htmlFor="sh-emails">Add people</label>
+        <label htmlFor="ct-emails">People</label>
         <div>
-          <textarea id="sh-emails" rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="alex@example.com, sam@example.com" />
-          <p className="secondary small">Their email addresses, if they are not in the team yet. They need an account on the server (the administrator creates accounts).</p>
+          <textarea id="ct-emails" rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="alex@example.com, sam@example.com" />
+          <p className="secondary small">Their email addresses. You get an invite to send each of them. You can add more people later.</p>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+/** After creating a team or inviting people: the invites to send. */
+export function InvitesSheet({ invites, hostedHere, onClose }: { invites: Invite[]; hostedHere: boolean; onClose: () => void }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = (i: Invite) => {
+    if (!i.invite) return;
+    void navigator.clipboard.writeText(i.invite).then(() => setCopied(i.email));
+  };
+  const toSend = invites.filter((i) => i.invite);
+  return (
+    <Sheet title={invites.length ? "Invite your team" : "Team project created"} onClose={onClose}>
+      {invites.length === 0 && <p>The project is now a team project. Add people any time with Team &gt; Invite People.</p>}
+      {toSend.length > 0 && (
+        <p>
+          Send each person their invite (Messages, Mail, anything). They open Super PM, choose <strong>Team &gt; Join a Team</strong> and paste it.
+        </p>
+      )}
+      <ul className="shared-list">
+        {invites.map((i) => (
+          <li key={i.email}>
+            <span>
+              <strong>{i.email}</strong>
+              {i.note && <span className="secondary small"> · {i.note}</span>}
+            </span>
+            {i.invite && (
+              <button type="button" onClick={() => copy(i)}>
+                {copied === i.email ? "Copied ✓" : "Copy Invite"}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {hostedHere && toSend.length > 0 && (
+        <p className="secondary small">
+          For now your team lives on this Mac: keep Super PM open so the others can reach it, and they need to be on the same network (office or home
+          Wi-Fi). Connecting the team to a server later makes it work from anywhere.
+        </p>
+      )}
+    </Sheet>
+  );
+}
+
+/** Team > Join a Team: paste the invite you were sent. */
+export function JoinSheet({ onClose, onJoined }: { onClose: () => void; onJoined: (s: TeamStatus) => void }) {
+  const [invite, setInvite] = useState("");
+  const save = async () => {
+    try {
+      onJoined(await team.join(invite));
+      return null;
+    } catch (e) {
+      return errorMessage(e);
+    }
+  };
+  return (
+    <Sheet title="Join a Team" onClose={onClose} onSave={save} action="Join">
+      <div className="form">
+        <label htmlFor="jt-invite">Invite</label>
+        <div>
+          <textarea id="jt-invite" rows={3} value={invite} onChange={(e) => setInvite(e.target.value)} placeholder="SuperPM-Invite|…" autoFocus required />
+          <p className="secondary small">Paste the invite a teammate sent you. Then open the team's projects with Team &gt; Open Team Project.</p>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+/** Team > Invite People: more people for a team you own. */
+export function InvitePeopleSheet({ onClose, onInvited }: { onClose: () => void; onInvited: (invites: Invite[]) => void }) {
+  const [teams, setTeams] = useState<TeamView[] | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [choice, setChoice] = useState("");
+  const [emails, setEmails] = useState("");
+  useEffect(() => {
+    team.teams().then(
+      (t) => {
+        const mine = t.filter((x) => x.role === "owner");
+        setTeams(mine);
+        if (mine.length) setChoice(mine[0].id);
+      },
+      (e) => setProblem(errorMessage(e)),
+    );
+  }, []);
+  if (problem || teams?.length === 0) {
+    return (
+      <Sheet title="Invite People" onClose={onClose}>
+        <p>{problem ?? "You do not own a team yet. Open a project and choose Team > Create Team Project."}</p>
+      </Sheet>
+    );
+  }
+  const save = async () => {
+    try {
+      onInvited(await team.invite(choice, splitEmails(emails)));
+      return null;
+    } catch (e) {
+      return errorMessage(e);
+    }
+  };
+  return (
+    <Sheet title="Invite People" onClose={onClose} onSave={save} action="Invite">
+      <div className="form">
+        <label htmlFor="ip-team">Team</label>
+        <select id="ip-team" value={choice} onChange={(e) => setChoice(e.target.value)}>
+          {(teams ?? []).map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+        <label htmlFor="ip-emails">People</label>
+        <div>
+          <textarea id="ip-emails" rows={3} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="alex@example.com, sam@example.com" autoFocus required />
+          <p className="secondary small">Their email addresses. You get an invite to send each of them.</p>
         </div>
       </div>
     </Sheet>
@@ -196,7 +322,7 @@ export function OpenSharedSheet({ onClose, onOpened, onSignIn }: { onClose: () =
     }
   };
   return (
-    <Sheet title="Open Shared Project" onClose={onClose}>
+    <Sheet title="Open Team Project" onClose={onClose}>
       {problem && (
         <p role="alert" className="error">
           {problem}
@@ -211,10 +337,10 @@ export function OpenSharedSheet({ onClose, onOpened, onSignIn }: { onClose: () =
             onSignIn();
           }}
         >
-          Sign In…
+          Join a Team…
         </button>
       )}
-      {projects?.length === 0 && <p>No projects are shared with your teams yet. Open a project and choose Team &gt; Share Project with Team.</p>}
+      {projects?.length === 0 && <p>Your teams have no projects yet. Open a project and choose Team &gt; Create Team Project.</p>}
       {projects && projects.length > 0 && (
         <ul className="shared-list">
           {projects.map((p) => (

@@ -2,6 +2,7 @@ mod actions;
 mod document;
 mod edits;
 mod files;
+mod hosting;
 mod ipc;
 mod menu;
 mod platform;
@@ -50,6 +51,7 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
             actions::open_path(app, label.as_deref(), std::path::Path::new(&recent[menu::id::RECENT_PREFIX.len()..])).map(|_| ())
         }
         menu::id::OPEN_5K => ipc::open_generated(app, label.as_deref(), 5_000).map(|_| ()),
+        menu::id::SECOND_USER => team::open_second_user(),
         menu::id::OPEN_20K => ipc::open_generated(app, label.as_deref(), 20_000).map(|_| ()),
         // While a cell editor is open, Undo and Redo belong to the text being typed.
         menu::id::UNDO | menu::id::REDO if typing => return to_front(MENU_EVENT, id),
@@ -83,6 +85,7 @@ pub fn run() {
             app.set_menu(menu)?;
             app.manage(handles);
             actions::set_focused(app.handle(), actions::START_WINDOW);
+            team::on_launch(app.handle());
             // Local backups on a schedule (spec 4.7); only projects that changed are copied.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
@@ -126,6 +129,10 @@ pub fn run() {
             team::team_sign_in,
             team::team_sign_out,
             team::team_create_account,
+            team::team_create_project,
+            team::team_invite,
+            team::team_join,
+            team::open_second_user,
             team::team_teams,
             team::team_create_team,
             team::team_add_member,
