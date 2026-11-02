@@ -59,7 +59,11 @@ pub fn set_focused(app: &AppHandle, label: &str) {
 fn show(window: &WebviewWindow) {
     let _ = window.show();
     if window.label() != crate::portfolio::WINDOW {
-        crate::platform::show_tab_bar(window, false);
+        // The tab bar is rebuilt the first time each window comes forward (so it has the "+"),
+        // and after that only switched on if hidden.
+        static REBUILT: std::sync::Mutex<Option<HashSet<String>>> = std::sync::Mutex::new(None);
+        let first = REBUILT.lock().expect("lock").get_or_insert_with(HashSet::new).insert(window.label().to_owned());
+        crate::platform::show_tab_bar(window, first);
     }
     let _ = window.unminimize();
     let _ = window.set_focus();
