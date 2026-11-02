@@ -71,3 +71,59 @@ pub fn tab_into<R: Runtime>(app: &AppHandle<R>, front: tauri::WebviewWindow<R>, 
 
 #[cfg(not(target_os = "macos"))]
 pub fn tab_into<R: Runtime>(_app: &AppHandle<R>, _front: tauri::WebviewWindow<R>, _window: tauri::WebviewWindow<R>) {}
+
+/// Shows the "+" button at the right of the tab bar: macOS shows it for windows that answer
+/// `newWindowForTab:`, so that answer is added to the windows' class once. Clicking it opens
+/// the start page in a new tab (File > New Tab).
+#[cfg(target_os = "macos")]
+pub fn enable_new_tab_button(app: &AppHandle<tauri::Wry>, window: &tauri::WebviewWindow<tauri::Wry>) {
+    use objc2::runtime::{AnyObject, Imp, Sel};
+    use std::sync::OnceLock;
+
+    static APP: OnceLock<AppHandle<tauri::Wry>> = OnceLock::new();
+    static ADDED: std::sync::Once = std::sync::Once::new();
+    let _ = APP.set(app.clone());
+
+    unsafe extern "C-unwind" fn new_window_for_tab(_this: *mut AnyObject, _cmd: Sel, _sender: *mut AnyObject) {
+        if let Some(app) = APP.get() {
+            let app = app.clone();
+            // Off the AppKit call: opening a window from inside it is not safe everywhere.
+            tauri::async_runtime::spawn(async move { crate::actions::show_home(&app) });
+        }
+    }
+
+    let Ok(ns) = window.ns_window() else { return };
+    ADDED.call_once(|| {
+        // SAFETY: `ns` is the window's live NSWindow; adding a method to its class is what the
+        // Objective-C runtime is for, and the method's types match `v@:@` (void, self, _cmd, id).
+        unsafe {
+            let class = (*(ns as *const AnyObject)).class() as *const objc2::runtime::AnyClass as *mut objc2::runtime::AnyClass;
+            let imp: Imp = std::mem::transmute::<unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject), Imp>(new_window_for_tab);
+            objc2::ffi::class_addMethod(class, objc2::sel!(newWindowForTab:), imp, c"v@:@".as_ptr());
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn enable_new_tab_button(_app: &AppHandle<tauri::Wry>, _window: &tauri::WebviewWindow<tauri::Wry>) {}
+
+/// Keeps the tab bar showing even with one tab, so its "+" button is always there (as Safari
+/// can). Must run on the main thread; this hands the work to it.
+#[cfg(target_os = "macos")]
+pub fn show_tab_bar(window: &tauri::WebviewWindow<tauri::Wry>) {
+    let w = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use objc2_app_kit::NSWindow;
+        let Ok(ns) = w.ns_window() else { return };
+        // SAFETY: the window's live NSWindow, on the main thread.
+        let ns = unsafe { &*(ns as *const NSWindow) };
+        if let Some(group) = ns.tabGroup()
+            && !group.isTabBarVisible()
+        {
+            ns.toggleTabBar(None);
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn show_tab_bar(_window: &tauri::WebviewWindow<tauri::Wry>) {}

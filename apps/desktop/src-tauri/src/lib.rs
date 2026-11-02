@@ -95,6 +95,9 @@ pub fn run() {
             app.set_menu(menu)?;
             app.manage(handles);
             actions::set_focused(app.handle(), actions::START_WINDOW);
+            if let Some(main) = app.get_webview_window(actions::START_WINDOW) {
+                platform::enable_new_tab_button(app.handle(), &main);
+            }
             team::on_launch(app.handle());
             // Local backups on a schedule (spec 4.7); only projects that changed are copied.
             let handle = app.handle().clone();

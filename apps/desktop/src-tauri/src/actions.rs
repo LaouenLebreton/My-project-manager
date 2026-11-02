@@ -58,6 +58,9 @@ pub fn set_focused(app: &AppHandle, label: &str) {
 
 fn show(window: &WebviewWindow) {
     let _ = window.show();
+    if window.label() != crate::portfolio::WINDOW {
+        crate::platform::show_tab_bar(window);
+    }
     let _ = window.unminimize();
     let _ = window.set_focus();
 }
@@ -95,7 +98,9 @@ fn create_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
         let p = pos.to_logical::<f64>(scale);
         builder = builder.position(p.x + 28.0, p.y + 28.0);
     }
-    builder.build()
+    let window = builder.build()?;
+    crate::platform::enable_new_tab_button(app, &window);
+    Ok(window)
 }
 
 /// Makes `window` a tab of the front project or Home window, unless it already is that window
