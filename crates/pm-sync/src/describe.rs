@@ -131,7 +131,7 @@ fn one(p: &Project, cmd: &Command) -> Vec<String> {
             many => format!("deleted {} tasks ({})", many.len(), names(p, many)),
         },
         Command::SetTask { id, change } => {
-            let Some(t) = p.tasks.get(id) else { return vec![format!("changed a task that no longer exists")] };
+            let Some(t) = p.tasks.get(id) else { return vec!["changed a task that no longer exists".into()] };
             let n = quoted(&t.name);
             match change {
                 TaskChange::Name(new) => format!("renamed {n} to {}", quoted(new)),
