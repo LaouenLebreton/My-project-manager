@@ -220,6 +220,34 @@ export function install() {
             : { email, invite: null, note: "Could not be invited: type an email address such as alex@example.com." },
         );
       switch (cmd) {
+        case "portfolio_data": {
+          const proj = (name: string, status: string, start: string, finish: string, done: number, slip: number | null, reasons: string[], shared = false) => ({
+            path: `/Users/me/${name}.pmproj`, name, shared, status, reasons, start, finish, baselineFinish: slip === null ? null : finish, finishVarianceMinutes: slip,
+            percentComplete: done, costCents: 1_250_000 + done * 1000, baselineCostCents: slip === null ? null : 1_200_000, currency: "€", overallocated: 0, overdue: 0,
+            nextMilestone: { name: "Go live", date: finish }, milestones: [{ name: "Design approved", date: start.replace("-05", "-12") }, { name: "Go live", date: finish }],
+          });
+          const week = (minutes: number, by: [string, number][]) => ({ minutes, capacity: 2400, projects: by });
+          return {
+            today: "2026-11-02T09:00:00",
+            weeks: ["2026-10-26", "2026-11-02", "2026-11-09", "2026-11-16"],
+            projects: [
+              proj("Office move", "late", "2026-10-05T08:00:00", "2026-12-04T17:00:00", 45, 1440, ["finishes 3 working days later than its baseline", "2 tasks should have finished by now"], true),
+              proj("Website relaunch", "atRisk", "2026-10-19T08:00:00", "2027-01-29T17:00:00", 20, 0, ["1 person is over-allocated"]),
+              proj("Year-end audit", "onTrack", "2026-11-02T08:00:00", "2026-12-18T17:00:00", 5, null, []),
+              proj("Summer event", "done", "2026-06-01T08:00:00", "2026-09-30T17:00:00", 100, 0, []),
+            ],
+            people: [
+              { name: "Alex", projectCount: 2, weeks: [week(2400, [["Office move", 2400]]), week(3360, [["Office move", 1920], ["Website relaunch", 1440]]), week(2880, [["Website relaunch", 2880]]), week(1200, [["Website relaunch", 1200]])] },
+              { name: "Sam", projectCount: 1, weeks: [week(0, []), week(1440, [["Year-end audit", 1440]]), week(2400, [["Year-end audit", 2400]]), week(2400, [["Year-end audit", 2400]])] },
+            ],
+          };
+        }
+        case "portfolio_add":
+          return false;
+        case "portfolio_remove":
+        case "portfolio_open":
+        case "open_portfolio":
+          return null;
         case "team_status":
           return teamStatus();
         case "team_sign_in": {

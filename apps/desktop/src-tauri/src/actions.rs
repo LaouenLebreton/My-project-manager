@@ -68,7 +68,7 @@ pub fn show_any_window(app: &AppHandle) {
     if windows.values().any(|w| w.is_visible().unwrap_or(false)) {
         return;
     }
-    match windows.get(START_WINDOW).or_else(|| windows.values().next()) {
+    match windows.get(START_WINDOW).or_else(|| windows.iter().find(|(l, _)| l.as_str() != crate::portfolio::WINDOW).map(|(_, w)| w)) {
         Some(w) => show(w),
         None => {
             if let Ok(w) = create_window(app, START_WINDOW) {
@@ -99,7 +99,8 @@ fn create_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
 fn window_for_new_project(app: &AppHandle, asking: Option<&str>) -> String {
     let docs = app.state::<AppState>();
     let docs = docs.docs.lock().expect("lock");
-    let empty = |label: &str| !docs.contains_key(label) && app.get_webview_window(label).is_some();
+    // The portfolio window never holds a project.
+    let empty = |label: &str| label != crate::portfolio::WINDOW && !docs.contains_key(label) && app.get_webview_window(label).is_some();
     if let Some(label) = asking.filter(|l| empty(l)) {
         return label.to_owned();
     }
@@ -225,7 +226,7 @@ fn documents_dir(app: &AppHandle) -> Option<PathBuf> {
 }
 
 /// A dialog attached to its window as a sheet, as Mac apps do.
-fn dialog(app: &AppHandle, parent: Option<&str>) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+pub(crate) fn dialog(app: &AppHandle, parent: Option<&str>) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
     let mut d = app.dialog().file();
     if let Some(w) = parent.and_then(|l| app.get_webview_window(l)) {
         d = d.set_parent(&w);

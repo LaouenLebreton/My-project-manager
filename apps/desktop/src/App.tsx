@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, chat, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
@@ -23,6 +24,9 @@ import { accessLabel } from "./permissions";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
 import type { ReportView } from "./bindings/ReportView";
+
+/** Window > Portfolio, from inside the page (start screen, command bar). */
+const openPortfolio = () => invoke("open_portfolio").catch(() => {});
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -250,6 +254,7 @@ export function App() {
       { name: "Show Board (Not started / In progress / Done)", shortcut: "⌘6", run: () => setView("board") },
       { name: "Show History (every change in a team project)", shortcut: "⌘7", run: () => setView("history") },
       { name: "Show Chat (teams, channels, posts)", shortcut: "⌘8", run: () => setView("chat") },
+      { name: "Open Portfolio (all projects)", shortcut: "⌘0", run: () => void openPortfolio() },
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
@@ -371,6 +376,7 @@ export function App() {
           </button>
           <button onClick={() => run(api.openProject)}>Open…</button>
           <button onClick={() => run(api.openSample)}>Open Sample Project</button>
+          <button onClick={() => void openPortfolio()}>Portfolio</button>
           <button onClick={() => setTeamSheet(teamStatus?.user ? "open" : "join")}>{teamStatus?.user ? "Open Team Project…" : "Join a Team…"}</button>
         </div>
         {recent.length > 0 && (

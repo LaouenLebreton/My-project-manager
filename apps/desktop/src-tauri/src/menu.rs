@@ -62,6 +62,7 @@ pub mod id {
     pub const TEAM_INVITE: &str = "team.invite";
     pub const TEAM_MEMBERS: &str = "team.members";
     pub const TEAM_MOVE: &str = "team.move";
+    pub const PORTFOLIO: &str = "window.portfolio";
     pub const SECOND_USER: &str = "dev.second_user";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
@@ -239,6 +240,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
         .maximize()
+        .separator()
+        .item(&enabled(id::PORTFOLIO, "Portfolio", Some("CmdOrCtrl+0"))?)
         .separator()
         .close_window()
         .build()?;

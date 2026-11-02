@@ -6,6 +6,7 @@ mod hosting;
 mod ipc;
 mod menu;
 mod platform;
+mod portfolio;
 mod sample;
 mod team;
 
@@ -52,6 +53,10 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
         }
         menu::id::OPEN_5K => ipc::open_generated(app, label.as_deref(), 5_000).map(|_| ()),
         menu::id::SECOND_USER => team::open_second_user(),
+        menu::id::PORTFOLIO => {
+            portfolio::show(app);
+            Ok(())
+        }
         menu::id::OPEN_20K => ipc::open_generated(app, label.as_deref(), 20_000).map(|_| ()),
         // While a cell editor is open, Undo and Redo belong to the text being typed.
         menu::id::UNDO | menu::id::REDO if typing => return to_front(MENU_EVENT, id),
@@ -102,6 +107,8 @@ pub fn run() {
                 WindowEvent::Focused(true) => actions::set_focused(app, window.label()),
                 // Closing a window closes its project. The last window stays (hidden) so the
                 // app keeps running in the Dock with a start window, like Mac document apps.
+                // The portfolio window just closes.
+                WindowEvent::CloseRequested { .. } if window.label() == portfolio::WINDOW => {}
                 WindowEvent::CloseRequested { api, .. } => {
                     if actions::close_window(app, window.label()) {
                         api.prevent_close();
@@ -134,6 +141,11 @@ pub fn run() {
             team::team_invite,
             team::team_join,
             team::team_move,
+            portfolio::portfolio_data,
+            portfolio::portfolio_add,
+            portfolio::portfolio_remove,
+            portfolio::portfolio_open,
+            portfolio::open_portfolio,
             team::team_history,
             team::team_revert,
             team::team_members,

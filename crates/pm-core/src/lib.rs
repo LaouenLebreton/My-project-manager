@@ -10,6 +10,7 @@ pub mod earned;
 pub mod leveling;
 pub mod model;
 pub mod outline;
+pub mod portfolio;
 pub mod resources;
 pub mod schedule;
 pub mod text;

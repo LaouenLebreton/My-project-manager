@@ -16,6 +16,7 @@ import type { Invite } from "./bindings/Invite";
 import type { TeamProject } from "./bindings/TeamProject";
 import type { HistoryPage } from "./bindings/HistoryPage";
 import type { MoveResult } from "./bindings/MoveResult";
+import type { PortfolioView } from "./bindings/PortfolioView";
 import type { Member } from "./bindings/Member";
 import type { MemberLimits } from "./bindings/MemberLimits";
 import type { ChatChannel } from "./bindings/ChatChannel";
@@ -75,6 +76,15 @@ export const team = {
   members: () => invoke<Member[]>("team_members"),
   setMember: (userId: string, role: string, limits: MemberLimits) => invoke<void>("team_set_member", { userId, role, limits }),
   open: (projectId: string) => invoke<Snapshot | null>("team_open", { projectId }),
+};
+
+/** The Portfolio window. */
+export const portfolio = {
+  data: () => invoke<PortfolioView>("portfolio_data"),
+  /** Resolves true if a project was chosen. */
+  add: () => invoke<boolean>("portfolio_add"),
+  remove: (path: string) => invoke<void>("portfolio_remove", { path }),
+  open: (path: string) => invoke<void>("portfolio_open", { path }),
 };
 
 /** Chat (Teams model): teams, channels, posts and replies. */
