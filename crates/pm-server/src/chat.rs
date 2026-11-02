@@ -67,6 +67,7 @@ pub fn make_channel(s: &dyn crate::storage::Storage, team: Uuid, name: &str, pro
 
 /// The team's channels with the caller's unread counts; General first, created if missing.
 async fn channels(State(state): State<AppState>, Auth(me): Auth, Path(team): Path<Uuid>) -> ApiResult<Vec<Channel>> {
+    crate::transfer::not_moved(&state, team).await?;
     let list = db(&state, move |s| {
         if s.team_role(team, me.id)?.is_none() {
             return Ok(None);

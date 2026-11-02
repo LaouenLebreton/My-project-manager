@@ -10,6 +10,7 @@ pub mod live;
 pub mod permissions;
 pub mod sharing;
 pub mod storage;
+pub mod transfer;
 
 use std::sync::Arc;
 
@@ -129,6 +130,7 @@ pub fn router(state: AppState) -> Router {
         .merge(sharing::routes())
         .merge(live::routes())
         .merge(chat::routes())
+        .merge(transfer::routes())
         .with_state(state)
 }
 

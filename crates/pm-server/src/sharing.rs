@@ -37,7 +37,7 @@ fn forbidden(message: &str) -> ApiError {
 /// The caller's place in a project: its record, their role and limits. Projects of teams they
 /// are not in look the same as projects that do not exist.
 pub async fn access(state: &AppState, project: Uuid, user: Uuid) -> Result<(ProjectRecord, Role, Limits), ApiError> {
-    db(state, move |s| {
+    let found = db(state, move |s| {
         let Some(record) = s.project_record(project)? else { return Ok(None) };
         if s.team_role(record.team_id, user)?.is_none() {
             return Ok(None);
@@ -48,7 +48,10 @@ pub async fn access(state: &AppState, project: Uuid, user: Uuid) -> Result<(Proj
         Ok(Some((record, role, limits)))
     })
     .await?
-    .ok_or_else(|| not_found("project"))
+    .ok_or_else(|| not_found("project"))?;
+    // A team that moved to another server is refused, saying where it went.
+    crate::transfer::not_moved(state, found.0.team_id).await?;
+    Ok(found)
 }
 
 #[derive(Deserialize)]

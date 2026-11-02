@@ -179,6 +179,16 @@ pub trait Storage: Send + Sync + 'static {
     fn delete_post(&self, id: Uuid) -> Result<()>;
     /// Adds the user's emoji to the post, or takes it away if it was there.
     fn toggle_reaction(&self, post: Uuid, user: Uuid, emoji: &str) -> Result<()>;
+
+    /// Everything about a team, to move it to another server (projects' `data` is the last
+    /// saved copy; the caller replaces it with the latest state).
+    fn export_team(&self, team: Uuid) -> Result<crate::transfer::TeamExport>;
+    /// Creates a team from an export, in one transaction: `new_users` are created first, the
+    /// importer becomes an owner. Fails with `ProjectExists` if it was imported already.
+    fn import_team(&self, bundle: &crate::transfer::TeamExport, importer: Uuid, new_users: &[(User, String)]) -> Result<Uuid>;
+    fn set_team_moved(&self, team: Uuid, to: Option<&str>) -> Result<()>;
+    /// Where the team went, if it moved.
+    fn team_moved(&self, team: Uuid) -> Result<Option<String>>;
 }
 
 /// Forward-only migrations; `PRAGMA user_version` holds the version.
@@ -289,6 +299,10 @@ const MIGRATIONS: &[&str] = &[
         emoji   TEXT NOT NULL,
         PRIMARY KEY (post_id, user_id, emoji)
     );
+    "#,
+    // 6 -> 7: teams moved to another server.
+    r#"
+    ALTER TABLE team ADD COLUMN moved_to TEXT;
     "#,
 ];
 
@@ -760,5 +774,153 @@ impl Storage for SqliteStorage {
         )?;
         let rows = stmt.query_map([user.to_string(), team.to_string()], |r| Ok((uuid_at(r, 0)?, r.get::<_, u32>(1)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn export_team(&self, team: Uuid) -> Result<crate::transfer::TeamExport> {
+        use crate::transfer::*;
+        let conn = self.conn();
+        let t = team.to_string();
+        let name: String = conn.query_row("SELECT name FROM team WHERE id = ?1", [&t], |r| r.get(0))?;
+        let emails: std::collections::HashMap<String, String> = conn
+            .prepare("SELECT id, email FROM user")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let email = |id: &str| emails.get(id).cloned().unwrap_or_default();
+        let members = conn
+            .prepare("SELECT u.name, u.email, m.role FROM team_member m JOIN user u ON u.id = m.user_id WHERE m.team_id = ?1")?
+            .query_map([&t], |r| Ok(ExMember { name: r.get(0)?, email: r.get(1)?, role: team_role_at(r, 2)? }))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut projects = Vec::new();
+        let rows: Vec<(String, String, String, String, i64, String)> = conn
+            .prepare("SELECT id, name, owner_id, created_at, version, data FROM project WHERE team_id = ?1 ORDER BY created_at")?
+            .query_map([&t], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (id, pname, owner, created_at, version, data) in rows {
+            let changes = conn
+                .prepare("SELECT version, client_change, author_id, at, label, summary, command, inverse FROM change WHERE project_id = ?1 ORDER BY version")?
+                .query_map([&id], |r| {
+                    Ok(ExChange {
+                        version: r.get(0)?,
+                        client_change: uuid_at(r, 1)?,
+                        author_email: email(&r.get::<_, String>(2)?),
+                        at: r.get(3)?,
+                        label: r.get(4)?,
+                        summary: r.get(5)?,
+                        command: r.get(6)?,
+                        inverse: r.get(7)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let pm = conn
+                .prepare("SELECT user_id, role, limits FROM project_member WHERE project_id = ?1")?
+                .query_map([&id], |r| Ok((email(&r.get::<_, String>(0)?), r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let id = Uuid::parse_str(&id).map_err(|e| StorageError::Damaged(e.to_string()))?;
+            projects.push(ExProject { id, name: pname, owner_email: email(&owner), created_at, version, data, changes, members: pm });
+        }
+        let mut channels = Vec::new();
+        let rows: Vec<Channel> = conn
+            .prepare("SELECT id, team_id, name, project_id, created_at FROM channel WHERE team_id = ?1 ORDER BY created_at")?
+            .query_map([&t], channel_from_row)?
+            .collect::<rusqlite::Result<_>>()?;
+        for c in rows {
+            let mut posts = conn
+                .prepare("SELECT id, parent_id, author_id, at, body, edited_at, deleted FROM post WHERE channel_id = ?1 ORDER BY id")?
+                .query_map([c.id.to_string()], |r| {
+                    Ok(ExPost {
+                        id: uuid_at(r, 0)?,
+                        parent_id: opt_uuid_at(r, 1)?,
+                        author_email: email(&r.get::<_, String>(2)?),
+                        at: r.get(3)?,
+                        body: r.get(4)?,
+                        edited_at: r.get(5)?,
+                        deleted: r.get(6)?,
+                        reactions: Vec::new(),
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut stmt = conn.prepare("SELECT emoji, user_id FROM reaction WHERE post_id = ?1 ORDER BY rowid")?;
+            for p in &mut posts {
+                p.reactions = stmt.query_map([p.id.to_string()], |r| Ok((r.get::<_, String>(0)?, email(&r.get::<_, String>(1)?))))?.collect::<rusqlite::Result<_>>()?;
+            }
+            channels.push(ExChannel { id: c.id, name: c.name, project_id: c.project_id, created_at: c.created_at, posts });
+        }
+        Ok(TeamExport { name, members, projects, channels })
+    }
+
+    fn import_team(&self, b: &crate::transfer::TeamExport, importer: Uuid, new_users: &[(User, String)]) -> Result<Uuid> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        for (u, hash) in new_users {
+            tx.execute(
+                "INSERT OR IGNORE INTO user (id, name, email, password_hash, is_admin, created_at) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+                params![u.id.to_string(), u.name, u.email, hash, u.created_at],
+            )?;
+        }
+        let ids: std::collections::HashMap<String, String> = tx
+            .prepare("SELECT email, id FROM user")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let me = importer.to_string();
+        let id_of = |email: &str| ids.get(email).cloned().unwrap_or_else(|| me.clone());
+        let team = Uuid::now_v7();
+        let t = team.to_string();
+        let now = jiff::Timestamp::now().to_string();
+        tx.execute("INSERT INTO team (id, name, created_at) VALUES (?1, ?2, ?3)", params![t, b.name.trim(), now])?;
+        for m in &b.members {
+            let role = if m.role == TeamRole::Owner { "owner" } else { "member" };
+            tx.execute("INSERT OR IGNORE INTO team_member (team_id, user_id, role) VALUES (?1, ?2, ?3)", params![t, id_of(&m.email), role])?;
+        }
+        tx.execute(
+            "INSERT INTO team_member (team_id, user_id, role) VALUES (?1, ?2, 'owner') ON CONFLICT (team_id, user_id) DO UPDATE SET role = 'owner'",
+            params![t, me],
+        )?;
+        for p in &b.projects {
+            let inserted = tx.execute(
+                "INSERT OR IGNORE INTO project (id, team_id, name, owner_id, version, data, created_at, updated_at, data_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?5)",
+                params![p.id.to_string(), t, p.name, id_of(&p.owner_email), p.version, p.data, p.created_at, now],
+            )?;
+            if inserted == 0 {
+                return Err(StorageError::ProjectExists);
+            }
+            for c in &p.changes {
+                tx.execute(
+                    "INSERT INTO change (project_id, version, author_id, at, label, command, client_change, summary, inverse) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![p.id.to_string(), c.version, id_of(&c.author_email), c.at, c.label, c.command, c.client_change.to_string(), c.summary, c.inverse],
+                )?;
+            }
+            for (email, role, limits) in &p.members {
+                tx.execute(
+                    "INSERT OR REPLACE INTO project_member (project_id, user_id, role, limits) VALUES (?1, ?2, ?3, ?4)",
+                    params![p.id.to_string(), id_of(email), role, limits],
+                )?;
+            }
+        }
+        for c in &b.channels {
+            tx.execute(
+                "INSERT INTO channel (id, team_id, name, project_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![c.id.to_string(), t, c.name, c.project_id.map(|x| x.to_string()), c.created_at],
+            )?;
+            for p in &c.posts {
+                tx.execute(
+                    "INSERT INTO post (id, channel_id, parent_id, author_id, at, body, edited_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![p.id.to_string(), c.id.to_string(), p.parent_id.map(|x| x.to_string()), id_of(&p.author_email), p.at, p.body, p.edited_at, p.deleted],
+                )?;
+                for (emoji, email) in &p.reactions {
+                    tx.execute("INSERT OR IGNORE INTO reaction (post_id, user_id, emoji) VALUES (?1, ?2, ?3)", params![p.id.to_string(), id_of(email), emoji])?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(team)
+    }
+
+    fn set_team_moved(&self, team: Uuid, to: Option<&str>) -> Result<()> {
+        self.conn().execute("UPDATE team SET moved_to = ?2 WHERE id = ?1", params![team.to_string(), to])?;
+        Ok(())
+    }
+
+    fn team_moved(&self, team: Uuid) -> Result<Option<String>> {
+        Ok(self.conn().query_row("SELECT moved_to FROM team WHERE id = ?1", [team.to_string()], |r| r.get(0)).optional()?.flatten())
     }
 }

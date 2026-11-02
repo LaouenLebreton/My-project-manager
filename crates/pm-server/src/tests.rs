@@ -431,3 +431,60 @@ async fn posts_can_be_edited_deleted_and_reacted_to() {
     let (status, deleted) = call(&app, "DELETE", &format!("/api/posts/{id}"), Some(&p[0].0), None).await;
     assert_eq!((status, deleted["deleted"].as_bool(), deleted["body"].as_str()), (StatusCode::OK, Some(true), Some("")));
 }
+
+#[tokio::test]
+async fn a_team_moves_to_another_server_with_its_history_and_chat() {
+    // Source: the team as it lives on someone's Mac.
+    let source = server();
+    let p = people(&source).await;
+    let (id, task) = shared(&source, &p).await;
+    let edit = |command: Value| json!({ "clientChange": uuid::Uuid::now_v7().to_string(), "command": command });
+    call(&source, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(rename(&task, "Site survey")))).await;
+    let (_, teams) = call(&source, "GET", "/api/teams", Some(&p[0].0), None).await;
+    let team_id = teams[0]["team"]["id"].as_str().unwrap().to_owned();
+    let (_, channels) = call(&source, "GET", &format!("/api/teams/{team_id}/channels"), Some(&p[0].0), None).await;
+    let general = channels.as_array().unwrap().iter().find(|c| c["name"] == "General").unwrap()["id"].as_str().unwrap().to_owned();
+    let (_, post) = call(&source, "POST", &format!("/api/channels/{general}/posts"), Some(&p[2].0), Some(json!({ "body": "Hello from the Mac" }))).await;
+    call(&source, "POST", &format!("/api/posts/{}/reactions", post["id"].as_str().unwrap()), Some(&p[1].0), Some(json!({ "emoji": "🎉" }))).await;
+
+    // Only an owner exports.
+    let (status, _) = call(&source, "GET", &format!("/api/teams/{team_id}/export"), Some(&p[1].0), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, bundle) = call(&source, "GET", &format!("/api/teams/{team_id}/export"), Some(&p[0].0), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Target: an online server where only the owner has an account so far.
+    let target = router(AppState::with_config(SqliteStorage::in_memory().unwrap(), Config { public_url: Some("https://pm.example.com".into()), open_signup: true }));
+    let (_, me) = call(&target, "POST", "/api/signup", None, Some(account("Laouen", "laouen@example.com"))).await;
+    let me = me["token"].as_str().unwrap().to_owned();
+    let (status, imported) = call(&target, "POST", "/api/teams/import", Some(&me), Some(bundle.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let invited: Vec<&str> = imported["invites"].as_array().unwrap().iter().map(|i| i["email"].as_str().unwrap()).collect();
+    assert_eq!(invited, ["alex@example.com", "sam@example.com"], "the others get new invites");
+    assert_eq!(imported["invites"][0]["server"], "https://pm.example.com");
+    let (status, _) = call(&target, "POST", "/api/teams/import", Some(&me), Some(bundle)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "imported once");
+
+    // Same project, same version, same history; the chat came along.
+    let (_, opened) = call(&target, "GET", &format!("/api/projects/{id}"), Some(&me), None).await;
+    assert_eq!((opened["record"]["version"].as_i64(), opened["role"].as_str()), (Some(1), Some("owner")));
+    assert_eq!(opened["project"]["tasks"][&task]["name"], "Site survey");
+    let (_, history) = call(&target, "GET", &format!("/api/projects/{id}/history"), Some(&me), None).await;
+    assert_eq!(history["changes"][0]["authorName"], "Alex");
+    let new_team = imported["teamId"].as_str().unwrap();
+    let (_, chans) = call(&target, "GET", &format!("/api/teams/{new_team}/channels"), Some(&me), None).await;
+    let (_, page) = call(&target, "GET", &format!("/api/channels/{general}/posts"), Some(&me), None).await;
+    assert!(chans.as_array().unwrap().len() >= 2);
+    assert_eq!(page["threads"][0]["post"]["body"], "Hello from the Mac");
+    assert_eq!(page["threads"][0]["post"]["reactions"][0]["emoji"], "🎉");
+    // Alex signs in with the invite code and carries on editing at version 2.
+    let code = imported["invites"][0]["code"].as_str().unwrap();
+    let (_, alex) = call(&target, "POST", "/api/sessions", None, Some(json!({ "email": "alex@example.com", "password": code }))).await;
+    let (_, next) = call(&target, "POST", &format!("/api/projects/{id}/changes"), Some(alex["token"].as_str().unwrap()), Some(edit(rename(&task, "Survey (online)")))).await;
+    assert_eq!(next["version"], 2);
+
+    // The source says where the team went.
+    call(&source, "POST", &format!("/api/teams/{team_id}/moved"), Some(&p[0].0), Some(json!({ "to": "https://pm.example.com/" }))).await;
+    let (status, body) = call(&source, "GET", &format!("/api/projects/{id}/access"), Some(&p[1].0), None).await;
+    assert_eq!((status, body["message"].as_str()), (StatusCode::GONE, Some("this team has moved to https://pm.example.com")));
+}
