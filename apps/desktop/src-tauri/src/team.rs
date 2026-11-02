@@ -407,6 +407,82 @@ pub async fn team_create_project(
     Ok(TeamProject { snapshot, invites })
 }
 
+/// One line of the History view.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    #[ts(type = "number")]
+    pub version: i64,
+    pub author_name: String,
+    /// RFC 3339.
+    pub at: String,
+    /// What they did, in plain words ("changed the duration of “Survey” from 3 days to 5 days").
+    pub summary: String,
+    /// Tasks the change touched, to show them.
+    pub task_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryPage {
+    /// Newest first.
+    pub entries: Vec<HistoryEntry>,
+    /// The user owns the project and may revert changes.
+    pub can_revert: bool,
+    /// Older changes can be loaded.
+    pub has_more: bool,
+}
+
+const HISTORY_PAGE: usize = 100;
+
+/// The shared project in this window, and the account to reach it with.
+fn shared_in(app: &AppHandle, label: &str) -> Result<(Account, Uuid), IpcError> {
+    let (server, project) = with_doc(app, label, |d| Ok(d.team.as_ref().map(|t| (t.server.clone(), d.project.id.0))))?.ok_or_else(|| err("this project is not a team project"))?;
+    let a = account(app).filter(|a| a.server == server).ok_or_else(|| err("join the team again (Team > Join a Team) to see this project's history"))?;
+    Ok((a, project))
+}
+
+/// The History view: changes newest first, a page at a time (`before`: the oldest version
+/// already shown).
+#[tauri::command]
+pub async fn team_history(app: AppHandle, window: WebviewWindow, before: Option<i64>) -> Result<HistoryPage, IpcError> {
+    let (a, project) = shared_in(&app, window.label())?;
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Raw {
+        changes: Vec<Change>,
+        can_revert: bool,
+    }
+    let query = match before {
+        Some(b) => format!("?limit={HISTORY_PAGE}&before={b}"),
+        None => format!("?limit={HISTORY_PAGE}"),
+    };
+    let raw: Raw = call(reqwest::Method::GET, &a.server, &format!("/api/projects/{project}/history{query}"), Some(&a.token), None).await?;
+    let has_more = raw.changes.len() == HISTORY_PAGE;
+    let entries = raw
+        .changes
+        .into_iter()
+        .map(|c| HistoryEntry {
+            version: c.version,
+            author_name: c.author_name,
+            at: c.at,
+            summary: if c.summary.is_empty() { c.label.to_lowercase() } else { c.summary },
+            task_ids: pm_sync::describe::tasks(&c.command).into_iter().map(|t| t.0.to_string()).collect(),
+        })
+        .collect();
+    Ok(HistoryPage { entries, can_revert: raw.can_revert, has_more })
+}
+
+/// The owner reverts a change; the result arrives like any other change.
+#[tauri::command]
+pub async fn team_revert(app: AppHandle, window: WebviewWindow, version: i64) -> Result<(), IpcError> {
+    let (a, project) = shared_in(&app, window.label())?;
+    let _: Change = call(reqwest::Method::POST, &a.server, &format!("/api/projects/{project}/revert"), Some(&a.token), Some(serde_json::json!({ "version": version }))).await?;
+    Ok(())
+}
+
 /// Team > Invite People: adds more people to a team.
 #[tauri::command]
 pub async fn team_invite(app: AppHandle, team_id: String, emails: Vec<String>) -> Result<Vec<Invite>, IpcError> {

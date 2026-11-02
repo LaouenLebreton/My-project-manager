@@ -84,7 +84,7 @@ revert a change (applied as a new change, so the log stays complete).
    to the server. In the app: Team menu (Sign In, Open Shared Project, Share Project with
    Team, Sign Out), a sync indicator in the header, notices when an edit is refused or no
    longer fits. Shared projects are kept in the app's Shared folder.
-4. **Change log view** and owner revert.
+4. **[Done]** **Change log view** and owner revert.
 5. **Permissions** per member, enforced on the server, reflected in the app.
 6. **Teams, channels, posts:** server API and storage, then the Chat pane.
 7. **Cloud scale:** Postgres storage, multi-instance notifications, Docker image, deployment

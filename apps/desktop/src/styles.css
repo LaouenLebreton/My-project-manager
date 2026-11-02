@@ -1258,3 +1258,69 @@ input.wide {
 .segmented button {
   white-space: nowrap;
 }
+
+/* History: who changed what, newest first. */
+.history {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.history-filters {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.history-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 16px;
+}
+.history-empty {
+  padding: 16px 0;
+}
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.history-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--gantt-grid);
+}
+.history-list .avatar {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--gantt-accent) 25%, Canvas);
+  color: var(--gantt-accent);
+  font-weight: 600;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+}
+.history-text {
+  flex: 1;
+  min-width: 0;
+}
+.history-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.history-list li .history-actions button:not(.link) {
+  opacity: 0;
+}
+.history-list li:hover .history-actions button,
+.history-list li:focus-within .history-actions button {
+  opacity: 1;
+}
+.history-more {
+  margin-top: 10px;
+}

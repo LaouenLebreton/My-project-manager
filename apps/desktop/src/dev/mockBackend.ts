@@ -245,6 +245,24 @@ export function install() {
           if (!String(args.invite).startsWith("SuperPM-Invite|")) fail("that does not look like a Super PM invite; copy the whole text you were sent, starting with SuperPM-Invite");
           state.account = { server: "http://192.168.1.20:7878", name: "Alex", email: "alex@example.com" };
           return teamStatus();
+        case "team_history": {
+          const people = ["Alex", "Sam", "Laouen"];
+          const before = (args.before as number | null) ?? 41;
+          const entries = Array.from({ length: Math.min(20, before - 1) }, (_, k) => {
+            const version = before - 1 - k;
+            const row = state.rows[(version * 3) % state.rows.length];
+            return {
+              version,
+              authorName: people[version % 3],
+              at: new Date(Date.now() - k * 47 * 60_000).toISOString(),
+              summary: version % 2 ? `changed the duration of “${row.name}” from 1 day to ${version % 5 + 2} days` : `renamed “Old name” to “${row.name}”`,
+              taskIds: [row.id],
+            };
+          });
+          return { entries, canRevert: true, hasMore: before - 21 > 1 };
+        }
+        case "team_revert":
+          return null;
         case "team_sign_out":
           state.account = null;
           return teamStatus();
