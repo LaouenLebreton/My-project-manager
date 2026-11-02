@@ -15,6 +15,7 @@ import type { TeamView } from "./bindings/TeamView";
 import type { Invite } from "./bindings/Invite";
 import type { TeamProject } from "./bindings/TeamProject";
 import type { HistoryPage } from "./bindings/HistoryPage";
+import type { MoveResult } from "./bindings/MoveResult";
 import type { Member } from "./bindings/Member";
 import type { MemberLimits } from "./bindings/MemberLimits";
 import type { ChatChannel } from "./bindings/ChatChannel";
@@ -22,7 +23,7 @@ import type { ChatPage } from "./bindings/ChatPage";
 import type { ChatPost } from "./bindings/ChatPost";
 import type { ChatTeam } from "./bindings/ChatTeam";
 
-export type { Edit, EditResult, HistoryPage, Invite, Member, MemberLimits, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamProject, TeamStatus, TeamView };
+export type { Edit, EditResult, HistoryPage, Invite, Member, MemberLimits, MoveResult, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamProject, TeamStatus, TeamView };
 
 /** Rejects with an IpcError whose message can be shown to the user as is. */
 export const api = {
@@ -65,6 +66,9 @@ export const team = {
   invite: (teamId: string, emails: string[]) => invoke<Invite[]>("team_invite", { teamId, emails }),
   /** With the invite text someone sent. */
   join: (invite: string) => invoke<TeamStatus>("team_join", { invite }),
+  /** Moves every team you own to another server and carries on there. */
+  move: (server: string, email: string, password: string, name: string | null, mode: "setup" | "signup" | null) =>
+    invoke<MoveResult>("team_move", { server, email, password, name, mode }),
   /** The History view, newest first; `before` is the oldest version already shown. */
   history: (before: number | null) => invoke<HistoryPage>("team_history", { before }),
   revert: (version: number) => invoke<void>("team_revert", { version }),

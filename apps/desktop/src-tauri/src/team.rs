@@ -485,7 +485,16 @@ async fn refresh_access(app: &AppHandle, label: &str, a: &Account, project: Uuid
         role: String,
         limits: MemberLimits,
     }
-    let Ok(raw) = call::<Raw>(reqwest::Method::GET, &a.server, &format!("/api/projects/{project}/access"), Some(&a.token), None).await else { return };
+    let raw = match call::<Raw>(reqwest::Method::GET, &a.server, &format!("/api/projects/{project}/access"), Some(&a.token), None).await {
+        Ok(raw) => raw,
+        Err(CallError::Refused(m)) => {
+            if let Some(to) = moved_to(&m) {
+                followed_move(app, label, &a.server, &to);
+            }
+            return;
+        }
+        Err(_) => return,
+    };
     let access = MyAccess { role: raw.role, limits: raw.limits, name: a.user.name.clone(), email: a.user.email.clone() };
     let _ = with_doc(app, label, |doc| {
         if let Some(team) = doc.team.as_mut()
@@ -496,6 +505,17 @@ async fn refresh_access(app: &AppHandle, label: &str, a: &Account, project: Uuid
         }
         Ok(())
     });
+}
+
+/// The team moved: remember where, and tell the person what to do.
+fn followed_move(app: &AppHandle, label: &str, from: &str, to: &str) {
+    if moves(app).get(from).map(String::as_str) == Some(to) {
+        return;
+    }
+    note_move(app, from, to);
+    let msg = format!("Your team moved to {to}. Join it there with the new invite you receive (Team > Join a Team); your copy and any unsent edits carry on.");
+    emit_status(app, label, "stopped", Some(msg.clone()));
+    notice(app, label, msg);
 }
 
 /// Which tasks an Editor may change (same shape as the server's).
@@ -577,6 +597,78 @@ pub async fn team_revert(app: AppHandle, window: WebviewWindow, version: i64) ->
     Ok(())
 }
 
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveResult {
+    pub status: TeamStatus,
+    /// New invites for people who had no account on the new server.
+    pub invites: Vec<Invite>,
+    /// The teams that moved.
+    pub teams: Vec<String>,
+}
+
+/// Team > Team Server > Connect Teams to a Server: moves every team you own here to another
+/// server (signing in there, creating your account, or setting it up), then carries on there.
+#[tauri::command]
+pub async fn team_move(app: AppHandle, server: String, email: String, password: String, name: Option<String>, mode: Option<String>) -> Result<MoveResult, IpcError> {
+    let source = signed_in(&app)?;
+    if source.server == LOCAL {
+        hosting::ensure(&app).await?;
+    }
+    let target = normalized_server(&server)?;
+    if target == hosting::base(&source.server) || target == source.server {
+        return Err(err("that is where your teams are already"));
+    }
+    let owned: Vec<TeamView> = team_teams(app.clone()).await?.into_iter().filter(|t| t.role == "owner").collect();
+    if owned.is_empty() {
+        return Err(err("you own no team here, so there is nothing to move"));
+    }
+    // Sign in on the new server first, so nothing moves if that fails.
+    let path = match mode.as_deref() {
+        Some("setup") => "/api/setup",
+        Some("signup") => "/api/signup",
+        _ => "/api/sessions",
+    };
+    let body = serde_json::json!({ "name": name.unwrap_or_else(|| source.user.name.clone()), "email": email, "password": password });
+    let reply: SessionReply = call(reqwest::Method::POST, &target, path, None, Some(body)).await?;
+    #[derive(Deserialize)]
+    struct RawInvite {
+        email: String,
+        code: Option<String>,
+        server: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct Imported {
+        invites: Vec<RawInvite>,
+    }
+    let mut invites: Vec<Invite> = Vec::new();
+    let mut moved = Vec::new();
+    for t in &owned {
+        let bundle: serde_json::Value = call(reqwest::Method::GET, &source.server, &format!("/api/teams/{}/export", t.id), Some(&source.token), None).await?;
+        let imported: Imported = call(reqwest::Method::POST, &target, "/api/teams/import", Some(&reply.token), Some(bundle))
+            .await
+            .map_err(|e| match e {
+                CallError::Refused(m) if m.contains("already") => err(format!("“{}” is already on {target}", t.name)),
+                other => other.into(),
+            })?;
+        let _: serde_json::Value = call(reqwest::Method::POST, &source.server, &format!("/api/teams/{}/moved", t.id), Some(&source.token), Some(serde_json::json!({ "to": target }))).await?;
+        for i in imported.invites {
+            if invites.iter().any(|x| x.email == i.email) {
+                continue;
+            }
+            let address = i.server.unwrap_or_else(|| target.clone());
+            invites.push(Invite { invite: i.code.map(|c| format!("{INVITE_PREFIX}|{address}|{}|{c}", i.email)), note: None, email: i.email });
+        }
+        moved.push(t.name.clone());
+    }
+    note_move(&app, &source.server, &target);
+    save_account(&app, Some(&Account { server: target, token: reply.token, user: reply.user }))?;
+    restart_all(&app);
+    start_chat(&app);
+    Ok(MoveResult { status: status_of(&app), invites, teams: moved })
+}
+
 /// Team > Invite People: adds more people to a team.
 #[tauri::command]
 pub async fn team_invite(app: AppHandle, team_id: String, emails: Vec<String>) -> Result<Vec<Invite>, IpcError> {
@@ -610,7 +702,7 @@ pub async fn team_join(app: AppHandle, invite: String) -> Result<TeamStatus, Ipc
 /// When the app starts: bring the teams hosted here back up, then sync open shared projects.
 pub fn on_launch(app: &AppHandle) {
     start_chat(app);
-    if !account(app).is_some_and(|a| a.server == LOCAL) {
+    if !account(app).is_some_and(|a| a.server == LOCAL) && !hosting::hosts_teams(app) {
         return;
     }
     let app = app.clone();
@@ -697,8 +789,44 @@ fn restart_all(app: &AppHandle) {
     }
 }
 
+fn moves_file(app: &AppHandle) -> Option<PathBuf> {
+    Some(hosting::profiled(app.path().app_config_dir().ok()?).join("team-moves.json"))
+}
+
+/// Teams that moved: old server name → new address.
+fn moves(app: &AppHandle) -> std::collections::HashMap<String, String> {
+    moves_file(app).and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn note_move(app: &AppHandle, from: &str, to: &str) {
+    let mut all = moves(app);
+    // Anything that pointed at the old place now points at the new one too.
+    for v in all.values_mut() {
+        if v == from {
+            *v = to.to_owned();
+        }
+    }
+    all.insert(from.to_owned(), to.to_owned());
+    if let Some(f) = moves_file(app) {
+        let _ = std::fs::write(f, serde_json::to_string_pretty(&all).expect("moves serialize"));
+    }
+}
+
+/// "this team has moved to https://…" → the address.
+fn moved_to(message: &str) -> Option<String> {
+    message.strip_prefix("this team has moved to ").map(|s| s.trim().trim_end_matches('.').to_owned())
+}
+
 /// Starts the sync task for the shared project in `label`, unless one is running.
 pub fn start_sync(app: &AppHandle, label: &str) {
+    // A team that moved: point this copy at its new address first.
+    let moved = moves(app);
+    let _ = with_doc(app, label, |d| {
+        if let Some(to) = d.team.as_ref().and_then(|t| moved.get(&t.server)).cloned() {
+            d.relink(&to).map_err(|e| err(e.to_string()))?;
+        }
+        Ok(())
+    });
     let Ok(Some((server, project, wake))) = with_doc(app, label, |d| Ok(d.team.as_ref().map(|t| (t.server.clone(), d.project.id.0, t.wake.clone())))) else { return };
     let Some(a) = account(app).filter(|a| a.server == server) else {
         emit_status(app, label, "stopped", Some(format!("Join the team again (Team > Join a Team) to sync this project. It is shared through {}.", hosting::display(&server))));
@@ -821,6 +949,10 @@ async fn send_outbox(app: &AppHandle, label: &str, a: &Account, project: Uuid, s
                 sent.insert(p.id);
             }
             Err(CallError::Offline(m)) => return Err(m),
+            Err(CallError::Refused(reason)) if moved_to(&reason).is_some() => {
+                followed_move(app, label, &a.server, &moved_to(&reason).unwrap_or_default());
+                return Ok(());
+            }
             Err(CallError::Refused(reason)) => {
                 let label_text = p.command.label();
                 let _ = with_doc(app, label, |doc| {
@@ -1081,5 +1213,14 @@ mod tests {
         assert!(!super::mentions("@alexandra please", "Alex"));
         assert!(!super::mentions("email alex@example.com", "Alex"));
         assert!(!super::mentions("no mention", "Alex"));
+    }
+}
+
+#[cfg(test)]
+mod move_tests {
+    #[test]
+    fn the_new_address_is_read_from_the_refusal() {
+        assert_eq!(super::moved_to("this team has moved to https://pm.example.com"), Some("https://pm.example.com".to_owned()));
+        assert_eq!(super::moved_to("you can view this project but not change it"), None);
     }
 }

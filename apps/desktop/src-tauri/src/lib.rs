@@ -133,6 +133,7 @@ pub fn run() {
             team::team_create_project,
             team::team_invite,
             team::team_join,
+            team::team_move,
             team::team_history,
             team::team_revert,
             team::team_members,

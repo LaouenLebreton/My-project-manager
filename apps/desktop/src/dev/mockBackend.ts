@@ -239,6 +239,10 @@ export function install() {
           state.team = { server: "local", pending: 0, projectId: "p-1", access: null };
           setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
           return { snapshot: snapshot(), invites: mockInvites(args.emails as string[]) };
+        case "team_move":
+          if (!String(args.server).includes(".")) fail("the team server at https://" + args.server + " cannot be reached");
+          state.account = { server: "https://" + String(args.server), name: state.account?.name ?? "Laouen", email: String(args.email) };
+          return { status: teamStatus(), invites: mockInvites(["alex@example.com", "sam@example.com"]), teams: ["Office move"] };
         case "team_invite":
           return mockInvites(args.emails as string[]);
         case "team_join":

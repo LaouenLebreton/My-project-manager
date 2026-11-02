@@ -148,6 +148,16 @@ impl Document {
         Ok(())
     }
 
+    /// The team moved to another server: same project, same versions, new address.
+    pub fn relink(&mut self, server: &str) -> Result<(), StoreError> {
+        self.store.set_meta(TEAM_SERVER, Some(server))?;
+        if let Some(team) = self.team.as_mut() {
+            team.server = server.to_owned();
+            team.access = None;
+        }
+        Ok(())
+    }
+
     /// A change from the server. `Err(Gap)` asks for the missing changes first; `Err(Diverged)`
     /// means this copy must be downloaded again.
     pub fn receive(&mut self, change: &Change) -> Result<TeamUpdate, ReceiveError> {

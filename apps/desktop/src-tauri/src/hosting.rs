@@ -61,6 +61,11 @@ pub fn invite_address() -> String {
     format!("http://{}:{port}", lan_ip().unwrap_or_else(|| "127.0.0.1".into()))
 }
 
+/// This Mac has hosted teams (even if they moved: it keeps telling people where they went).
+pub fn hosts_teams(app: &AppHandle) -> bool {
+    app.path().app_data_dir().is_ok_and(|d| profiled(d).join("TeamServer").join("server.sqlite").exists())
+}
+
 /// Starts the built-in team server if it is not running yet.
 pub async fn ensure(app: &AppHandle) -> Result<(), IpcError> {
     if port_cell().lock().expect("lock").is_some() {

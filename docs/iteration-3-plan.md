@@ -96,7 +96,8 @@ revert a change (applied as a new change, so the log stays complete).
 7. **Online (in progress):** *Done:* team owners invite through the server; optional open
    sign-up (`--open-signup`); `--public-url` for invites; Dockerfile and `docs/deploy.md`
    (Fly.io recommended, or any Linux server with Caddy); the app's sign-in offers "create my
-   account". *To do:* move a team hosted on a Mac to an online server ("connect it to a
-   server afterwards"); invite emails sent by the server (needs an email provider);
+   account"; Team > Team Server > Connect Teams to a Server moves every team you own (people,
+   projects with history and versions, permissions, chat) and your copies follow; teammates'
+   apps are told where the team went; @mention notifications. *To do:* invite emails sent by the server (needs an email provider);
    session token in the Keychain; Postgres storage and several server instances; single
    sign-on. Needs the owner's hosting and email accounts to go live.

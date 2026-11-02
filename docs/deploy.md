@@ -58,6 +58,14 @@ Keep exactly one machine: the server keeps each open project's latest state in m
 orders changes there. (Several machines need the Postgres storage planned in
 `iteration-3-plan.md`, step 7.)
 
+## Moving teams you already have
+
+If your teams live on your Mac, choose **Team > Team Server > Connect Teams to a Server…**,
+type the server's address and create your account there (or tick "new server" the very first
+time). Everything moves: people, projects with their history, permissions and chat. Send the
+new invites it shows you; until teammates use them, their app tells them where the team went.
+Keep Super PM open on your Mac for a few days so it can tell them.
+
 ## First use
 
 1. In Super PM: **Team > Team Server > Sign In to a Team Server…**, type the address, tick

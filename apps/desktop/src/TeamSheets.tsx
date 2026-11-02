@@ -1,8 +1,70 @@
 import { useEffect, useState } from "react";
-import { errorMessage, team, type Invite, type SharedProject, type Snapshot, type TeamProject, type TeamStatus, type TeamView } from "./api";
+import { errorMessage, team, type Invite, type MoveResult, type SharedProject, type Snapshot, type TeamProject, type TeamStatus, type TeamView } from "./api";
 import type { SyncStatus } from "./bindings/SyncStatus";
 import { formatDateTime } from "./format";
 import { Sheet } from "./Sheets";
+
+/** Team > Team Server > Connect Teams to a Server: everything you host here moves online. */
+export function ConnectSheet({ status, onClose, onMoved }: { status: TeamStatus | null; onClose: () => void; onMoved: (r: MoveResult) => void }) {
+  const [server, setServer] = useState("");
+  const [email, setEmail] = useState(status?.user?.email ?? "");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"signin" | "signup" | "setup">("signup");
+  const [name, setName] = useState(status?.user?.name ?? "");
+  if (!status?.user) {
+    return (
+      <Sheet title="Connect Teams to a Server" onClose={onClose}>
+        <p>You have no team yet. Create one first (Team &gt; Create Team Project).</p>
+      </Sheet>
+    );
+  }
+  const save = async () => {
+    try {
+      onMoved(await team.move(server, email, password, mode === "signin" ? null : name, mode === "signin" ? null : mode));
+      return null;
+    } catch (e) {
+      return errorMessage(e);
+    }
+  };
+  return (
+    <Sheet title="Connect Teams to a Server" onClose={onClose} onSave={save} action="Move Teams">
+      <p className="secondary small">
+        The teams you own on {status.server} move to an online server with everything in them: people, projects and their history, permissions and chat. Your copies
+        carry on there, unsent edits included. Teammates get a new invite; until they use it, their app tells them where the team went. See docs/deploy.md to
+        put a server online.
+      </p>
+      <div className="form">
+        <label htmlFor="cn-server">Server</label>
+        <input id="cn-server" className="wide" value={server} onChange={(e) => setServer(e.target.value)} placeholder="pm.yourcompany.com" autoFocus required />
+        <span className="form-label">Your account there</span>
+        <div role="radiogroup" aria-label="Your account there">
+          <label className="inline block">
+            <input type="radio" name="cmode" checked={mode === "signup"} onChange={() => setMode("signup")} /> Create my account
+          </label>
+          <label className="inline block">
+            <input type="radio" name="cmode" checked={mode === "signin"} onChange={() => setMode("signin")} /> I have an account
+          </label>
+          <label className="inline block">
+            <input type="radio" name="cmode" checked={mode === "setup"} onChange={() => setMode("setup")} /> It is a new server: set it up and make me its administrator
+          </label>
+        </div>
+        {mode !== "signin" && (
+          <>
+            <label htmlFor="cn-name">Your name</label>
+            <input id="cn-name" className="wide" value={name} onChange={(e) => setName(e.target.value)} required />
+          </>
+        )}
+        <label htmlFor="cn-email">Email</label>
+        <input id="cn-email" type="email" className="wide" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <label htmlFor="cn-password">Password</label>
+        <div>
+          <input id="cn-password" type="password" className="wide" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signin" ? "current-password" : "new-password"} required />
+          {mode !== "signin" && <p className="secondary small">At least 10 characters.</p>}
+        </div>
+      </div>
+    </Sheet>
+  );
+}
 
 /** Team > Team Server > Sign In: an existing account, a new account on an online server, or
  * setting up a brand-new server. */

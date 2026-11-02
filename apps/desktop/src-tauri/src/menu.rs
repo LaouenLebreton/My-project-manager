@@ -61,6 +61,7 @@ pub mod id {
     pub const TEAM_JOIN: &str = "team.join";
     pub const TEAM_INVITE: &str = "team.invite";
     pub const TEAM_MEMBERS: &str = "team.members";
+    pub const TEAM_MOVE: &str = "team.move";
     pub const SECOND_USER: &str = "dev.second_user";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
@@ -247,6 +248,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let team_share = item(app, id::TEAM_SHARE, "Create Team Project…", None)?;
     let team_members = item(app, id::TEAM_MEMBERS, "Members & Permissions…", None)?;
     let server = SubmenuBuilder::new(app, "Team Server")
+        .item(&enabled(id::TEAM_MOVE, "Connect Teams to a Server…", None)?)
+        .separator()
         .item(&enabled(id::TEAM_SIGN_IN, "Sign In to a Team Server…", None)?)
         .item(&enabled(id::TEAM_ADD_ACCOUNT, "Add Account to Server…", None)?)
         .build()?;

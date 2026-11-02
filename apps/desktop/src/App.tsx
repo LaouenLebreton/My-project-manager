@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, chat, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
-import { AddAccountSheet, CreateTeamSheet, InvitePeopleSheet, InvitesSheet, JoinSheet, OpenSharedSheet, SignInSheet, SyncPill } from "./TeamSheets";
+import { AddAccountSheet, ConnectSheet, CreateTeamSheet, InvitePeopleSheet, InvitesSheet, JoinSheet, OpenSharedSheet, SignInSheet, SyncPill } from "./TeamSheets";
 import type { Invite } from "./api";
 import { formatDate, formatMoney } from "./format";
 import { CommandBar, type CommandItem } from "./CommandBar";
@@ -50,7 +50,7 @@ export function App() {
   // New chat posts by others while the Chat tab is not showing.
   const [chatUnread, setChatUnread] = useState(0);
   const viewRef = useRef<string>("tasks");
-  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | "account" | "join" | "invite" | "invites" | "members" | null>(null);
+  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | "account" | "join" | "invite" | "invites" | "members" | "connect" | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
   /** Closes a team sheet unless it has already been replaced by the next one. */
   const closeTeamSheet = (which: string) => setTeamSheet((s) => (s === which ? null : s));
@@ -213,6 +213,7 @@ export function App() {
         if (e.payload === "team.join") setTeamSheet("join");
         if (e.payload === "team.invite") setTeamSheet("invite");
         if (e.payload === "team.members") setTeamSheet("members");
+        if (e.payload === "team.move") setTeamSheet("connect");
         if (e.payload === "project.statistics") setOverlay("stats");
         const percent = /^task\.percent_(\d+)$/.exec(e.payload);
         if (percent && selectedRef.current.size)
@@ -237,6 +238,7 @@ export function App() {
     { name: "Join a Team…", run: () => setTeamSheet("join") },
     { name: "Invite People to a Team…", run: () => setTeamSheet("invite") },
     { name: "Add Account to Team Server…", run: () => setTeamSheet("account") },
+    { name: "Connect Teams to a Server… (put your teams online)", run: () => setTeamSheet("connect") },
   ];
   if (snapshot) {
     commands.push(
@@ -307,6 +309,18 @@ export function App() {
           onClose={() => closeTeamSheet("invite")}
           onInvited={(list) => {
             setInvites(list);
+            setTeamSheet("invites");
+          }}
+        />
+      )}
+      {teamSheet === "connect" && (
+        <ConnectSheet
+          status={teamStatus}
+          onClose={() => closeTeamSheet("connect")}
+          onMoved={(r) => {
+            setTeamStatus(r.status);
+            setInvites(r.invites);
+            setNotice(`${r.teams.join(", ")} moved to ${r.status.server}. Send the new invites below; your copies already carry on there.`);
             setTeamSheet("invites");
           }}
         />
