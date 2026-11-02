@@ -17,6 +17,7 @@ import { Workload } from "./Workload";
 import { Board } from "./Board";
 import { CalendarView } from "./CalendarView";
 import { HistoryView } from "./HistoryView";
+import { ChatView } from "./ChatView";
 import { MembersSheet } from "./MembersSheet";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
@@ -40,7 +41,7 @@ export function App() {
   const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
-  const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload" | "calendar" | "board" | "history">("tasks");
+  const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload" | "calendar" | "board" | "history" | "chat">("tasks");
   const [notice, setNotice] = useState<string | null>(null);
   // The team server account, and this window's sync state (shared projects only).
   const [teamStatus, setTeamStatus] = useState<TeamStatus | null>(null);
@@ -179,6 +180,7 @@ export function App() {
         if (e.payload === "view.calendar") setView("calendar");
         if (e.payload === "view.board") setView("board");
         if (e.payload === "view.history") setView("history");
+        if (e.payload === "view.chat") setView("chat");
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
@@ -230,6 +232,7 @@ export function App() {
       { name: "Show Calendar", shortcut: "⌘5", run: () => setView("calendar") },
       { name: "Show Board (Not started / In progress / Done)", shortcut: "⌘6", run: () => setView("board") },
       { name: "Show History (every change in a team project)", shortcut: "⌘7", run: () => setView("history") },
+      { name: "Show Chat (teams, channels, posts)", shortcut: "⌘8", run: () => setView("chat") },
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
@@ -404,6 +407,11 @@ export function App() {
               History
             </button>
           )}
+          {teamStatus?.user && (
+            <button role="tab" aria-selected={view === "chat"} className={view === "chat" ? "on" : undefined} onClick={() => setView("chat")}>
+              Chat
+            </button>
+          )}
         </div>
       </header>
       {error && (
@@ -429,7 +437,9 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
-      {view === "history" && snapshot.project.team ? (
+      {view === "chat" ? (
+        <ChatView snapshot={snapshot} onShowTask={showTask} />
+      ) : view === "history" && snapshot.project.team ? (
         <HistoryView snapshot={snapshot} onShowTask={showTask} onConfirm={confirm} />
       ) : view === "board" ? (
         <Board snapshot={snapshot} onEdit={edit} onShowTask={showTask} />

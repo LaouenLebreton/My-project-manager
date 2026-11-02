@@ -171,6 +171,8 @@ pub struct TeamInfo {
     pub server: String,
     /// Edits not yet confirmed by the server.
     pub pending: u32,
+    /// The project's id on the server (its chat channel carries it).
+    pub project_id: String,
 }
 
 /// Earned value in cents, as in Microsoft Project's Earned Value table.
@@ -583,7 +585,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
             cost_cents: doc.loads.project_cost,
             earned_value: earned.as_ref().map(|e| EarnedView::new(as_of, e.project)),
             baseline_finish: p.baseline.as_ref().and_then(|b| b.tasks.values().map(|t| t.finish).max()).map(iso),
-            team: crate::team::snapshot_info(doc).map(|(server, pending)| TeamInfo { server, pending }),
+            team: crate::team::snapshot_info(doc).map(|(server, pending, project_id)| TeamInfo { server, pending, project_id }),
         },
         rows,
         links,

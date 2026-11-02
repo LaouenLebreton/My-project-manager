@@ -4,4 +4,8 @@ export type TeamInfo = { server: string,
 /**
  * Edits not yet confirmed by the server.
  */
-pending: number, };
+pending: number, 
+/**
+ * The project's id on the server (its chat channel carries it).
+ */
+projectId: string, };

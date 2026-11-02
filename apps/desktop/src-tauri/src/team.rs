@@ -244,6 +244,7 @@ pub async fn team_sign_in(app: AppHandle, server: String, email: String, passwor
     };
     save_account(&app, Some(&Account { server, token: reply.token, user: reply.user }))?;
     restart_all(&app);
+    start_chat(&app);
     Ok(status_of(&app))
 }
 
@@ -389,6 +390,7 @@ pub async fn team_create_project(
             })?;
             let a = Account { server: LOCAL.to_owned(), token: reply.token, user: reply.user };
             save_account(&app, Some(&a))?;
+            start_chat(&app);
             a
         }
     };
@@ -580,11 +582,13 @@ pub async fn team_join(app: AppHandle, invite: String) -> Result<TeamStatus, Ipc
         })?;
     save_account(&app, Some(&Account { server, token: reply.token, user: reply.user }))?;
     restart_all(&app);
+    start_chat(&app);
     Ok(status_of(&app))
 }
 
 /// When the app starts: bring the teams hosted here back up, then sync open shared projects.
 pub fn on_launch(app: &AppHandle) {
+    start_chat(app);
     if !account(app).is_some_and(|a| a.server == LOCAL) {
         return;
     }
@@ -812,6 +816,170 @@ async fn send_outbox(app: &AppHandle, label: &str, a: &Account, project: Uuid, s
 }
 
 /// For the snapshot: where this project syncs.
-pub fn snapshot_info(doc: &Document) -> Option<(String, u32)> {
-    doc.team.as_ref().map(|t| (t.server.clone(), t.outbox.pending.len() as u32))
+pub fn snapshot_info(doc: &Document) -> Option<(String, u32, String)> {
+    doc.team.as_ref().map(|t| (t.server.clone(), t.outbox.pending.len() as u32, doc.project.id.0.to_string()))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Chat (step 6): teams, channels, posts and replies, as in Microsoft Teams.
+
+/// Sent to every window when a post or channel appears.
+pub const CHAT_EVENT: &str = "chat-event";
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatChannel {
+    pub id: String,
+    pub team_id: String,
+    pub name: String,
+    /// The team project this channel belongs to, if any.
+    pub project_id: Option<String>,
+    /// Posts by others not seen yet.
+    pub unread: u32,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTeam {
+    pub id: String,
+    pub name: String,
+    /// General first, then project channels, then the others.
+    pub channels: Vec<ChatChannel>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPost {
+    pub id: String,
+    pub channel_id: String,
+    /// Set for a reply.
+    pub parent_id: Option<String>,
+    pub author_id: String,
+    pub author_name: String,
+    pub at: String,
+    pub body: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatThread {
+    pub post: ChatPost,
+    /// Oldest first.
+    pub replies: Vec<ChatPost>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPage {
+    /// Newest first.
+    pub threads: Vec<ChatThread>,
+    pub has_more: bool,
+}
+
+/// Who the signed-in person is, for telling their own posts apart.
+#[tauri::command]
+pub fn chat_me(app: AppHandle) -> Option<String> {
+    account(&app).map(|a| a.user.id)
+}
+
+/// Every team the person is in, with its channels.
+#[tauri::command]
+pub async fn chat_teams(app: AppHandle) -> Result<Vec<ChatTeam>, IpcError> {
+    let a = signed_in(&app)?;
+    if a.server == LOCAL {
+        hosting::ensure(&app).await?;
+    }
+    let teams = team_teams(app.clone()).await?;
+    let mut out = Vec::new();
+    for t in teams {
+        let channels: Vec<ChatChannel> = call(reqwest::Method::GET, &a.server, &format!("/api/teams/{}/channels", t.id), Some(&a.token), None).await?;
+        out.push(ChatTeam { id: t.id, name: t.name, channels });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn chat_posts(app: AppHandle, channel_id: String, before: Option<String>) -> Result<ChatPage, IpcError> {
+    let a = signed_in(&app)?;
+    let query = before.map(|b| format!("?before={b}")).unwrap_or_default();
+    Ok(call(reqwest::Method::GET, &a.server, &format!("/api/channels/{channel_id}/posts{query}"), Some(&a.token), None).await?)
+}
+
+/// A new post, or with `parentId` a reply.
+#[tauri::command]
+pub async fn chat_send(app: AppHandle, channel_id: String, body: String, parent_id: Option<String>) -> Result<ChatPost, IpcError> {
+    let a = signed_in(&app)?;
+    Ok(call(reqwest::Method::POST, &a.server, &format!("/api/channels/{channel_id}/posts"), Some(&a.token), Some(serde_json::json!({ "body": body, "parentId": parent_id }))).await?)
+}
+
+#[tauri::command]
+pub async fn chat_read(app: AppHandle, channel_id: String) -> Result<(), IpcError> {
+    let a = signed_in(&app)?;
+    let _: serde_json::Value = call(reqwest::Method::POST, &a.server, &format!("/api/channels/{channel_id}/read"), Some(&a.token), None).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn chat_create_channel(app: AppHandle, team_id: String, name: String) -> Result<ChatChannel, IpcError> {
+    let a = signed_in(&app)?;
+    Ok(call(reqwest::Method::POST, &a.server, &format!("/api/teams/{team_id}/channels"), Some(&a.token), Some(serde_json::json!({ "name": name }))).await?)
+}
+
+/// Keeps one live chat connection for the signed-in account and passes every event to all
+/// windows. Restarted when the account changes.
+pub fn start_chat(app: &AppHandle) {
+    static RUNNING: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    let Some(a) = account(app) else { return };
+    let key = format!("{}|{}", a.server, a.token);
+    {
+        let mut running = RUNNING.get_or_init(Default::default).lock().expect("lock");
+        if running.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        *running = Some(key.clone());
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut pause = Duration::from_secs(1);
+        loop {
+            // Stop when someone else signs in (a new task takes over).
+            let current = RUNNING.get_or_init(Default::default).lock().expect("lock").clone();
+            if current.as_deref() != Some(key.as_str()) {
+                return;
+            }
+            let base = hosting::base(&a.server).replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
+            let Ok(mut req) = format!("{base}/api/chat/live").into_client_request() else { return };
+            let Ok(auth) = format!("Bearer {}", a.token).parse() else { return };
+            req.headers_mut().insert("authorization", auth);
+            if let Ok((ws, _)) = tokio_tungstenite::connect_async(req).await {
+                pause = Duration::from_secs(1);
+                let (mut write, mut read) = ws.split();
+                loop {
+                    tokio::select! {
+                        msg = read.next() => match msg {
+                            Some(Ok(Message::Text(text))) => {
+                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    let _ = app.emit(CHAT_EVENT, v);
+                                }
+                            }
+                            Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                            Some(Ok(_)) => {}
+                        },
+                        _ = tokio::time::sleep(Duration::from_secs(25)) => {
+                            if write.send(Message::Ping(Vec::new().into())).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(pause).await;
+            pause = (pause * 2).min(Duration::from_secs(30));
+        }
+    });
 }

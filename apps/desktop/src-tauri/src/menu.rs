@@ -31,6 +31,7 @@ pub mod id {
     pub const VIEW_CALENDAR: &str = "view.calendar";
     pub const VIEW_BOARD: &str = "view.board";
     pub const VIEW_HISTORY: &str = "view.history";
+    pub const VIEW_CHAT: &str = "view.chat";
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
     pub const TASK_INFO: &str = "task.info";
@@ -186,6 +187,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let view_calendar = item(app, id::VIEW_CALENDAR, "Calendar", Some("CmdOrCtrl+5"))?;
     let view_board = item(app, id::VIEW_BOARD, "Board", Some("CmdOrCtrl+6"))?;
     let view_history = item(app, id::VIEW_HISTORY, "History", Some("CmdOrCtrl+7"))?;
+    let view_chat = item(app, id::VIEW_CHAT, "Chat", Some("CmdOrCtrl+8"))?;
     let view = SubmenuBuilder::new(app, "View")
         .item(&view_tasks)
         .item(&view_resources)
@@ -194,6 +196,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&view_calendar)
         .item(&view_board)
         .item(&view_history)
+        .item(&view_chat)
         .separator()
         .item(&enabled(id::COMMAND_BAR, "Show Command Bar", Some("CmdOrCtrl+K"))?)
         .separator()
@@ -281,7 +284,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members];
+    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

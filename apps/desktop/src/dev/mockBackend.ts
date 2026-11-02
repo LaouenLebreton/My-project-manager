@@ -149,7 +149,7 @@ export function install() {
     costCents: 182_000,
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
   });
-  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null, team: null as { server: string; pending: number } | null, account: null as { server: string; name: string; email: string } | null };
+  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null, team: null as { server: string; pending: number; projectId: string } | null, account: null as { server: string; name: string; email: string } | null };
   if (state.rows[1]) {
     state.rows[1].resourceNames = "Alex";
     state.rows[1].overloaded = true;
@@ -236,7 +236,7 @@ export function install() {
             if (!String(args.myEmail ?? "").includes("@")) fail("type your name and email, so your team knows who changed what");
             state.account = { server: "this Mac", name: String(args.myName), email: String(args.myEmail) };
           }
-          state.team = { server: "local", pending: 0 };
+          state.team = { server: "local", pending: 0, projectId: "p-1" };
           setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
           return { snapshot: snapshot(), invites: mockInvites(args.emails as string[]) };
         case "team_invite":
@@ -271,6 +271,41 @@ export function install() {
         }
         case "team_set_member":
           return null;
+        case "chat_me":
+          return "u1";
+        case "chat_teams":
+          return [
+            {
+              id: "team-1",
+              name: "Office move",
+              channels: [
+                { id: "c-general", teamId: "team-1", name: "General", projectId: null, unread: 0 },
+                { id: "c-project", teamId: "team-1", name: "Mock Project", projectId: "p-1", unread: 2 },
+                { id: "c-it", teamId: "team-1", name: "IT and network", projectId: null, unread: 0 },
+              ],
+            },
+          ];
+        case "chat_posts": {
+          const post = (id: string, authorName: string, body: string, minutesAgo: number, parentId: string | null = null) => ({
+            id, channelId: args.channelId, parentId, authorId: authorName === "Laouen" ? "u1" : "u2", authorName, at: new Date(Date.now() - minutesAgo * 60_000).toISOString(), body,
+          });
+          return {
+            hasMore: false,
+            threads: [
+              { post: post("p3", "Sam", "Movers confirmed for #5. I'll send the quote here.", 12), replies: [] },
+              {
+                post: post("p1", "Laouen", "Kick-off tomorrow at 9. @Alex can you book the big room?", 95),
+                replies: [post("p2", "Alex", "Booked ✓ — and I moved #3 by a day, see the History tab.", 80, "p1")],
+              },
+            ],
+          };
+        }
+        case "chat_send":
+          return { id: `p${Date.now()}`, channelId: args.channelId, parentId: args.parentId ?? null, authorId: "u1", authorName: "Laouen", at: new Date().toISOString(), body: args.body };
+        case "chat_read":
+          return null;
+        case "chat_create_channel":
+          return { id: "c-new", teamId: args.teamId, name: args.name, projectId: null, unread: 0 };
         case "team_revert":
           return null;
         case "team_sign_out":
@@ -288,11 +323,11 @@ export function install() {
           if (!state.account) fail("sign in to a team server first (Team > Sign In to Team Server)");
           return [{ id: "p-1", teamId: "team-1", name: "Office move", version: 42, updatedAt: "2026-10-09T09:30:00Z" }];
         case "team_share":
-          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0 };
+          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0, projectId: "p-1" };
           setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
           return snapshot();
         case "team_open":
-          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0 };
+          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0, projectId: "p-1" };
           setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
           return snapshot();
         case "get_snapshot":

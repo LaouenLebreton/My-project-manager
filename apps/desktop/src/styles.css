@@ -1349,3 +1349,161 @@ input.wide {
 label.indent {
   margin-left: 20px;
 }
+
+/* Chat (Teams model): teams and channels on the left, conversations on the right. */
+.chat {
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  flex: 1;
+  min-height: 0;
+}
+.chat-empty {
+  padding: 32px;
+  max-width: 60ch;
+}
+.chat-teams {
+  border-right: 1px solid var(--gantt-grid);
+  overflow: auto;
+  padding: 10px 8px;
+}
+.chat-teams h3 {
+  font-size: 12px;
+  margin: 10px 8px 4px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.chat-teams ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.chat-teams .channel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.chat-teams .channel.on {
+  background: color-mix(in srgb, var(--gantt-accent) 22%, transparent);
+}
+.chat-teams .channel.unread .channel-name {
+  font-weight: 700;
+}
+.chat-teams .channel-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-teams .badge {
+  background: var(--gantt-critical);
+  color: white;
+  border-radius: 9px;
+  font-size: 11px;
+  padding: 0 6px;
+  margin-left: 6px;
+}
+.chat-teams .small,
+.add-channel {
+  margin: 4px 8px 8px;
+}
+.add-channel input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.chat-channel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.chat-channel > header {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--gantt-grid);
+}
+.chat-channel > header h2 {
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+.chat-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-older,
+.chat-none {
+  align-self: center;
+}
+.thread {
+  border: 1px solid var(--gantt-grid);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, CanvasText 3%, Canvas);
+}
+.chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.chat-meta .avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--gantt-accent) 25%, Canvas);
+  color: var(--gantt-accent);
+  font-weight: 600;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+}
+.chat-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-left: 32px;
+}
+.chat-body .mention {
+  color: var(--gantt-accent);
+  font-weight: 600;
+}
+.chat-body .task-ref {
+  padding: 0;
+}
+.replies {
+  margin: 8px 0 0 32px;
+  padding-left: 12px;
+  border-left: 2px solid var(--gantt-grid);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.reply-link {
+  margin: 6px 0 0 32px;
+}
+.composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.chat-channel > .composer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--gantt-grid);
+}
+.composer textarea {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+}

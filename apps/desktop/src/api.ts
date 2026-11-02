@@ -17,6 +17,10 @@ import type { TeamProject } from "./bindings/TeamProject";
 import type { HistoryPage } from "./bindings/HistoryPage";
 import type { Member } from "./bindings/Member";
 import type { MemberLimits } from "./bindings/MemberLimits";
+import type { ChatChannel } from "./bindings/ChatChannel";
+import type { ChatPage } from "./bindings/ChatPage";
+import type { ChatPost } from "./bindings/ChatPost";
+import type { ChatTeam } from "./bindings/ChatTeam";
 
 export type { Edit, EditResult, HistoryPage, Invite, Member, MemberLimits, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamProject, TeamStatus, TeamView };
 
@@ -66,6 +70,17 @@ export const team = {
   members: () => invoke<Member[]>("team_members"),
   setMember: (userId: string, role: string, limits: MemberLimits) => invoke<void>("team_set_member", { userId, role, limits }),
   open: (projectId: string) => invoke<Snapshot | null>("team_open", { projectId }),
+};
+
+/** Chat (Teams model): teams, channels, posts and replies. */
+export const chat = {
+  me: () => invoke<string | null>("chat_me"),
+  teams: () => invoke<ChatTeam[]>("chat_teams"),
+  /** Conversations newest first; `before` is the oldest post id already shown. */
+  posts: (channelId: string, before: string | null) => invoke<ChatPage>("chat_posts", { channelId, before }),
+  send: (channelId: string, body: string, parentId: string | null) => invoke<ChatPost>("chat_send", { channelId, body, parentId }),
+  read: (channelId: string) => invoke<void>("chat_read", { channelId }),
+  createChannel: (teamId: string, name: string) => invoke<ChatChannel>("chat_create_channel", { teamId, name }),
 };
 
 export function errorMessage(e: unknown): string {

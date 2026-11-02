@@ -88,6 +88,9 @@ revert a change (applied as a new change, so the log stays complete).
 5. **[Done]** **Permissions** per member, enforced on the server, reflected in the app. Team > Members & Permissions
    for the owner; refused edits come back as a notice saying what is not allowed. Greying
    out controls before the edit is tried is still to do.
-6. **Teams, channels, posts:** server API and storage, then the Chat pane.
+6. **[Done]** **Teams, channels, posts:** server API and storage, then the Chat pane. Chat tab (⌘8): teams and channels on the
+   left (General, one per team project, and any added), conversations with threaded replies,
+   live delivery, unread counts, @mentions highlighted, #12 linking to task 12. Reactions and
+   mention notifications are still to do.
 7. **Cloud scale:** Postgres storage, multi-instance notifications, Docker image, deployment
    notes for a cloud provider, single sign-on.
