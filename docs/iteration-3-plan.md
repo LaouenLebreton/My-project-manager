@@ -92,5 +92,10 @@ revert a change (applied as a new change, so the log stays complete).
    left (General, one per team project, and any added), conversations with threaded replies,
    live delivery, unread counts, @mentions highlighted, #12 linking to task 12. Reactions and
    mention notifications are still to do.
-7. **Cloud scale:** Postgres storage, multi-instance notifications, Docker image, deployment
-   notes for a cloud provider, single sign-on.
+7. **Online (in progress):** *Done:* team owners invite through the server; optional open
+   sign-up (`--open-signup`); `--public-url` for invites; Dockerfile and `docs/deploy.md`
+   (Fly.io recommended, or any Linux server with Caddy); the app's sign-in offers "create my
+   account". *To do:* move a team hosted on a Mac to an online server ("connect it to a
+   server afterwards"); invite emails sent by the server (needs an email provider);
+   session token in the Keychain; Postgres storage and several server instances; single
+   sign-on. Needs the owner's hosting and email accounts to go live.

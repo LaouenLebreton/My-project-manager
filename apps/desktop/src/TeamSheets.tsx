@@ -4,51 +4,60 @@ import type { SyncStatus } from "./bindings/SyncStatus";
 import { formatDateTime } from "./format";
 import { Sheet } from "./Sheets";
 
-/** Team > Sign In to Team Server: an existing account, or setting up a brand-new server. */
+/** Team > Team Server > Sign In: an existing account, a new account on an online server, or
+ * setting up a brand-new server. */
 export function SignInSheet({ status, onClose, onSignedIn }: { status: TeamStatus | null; onClose: () => void; onSignedIn: (s: TeamStatus) => void }) {
-  const [server, setServer] = useState(status?.server ?? "");
+  const [server, setServer] = useState(status?.hostedHere ? "" : (status?.server ?? ""));
   const [email, setEmail] = useState(status?.user?.email ?? "");
   const [password, setPassword] = useState("");
-  const [setup, setSetup] = useState(false);
+  const [mode, setMode] = useState<"signin" | "signup" | "setup">("signin");
   const [name, setName] = useState("");
   const save = async () => {
     try {
-      onSignedIn(await team.signIn(server, email, password, setup ? name : null));
+      onSignedIn(await team.signIn(server, email, password, mode === "signin" ? null : name, mode === "signin" ? null : mode));
       return null;
     } catch (e) {
       return errorMessage(e);
     }
   };
   return (
-    <Sheet title="Sign In to Team Server" onClose={onClose} onSave={save} action="Sign In">
+    <Sheet title="Sign In to a Team Server" onClose={onClose} onSave={save} action={mode === "signin" ? "Sign In" : mode === "signup" ? "Create Account" : "Set Up Server"}>
       {status?.user && (
         <p className="secondary small">
-          Signed in as {status.user.name} on {status.server}. Signing in again replaces this account.
+          Signed in as {status.user.name} on {status.server}. Signing in here replaces this account.
         </p>
       )}
       <div className="form">
         <label htmlFor="ts-server">Server</label>
         <div>
           <input id="ts-server" className="wide" value={server} onChange={(e) => setServer(e.target.value)} placeholder="pm.example.com" autoFocus required />
-          <p className="secondary small">The address your team's Super PM server runs at. Ask whoever set it up.</p>
+          <p className="secondary small">Your team's online Super PM server. To put one online, see docs/deploy.md.</p>
         </div>
-        <label htmlFor="ts-email">Email</label>
-        <input id="ts-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
-        <label htmlFor="ts-password">Password</label>
-        <input id="ts-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={setup ? "new-password" : "current-password"} required />
         <span className="form-label" />
-        <label className="inline">
-          <input type="checkbox" checked={setup} onChange={(e) => setSetup(e.target.checked)} /> This is a new server: set it up and make me its administrator
-        </label>
-        {setup && (
+        <div role="radiogroup" aria-label="Account">
+          <label className="inline block">
+            <input type="radio" name="mode" checked={mode === "signin"} onChange={() => setMode("signin")} /> I have an account
+          </label>
+          <label className="inline block">
+            <input type="radio" name="mode" checked={mode === "signup"} onChange={() => setMode("signup")} /> Create my account
+          </label>
+          <label className="inline block">
+            <input type="radio" name="mode" checked={mode === "setup"} onChange={() => setMode("setup")} /> This is a new server: set it up and make me its administrator
+          </label>
+        </div>
+        {mode !== "signin" && (
           <>
             <label htmlFor="ts-name">Your name</label>
-            <div>
-              <input id="ts-name" className="wide" value={name} onChange={(e) => setName(e.target.value)} required />
-              <p className="secondary small">Only works on a server nobody has set up yet. Choose a password of at least 10 characters.</p>
-            </div>
+            <input id="ts-name" className="wide" value={name} onChange={(e) => setName(e.target.value)} required />
           </>
         )}
+        <label htmlFor="ts-email">Email</label>
+        <input id="ts-email" type="email" className="wide" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
+        <label htmlFor="ts-password">Password</label>
+        <div>
+          <input id="ts-password" type="password" className="wide" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signin" ? "current-password" : "new-password"} required />
+          {mode !== "signin" && <p className="secondary small">At least 10 characters.</p>}
+        </div>
       </div>
     </Sheet>
   );

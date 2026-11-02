@@ -225,7 +225,7 @@ export function install() {
         case "team_sign_in": {
           if (String(args.password).length < 10) fail("the email or password is not right");
           const server = String(args.server).startsWith("http") ? String(args.server) : `https://${args.server}`;
-          state.account = { server, name: (args.setupName as string) || "Laouen", email: String(args.email) };
+          state.account = { server, name: (args.name as string) || "Laouen", email: String(args.email) };
           return teamStatus();
         }
         case "team_create_account":

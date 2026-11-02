@@ -46,9 +46,10 @@ export const api = {
 /** The team server (iteration 3). */
 export const team = {
   status: () => invoke<TeamStatus>("team_status"),
-  /** With `setupName`, sets up a new server and becomes its administrator. */
-  signIn: (server: string, email: string, password: string, setupName: string | null) =>
-    invoke<TeamStatus>("team_sign_in", { server, email, password, setupName }),
+  /** `mode` "setup": set up a new server (you become its administrator); "signup": create your
+   * account on a server that takes sign-ups; null: sign in. */
+  signIn: (server: string, email: string, password: string, name: string | null, mode: "setup" | "signup" | null) =>
+    invoke<TeamStatus>("team_sign_in", { server, email, password, name, mode }),
   signOut: () => invoke<TeamStatus>("team_sign_out"),
   /** Administrators only. */
   createAccount: (name: string, email: string, password: string) => invoke<TeamUser>("team_create_account", { name, email, password }),

@@ -234,14 +234,18 @@ struct SessionReply {
     user: TeamUser,
 }
 
-/// Signs in, or with `setupName` sets up a new server and becomes its administrator.
+/// Signs in. With `name`: `mode` "setup" sets up a new server (you become its administrator),
+/// "signup" creates your account on a server that takes sign-ups.
 #[tauri::command]
-pub async fn team_sign_in(app: AppHandle, server: String, email: String, password: String, setup_name: Option<String>) -> Result<TeamStatus, IpcError> {
+pub async fn team_sign_in(app: AppHandle, server: String, email: String, password: String, name: Option<String>, mode: Option<String>) -> Result<TeamStatus, IpcError> {
     let server = normalized_server(&server)?;
-    let reply: SessionReply = match setup_name.filter(|n| !n.trim().is_empty()) {
-        Some(name) => call(reqwest::Method::POST, &server, "/api/setup", None, Some(serde_json::json!({ "name": name, "email": email, "password": password }))).await?,
-        None => call(reqwest::Method::POST, &server, "/api/sessions", None, Some(serde_json::json!({ "email": email, "password": password }))).await?,
+    let path = match mode.as_deref() {
+        Some("setup") => "/api/setup",
+        Some("signup") => "/api/signup",
+        _ => "/api/sessions",
     };
+    let body = serde_json::json!({ "name": name.unwrap_or_default(), "email": email, "password": password });
+    let reply: SessionReply = call(reqwest::Method::POST, &server, path, None, Some(body)).await?;
     save_account(&app, Some(&Account { server, token: reply.token, user: reply.user }))?;
     restart_all(&app);
     start_chat(&app);
