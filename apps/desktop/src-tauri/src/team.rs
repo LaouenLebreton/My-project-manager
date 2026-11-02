@@ -475,6 +475,77 @@ pub async fn team_history(app: AppHandle, window: WebviewWindow, before: Option<
     Ok(HistoryPage { entries, can_revert: raw.can_revert, has_more })
 }
 
+/// Which tasks an Editor may change (same shape as the server's).
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TaskScopeView {
+    All,
+    /// Only tasks they are assigned to (as a resource with their name or email).
+    Assigned,
+    /// Only tasks inside these phases.
+    Phases { ids: Vec<String> },
+}
+
+/// What an Editor may change.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberLimits {
+    pub schedule: bool,
+    pub progress: bool,
+    pub resources: bool,
+    pub costs: bool,
+    pub project: bool,
+    pub tasks: TaskScopeView,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct Member {
+    pub user_id: String,
+    pub name: String,
+    pub email: String,
+    /// "owner", "editor" or "viewer".
+    pub role: String,
+    pub limits: MemberLimits,
+    /// This is the person using the app.
+    pub is_me: bool,
+}
+
+/// Team > Members & Permissions: everyone in the project's team and what they may change.
+#[tauri::command]
+pub async fn team_members(app: AppHandle, window: WebviewWindow) -> Result<Vec<Member>, IpcError> {
+    let (a, project) = shared_in(&app, window.label())?;
+    #[derive(Deserialize)]
+    struct Raw {
+        user: TeamUser,
+        role: String,
+        limits: MemberLimits,
+    }
+    let list: Vec<Raw> = call(reqwest::Method::GET, &a.server, &format!("/api/projects/{project}/members"), Some(&a.token), None).await?;
+    Ok(list
+        .into_iter()
+        .map(|m| Member { is_me: m.user.id == a.user.id, user_id: m.user.id, name: m.user.name, email: m.user.email, role: m.role, limits: m.limits })
+        .collect())
+}
+
+/// The owner sets one member's role ("editor" or "viewer") and limits.
+#[tauri::command]
+pub async fn team_set_member(app: AppHandle, window: WebviewWindow, user_id: String, role: String, limits: MemberLimits) -> Result<(), IpcError> {
+    let (a, project) = shared_in(&app, window.label())?;
+    let _: serde_json::Value = call(
+        reqwest::Method::PUT,
+        &a.server,
+        &format!("/api/projects/{project}/members/{user_id}"),
+        Some(&a.token),
+        Some(serde_json::json!({ "role": role, "limits": limits })),
+    )
+    .await?;
+    Ok(())
+}
+
 /// The owner reverts a change; the result arrives like any other change.
 #[tauri::command]
 pub async fn team_revert(app: AppHandle, window: WebviewWindow, version: i64) -> Result<(), IpcError> {

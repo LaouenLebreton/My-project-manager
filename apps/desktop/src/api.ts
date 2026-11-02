@@ -15,8 +15,10 @@ import type { TeamView } from "./bindings/TeamView";
 import type { Invite } from "./bindings/Invite";
 import type { TeamProject } from "./bindings/TeamProject";
 import type { HistoryPage } from "./bindings/HistoryPage";
+import type { Member } from "./bindings/Member";
+import type { MemberLimits } from "./bindings/MemberLimits";
 
-export type { Edit, EditResult, HistoryPage, Invite, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamProject, TeamStatus, TeamView };
+export type { Edit, EditResult, HistoryPage, Invite, Member, MemberLimits, IpcError, RecentFile, SharedProject, Snapshot, SyncStatus, TeamProject, TeamStatus, TeamView };
 
 /** Rejects with an IpcError whose message can be shown to the user as is. */
 export const api = {
@@ -61,6 +63,8 @@ export const team = {
   /** The History view, newest first; `before` is the oldest version already shown. */
   history: (before: number | null) => invoke<HistoryPage>("team_history", { before }),
   revert: (version: number) => invoke<void>("team_revert", { version }),
+  members: () => invoke<Member[]>("team_members"),
+  setMember: (userId: string, role: string, limits: MemberLimits) => invoke<void>("team_set_member", { userId, role, limits }),
   open: (projectId: string) => invoke<Snapshot | null>("team_open", { projectId }),
 };
 

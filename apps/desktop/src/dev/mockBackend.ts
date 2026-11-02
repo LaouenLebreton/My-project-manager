@@ -261,6 +261,16 @@ export function install() {
           });
           return { entries, canRevert: true, hasMore: before - 21 > 1 };
         }
+        case "team_members": {
+          const all = { schedule: true, progress: true, resources: true, costs: true, project: true, tasks: { kind: "all" } };
+          return [
+            { userId: "u1", name: "Laouen", email: "laouen@example.com", role: "owner", limits: all, isMe: true },
+            { userId: "u2", name: "Alex Martin", email: "alex@example.com", role: "editor", limits: { ...all, schedule: false, tasks: { kind: "assigned" } }, isMe: false },
+            { userId: "u3", name: "Sam", email: "sam@example.com", role: "viewer", limits: all, isMe: false },
+          ];
+        }
+        case "team_set_member":
+          return null;
         case "team_revert":
           return null;
         case "team_sign_out":

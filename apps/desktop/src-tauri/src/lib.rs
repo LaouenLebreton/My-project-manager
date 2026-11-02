@@ -134,6 +134,8 @@ pub fn run() {
             team::team_join,
             team::team_history,
             team::team_revert,
+            team::team_members,
+            team::team_set_member,
             team::open_second_user,
             team::team_teams,
             team::team_create_team,

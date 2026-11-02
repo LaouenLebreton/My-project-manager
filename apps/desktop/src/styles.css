@@ -1324,3 +1324,28 @@ input.wide {
 .history-more {
   margin-top: 10px;
 }
+
+/* Members & Permissions. */
+.members {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 60vh;
+  overflow: auto;
+  min-width: 460px;
+}
+.member {
+  border: 1px solid var(--gantt-grid);
+  border-radius: 8px;
+  padding: 6px 12px 10px;
+  margin: 0;
+}
+.member-limits {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 6px;
+}
+label.indent {
+  margin-left: 20px;
+}
