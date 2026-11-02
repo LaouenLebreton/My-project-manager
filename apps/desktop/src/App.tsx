@@ -27,6 +27,8 @@ import type { ReportView } from "./bindings/ReportView";
 
 /** Window > Portfolio, from inside the page (start screen, command bar). */
 const openPortfolio = () => invoke("open_portfolio").catch(() => {});
+/** File > New Tab: the start page in a tab, to open or create another project. */
+const openHome = () => invoke("show_home").catch(() => {});
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -255,6 +257,7 @@ export function App() {
       { name: "Show History (every change in a team project)", shortcut: "⌘7", run: () => setView("history") },
       { name: "Show Chat (teams, channels, posts)", shortcut: "⌘8", run: () => setView("chat") },
       { name: "Open Portfolio (all projects)", shortcut: "⌘0", run: () => void openPortfolio() },
+      { name: "New Tab (Home: open or create another project)", shortcut: "⌘T", run: () => void openHome() },
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
@@ -405,6 +408,9 @@ export function App() {
   return (
     <main className="document">
       <header className="toolbar">
+        <button className="home-button" onClick={() => void openHome()} title="Home: open or create another project in a new tab (⌘T)" aria-label="Home">
+          ⌂
+        </button>
         <div>
           <h1>{snapshot.project.name}</h1>
           <p className="secondary">

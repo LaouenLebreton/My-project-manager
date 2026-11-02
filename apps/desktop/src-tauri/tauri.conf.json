@@ -17,7 +17,8 @@
         "height": 800,
         "minWidth": 720,
         "minHeight": 480,
-        "label": "main"
+        "label": "main",
+        "tabbingIdentifier": "super-pm-projects"
       }
     ],
     "security": {

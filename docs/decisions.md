@@ -147,3 +147,15 @@ Rust, so the web view gets no new permission. Only when someone @mentions you by
 no Super PM window is in front; inside the app the Chat tab's badge and highlighting do the job.
 Development builds are not app bundles, so macOS may show them under another name or not at
 all; the bundled app shows them as Super PM.
+
+## Tabs and a way home (owner, 2026-11-02)
+
+The owner asked for a way back to the landing page while a project is open, and for tabs so
+several projects (local or shared) can be open at once. Projects stay one window each (the
+earlier decision), grouped as native macOS tabs (tabbing identifier `super-pm-projects`, and
+each new project window added as a tab of the front one through AppKit's
+`addTabbedWindow:ordered:`), so they behave like Safari's or Finder's tabs: drag one out to
+make a window, Window > Merge All Windows, ⌃Tab to switch. File > New Tab (⌘T) and the ⌂
+button in every project's header open the start page as a tab; opening a project there turns
+that tab into the project. The Portfolio keeps its own window. Windows and Linux get separate
+windows (no native tabs there).

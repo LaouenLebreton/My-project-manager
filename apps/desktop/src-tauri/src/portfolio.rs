@@ -338,7 +338,11 @@ pub fn show(app: &AppHandle) {
         let _ = w.set_focus();
         return;
     }
-    let built = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()))
+    let builder = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()));
+    // Its own tab group, so projects never open as tabs of the portfolio.
+    #[cfg(target_os = "macos")]
+    let builder = builder.tabbing_identifier("super-pm-portfolio");
+    let built = builder
         .title("Portfolio")
         .inner_size(1200.0, 760.0)
         .min_inner_size(720.0, 480.0)
@@ -346,6 +350,12 @@ pub fn show(app: &AppHandle) {
     if let Err(e) = built {
         eprintln!("could not open the portfolio: {e}");
     }
+}
+
+/// The Home button and File > New Tab: the start page in a tab.
+#[tauri::command]
+pub fn show_home(app: AppHandle) {
+    crate::actions::show_home(&app);
 }
 
 /// The start screen's and command bar's way to Window > Portfolio.

@@ -247,6 +247,7 @@ export function install() {
         case "portfolio_remove":
         case "portfolio_open":
         case "open_portfolio":
+        case "show_home":
           return null;
         case "team_status":
           return teamStatus();

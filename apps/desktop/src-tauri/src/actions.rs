@@ -84,6 +84,10 @@ fn create_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
         .inner_size(1200.0, 800.0)
         .min_inner_size(720.0, 480.0)
         .visible(false);
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.tabbing_identifier(crate::platform::TAB_GROUP);
+    }
     // Cascade from the front window, as document apps do.
     if let Some(front) = focused_label(app).and_then(|l| app.get_webview_window(&l))
         && let (Ok(pos), Ok(scale)) = (front.outer_position(), front.scale_factor())
@@ -92,6 +96,43 @@ fn create_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
         builder = builder.position(p.x + 28.0, p.y + 28.0);
     }
     builder.build()
+}
+
+/// Makes `window` a tab of the front project or Home window, unless it already is that window
+/// or is already showing (then it stays where it is).
+fn tab_into_front(app: &AppHandle, window: &WebviewWindow) {
+    if window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let front = focused_label(app)
+        .filter(|l| l != window.label() && l != crate::portfolio::WINDOW)
+        .and_then(|l| app.get_webview_window(&l))
+        .filter(|w| w.is_visible().unwrap_or(false));
+    if let Some(front) = front {
+        crate::platform::tab_into(app, front, window.clone());
+    }
+}
+
+/// File > New Tab and the Home button: the start page (new, open, recent, portfolio, team) in a
+/// tab. An existing empty tab is reused rather than opening another.
+pub fn show_home(app: &AppHandle) {
+    let docs = app.state::<AppState>();
+    let empty: Vec<String> = {
+        let docs = docs.docs.lock().expect("lock");
+        let mut labels: Vec<String> = app.webview_windows().into_keys().filter(|l| l != crate::portfolio::WINDOW && !docs.contains_key(l)).collect();
+        labels.sort();
+        labels
+    };
+    let window = match empty.first().and_then(|l| app.get_webview_window(l)) {
+        Some(w) => Some(w),
+        None => create_window(app, &format!("doc-{}", new_id().simple())).map_err(|e| eprintln!("could not open a tab: {e}")).ok(),
+    };
+    if let Some(w) = window {
+        let _ = w.set_title("Super PM");
+        tab_into_front(app, &w);
+        show(&w);
+        set_focused(app, w.label());
+    }
 }
 
 /// The window a newly opened project should use: the asking window if it is empty, else any
@@ -137,6 +178,8 @@ pub fn install(app: &AppHandle, asking: Option<&str>, doc: Document) -> Option<S
     };
     if let Some(w) = &window {
         let _ = w.set_title(&title);
+        // A project opened from another window becomes a tab there, not a window of its own.
+        tab_into_front(app, w);
         show(w);
     }
     let _ = app.emit_to(label.as_str(), crate::CHANGED_EVENT, snap.clone());

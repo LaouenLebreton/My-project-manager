@@ -46,3 +46,28 @@ pub fn register_standard_menus<R: Runtime>(window: &Submenu<R>, help: &Submenu<R
 pub fn register_standard_menus<R: Runtime>(_window: &Submenu<R>, _help: &Submenu<R>) -> tauri::Result<()> {
     Ok(())
 }
+
+/// Windows with this identifier group as tabs of one window (macOS).
+pub const TAB_GROUP: &str = "super-pm-projects";
+
+/// Shows `window` as a tab of the window in front, as Safari and Finder do with new tabs.
+/// AppKit must be called on the main thread, so this hands the work to it.
+#[cfg(target_os = "macos")]
+pub fn tab_into<R: Runtime>(app: &AppHandle<R>, front: tauri::WebviewWindow<R>, window: tauri::WebviewWindow<R>) {
+    let _ = app.run_on_main_thread(move || {
+        use objc2_app_kit::{NSWindow, NSWindowOrderingMode};
+        let (Ok(a), Ok(b)) = (front.ns_window(), window.ns_window()) else { return };
+        if a == b {
+            return;
+        }
+        // SAFETY: Tauri hands out the window's live NSWindow, and we are on the main thread.
+        unsafe {
+            let (a, b) = (&*(a as *const NSWindow), &*(b as *const NSWindow));
+            a.addTabbedWindow_ordered(b, NSWindowOrderingMode::Above);
+            b.makeKeyAndOrderFront(None);
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn tab_into<R: Runtime>(_app: &AppHandle<R>, _front: tauri::WebviewWindow<R>, _window: tauri::WebviewWindow<R>) {}

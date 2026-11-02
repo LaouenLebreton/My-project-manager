@@ -3999,6 +3999,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "jiff",
+ "objc2-app-kit",
  "pm-core",
  "pm-interop",
  "pm-server",

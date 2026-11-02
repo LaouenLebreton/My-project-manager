@@ -53,6 +53,10 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
         }
         menu::id::OPEN_5K => ipc::open_generated(app, label.as_deref(), 5_000).map(|_| ()),
         menu::id::SECOND_USER => team::open_second_user(),
+        menu::id::NEW_TAB => {
+            actions::show_home(app);
+            Ok(())
+        }
         menu::id::PORTFOLIO => {
             portfolio::show(app);
             Ok(())
@@ -146,6 +150,7 @@ pub fn run() {
             portfolio::portfolio_remove,
             portfolio::portfolio_open,
             portfolio::open_portfolio,
+            portfolio::show_home,
             team::team_history,
             team::team_revert,
             team::team_members,

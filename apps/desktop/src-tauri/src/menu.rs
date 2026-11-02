@@ -63,6 +63,7 @@ pub mod id {
     pub const TEAM_MEMBERS: &str = "team.members";
     pub const TEAM_MOVE: &str = "team.move";
     pub const PORTFOLIO: &str = "window.portfolio";
+    pub const NEW_TAB: &str = "file.new_tab";
     pub const SECOND_USER: &str = "dev.second_user";
     pub const OPEN_5K: &str = "dev.open_5000";
     pub const OPEN_20K: &str = "dev.open_20000";
@@ -151,6 +152,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let export = item(app, id::EXPORT, "Export as Microsoft Project XML…", Some("CmdOrCtrl+Shift+E"))?;
     let file = SubmenuBuilder::new(app, "File")
         .item(&enabled(id::NEW, "New Project…", Some("CmdOrCtrl+N"))?)
+        .item(&enabled(id::NEW_TAB, "New Tab", Some("CmdOrCtrl+T"))?)
         .item(&enabled(id::OPEN, "Open…", Some("CmdOrCtrl+O"))?)
         .item(&recent)
         .separator()

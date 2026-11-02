@@ -1241,12 +1241,12 @@ input.wide {
 }
 
 /* Narrow windows: the title shrinks (with an ellipsis) before the view tabs wrap. */
-.toolbar > div:first-child {
+.toolbar > div:first-of-type {
   min-width: 0;
   flex: 1 1 auto;
 }
-.toolbar > div:first-child h1,
-.toolbar > div:first-child p {
+.toolbar > div:first-of-type h1,
+.toolbar > div:first-of-type p {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1732,4 +1732,14 @@ label.indent {
   bottom: 5px;
   width: 2px;
   background: var(--text-secondary);
+}
+
+/* Home: back to the start page in a tab. */
+.home-button {
+  flex-shrink: 0;
+  margin-right: 10px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
 }
