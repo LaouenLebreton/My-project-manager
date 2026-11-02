@@ -401,3 +401,33 @@ async fn team_owners_invite_people_and_open_servers_take_sign_ups() {
     let (_, info) = call(&open, "GET", "/api/server", None, None).await;
     assert_eq!(info, json!({ "openSignup": true, "publicUrl": "https://pm.example.com" }));
 }
+
+#[tokio::test]
+async fn posts_can_be_edited_deleted_and_reacted_to() {
+    let app = server();
+    let p = people(&app).await;
+    let (_, team) = call(&app, "POST", "/api/teams", Some(&p[0].0), Some(json!({ "name": "T" }))).await;
+    let team_id = team["team"]["id"].as_str().unwrap().to_owned();
+    call(&app, "POST", &format!("/api/teams/{team_id}/members"), Some(&p[0].0), Some(json!({ "email": "alex@example.com" }))).await;
+    let (_, channels) = call(&app, "GET", &format!("/api/teams/{team_id}/channels"), Some(&p[1].0), None).await;
+    let general = channels[0]["id"].as_str().unwrap().to_owned();
+    let (_, post) = call(&app, "POST", &format!("/api/channels/{general}/posts"), Some(&p[1].0), Some(json!({ "body": "Meetng at 9" }))).await;
+    let id = post["id"].as_str().unwrap().to_owned();
+
+    let (status, edited) = call(&app, "PUT", &format!("/api/posts/{id}"), Some(&p[1].0), Some(json!({ "body": "Meeting at 9" }))).await;
+    assert_eq!((status, edited["body"].as_str()), (StatusCode::OK, Some("Meeting at 9")));
+    assert!(edited["editedAt"].is_string());
+    let (status, _) = call(&app, "PUT", &format!("/api/posts/{id}"), Some(&p[0].0), Some(json!({ "body": "Hijacked" }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "only the author edits");
+
+    let (_, reacted) = call(&app, "POST", &format!("/api/posts/{id}/reactions"), Some(&p[0].0), Some(json!({ "emoji": "👍" }))).await;
+    assert_eq!(reacted["reactions"][0]["userName"], "Laouen");
+    let (_, again) = call(&app, "POST", &format!("/api/posts/{id}/reactions"), Some(&p[0].0), Some(json!({ "emoji": "👍" }))).await;
+    assert_eq!(again["reactions"], json!([]), "a second click takes it back");
+    let (status, _) = call(&app, "POST", &format!("/api/posts/{id}/reactions"), Some(&p[0].0), Some(json!({ "emoji": "💩" }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The team's owner may delete anyone's post; it stays as "deleted".
+    let (status, deleted) = call(&app, "DELETE", &format!("/api/posts/{id}"), Some(&p[0].0), None).await;
+    assert_eq!((status, deleted["deleted"].as_bool(), deleted["body"].as_str()), (StatusCode::OK, Some(true), Some("")));
+}

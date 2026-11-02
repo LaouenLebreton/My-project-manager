@@ -91,7 +91,21 @@ pub struct Post {
     pub author_id: Uuid,
     pub author_name: String,
     pub at: String,
+    /// Empty once deleted.
     pub body: String,
+    /// When the author last edited it.
+    pub edited_at: Option<String>,
+    pub deleted: bool,
+    pub reactions: Vec<Reaction>,
+}
+
+/// One person's emoji on a post.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reaction {
+    pub emoji: String,
+    pub user_id: Uuid,
+    pub user_name: String,
 }
 
 /// Everything the handlers need from storage. Calls are blocking; handlers run them on
@@ -160,6 +174,11 @@ pub trait Storage: Send + Sync + 'static {
     fn mark_read(&self, user: Uuid, channel: Uuid, upto: Uuid) -> Result<()>;
     /// Per channel of the team: posts and replies by others the user has not seen.
     fn unread(&self, user: Uuid, team: Uuid) -> Result<Vec<(Uuid, u32)>>;
+    fn edit_post(&self, id: Uuid, body: &str, at: &str) -> Result<()>;
+    /// Keeps the post (its replies stay) but empties it.
+    fn delete_post(&self, id: Uuid) -> Result<()>;
+    /// Adds the user's emoji to the post, or takes it away if it was there.
+    fn toggle_reaction(&self, post: Uuid, user: Uuid, emoji: &str) -> Result<()>;
 }
 
 /// Forward-only migrations; `PRAGMA user_version` holds the version.
@@ -260,6 +279,17 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (user_id, channel_id)
     );
     "#,
+    // 5 -> 6: editing and deleting posts, and reactions.
+    r#"
+    ALTER TABLE post ADD COLUMN edited_at TEXT;
+    ALTER TABLE post ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE reaction (
+        post_id TEXT NOT NULL REFERENCES post (id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES user (id) ON DELETE CASCADE,
+        emoji   TEXT NOT NULL,
+        PRIMARY KEY (post_id, user_id, emoji)
+    );
+    "#,
 ];
 
 /// A team server's storage: one SQLite file.
@@ -355,7 +385,7 @@ fn channel_from_row(r: &rusqlite::Row) -> rusqlite::Result<Channel> {
     Ok(Channel { id: uuid_at(r, 0)?, team_id: uuid_at(r, 1)?, name: r.get(2)?, project_id: opt_uuid_at(r, 3)?, created_at: r.get(4)?, unread: 0 })
 }
 
-const POST_COLUMNS: &str = "p.id, p.channel_id, p.parent_id, p.author_id, u.name, p.at, p.body";
+const POST_COLUMNS: &str = "p.id, p.channel_id, p.parent_id, p.author_id, u.name, p.at, p.body, p.edited_at, p.deleted";
 
 fn post_from_row(r: &rusqlite::Row) -> rusqlite::Result<Post> {
     Ok(Post {
@@ -366,7 +396,20 @@ fn post_from_row(r: &rusqlite::Row) -> rusqlite::Result<Post> {
         author_name: r.get(4)?,
         at: r.get(5)?,
         body: r.get(6)?,
+        edited_at: r.get(7)?,
+        deleted: r.get(8)?,
+        reactions: Vec::new(),
     })
+}
+
+/// Fills in each post's reactions, oldest first.
+fn with_reactions(conn: &Connection, posts: &mut [Post]) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("SELECT r.emoji, r.user_id, u.name FROM reaction r JOIN user u ON u.id = r.user_id WHERE r.post_id = ?1 ORDER BY r.rowid")?;
+    for p in posts {
+        let rows = stmt.query_map([p.id.to_string()], |r| Ok(Reaction { emoji: r.get(0)?, user_id: uuid_at(r, 1)?, user_name: r.get(2)? }))?;
+        p.reactions = rows.collect::<rusqlite::Result<_>>()?;
+    }
+    Ok(())
 }
 
 impl Storage for SqliteStorage {
@@ -642,10 +685,12 @@ impl Storage for SqliteStorage {
     }
 
     fn post(&self, id: Uuid) -> Result<Option<Post>> {
-        Ok(self
-            .conn()
-            .query_row(&format!("SELECT {POST_COLUMNS} FROM post p JOIN user u ON u.id = p.author_id WHERE p.id = ?1"), [id.to_string()], post_from_row)
-            .optional()?)
+        let conn = self.conn();
+        let mut found = conn.query_row(&format!("SELECT {POST_COLUMNS} FROM post p JOIN user u ON u.id = p.author_id WHERE p.id = ?1"), [id.to_string()], post_from_row).optional()?;
+        if let Some(p) = found.as_mut() {
+            with_reactions(&conn, std::slice::from_mut(p))?;
+        }
+        Ok(found)
     }
 
     fn posts(&self, channel: Uuid, before: Option<Uuid>, limit: u32) -> Result<Vec<Post>> {
@@ -657,7 +702,9 @@ impl Storage for SqliteStorage {
         // "~" sorts after every hex digit, so no `before` means everything.
         let before = before.map_or_else(|| "~".to_owned(), |b| b.to_string());
         let rows = stmt.query_map(params![channel.to_string(), before, limit], post_from_row)?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let mut posts: Vec<Post> = rows.collect::<rusqlite::Result<_>>()?;
+        with_reactions(&conn, &mut posts)?;
+        Ok(posts)
     }
 
     fn replies(&self, parents: &[Uuid]) -> Result<Vec<Post>> {
@@ -668,7 +715,29 @@ impl Storage for SqliteStorage {
             let rows = stmt.query_map([parent.to_string()], post_from_row)?;
             out.extend(rows.collect::<rusqlite::Result<Vec<_>>>()?);
         }
+        with_reactions(&conn, &mut out)?;
         Ok(out)
+    }
+
+    fn edit_post(&self, id: Uuid, body: &str, at: &str) -> Result<()> {
+        self.conn().execute("UPDATE post SET body = ?2, edited_at = ?3 WHERE id = ?1 AND deleted = 0", params![id.to_string(), body, at])?;
+        Ok(())
+    }
+
+    fn delete_post(&self, id: Uuid) -> Result<()> {
+        let conn = self.conn();
+        conn.execute("UPDATE post SET body = '', deleted = 1 WHERE id = ?1", [id.to_string()])?;
+        conn.execute("DELETE FROM reaction WHERE post_id = ?1", [id.to_string()])?;
+        Ok(())
+    }
+
+    fn toggle_reaction(&self, post: Uuid, user: Uuid, emoji: &str) -> Result<()> {
+        let conn = self.conn();
+        let removed = conn.execute("DELETE FROM reaction WHERE post_id = ?1 AND user_id = ?2 AND emoji = ?3", params![post.to_string(), user.to_string(), emoji])?;
+        if removed == 0 {
+            conn.execute("INSERT INTO reaction (post_id, user_id, emoji) VALUES (?1, ?2, ?3)", params![post.to_string(), user.to_string(), emoji])?;
+        }
+        Ok(())
     }
 
     fn mark_read(&self, user: Uuid, channel: Uuid, upto: Uuid) -> Result<()> {

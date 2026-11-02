@@ -86,12 +86,13 @@ revert a change (applied as a new change, so the log stays complete).
    longer fits. Shared projects are kept in the app's Shared folder.
 4. **[Done]** **Change log view** and owner revert.
 5. **[Done]** **Permissions** per member, enforced on the server, reflected in the app. Team > Members & Permissions
-   for the owner; refused edits come back as a notice saying what is not allowed. Greying
-   out controls before the edit is tried is still to do.
+   for the owner; refused edits come back as a notice saying what is not allowed. The app also
+   greys out what a person may not change and says why (View only / Limited editing).
 6. **[Done]** **Teams, channels, posts:** server API and storage, then the Chat pane. Chat tab (⌘8): teams and channels on the
    left (General, one per team project, and any added), conversations with threaded replies,
-   live delivery, unread counts, @mentions highlighted, #12 linking to task 12. Reactions and
-   mention notifications are still to do.
+   live delivery, unread counts, @mentions highlighted, #12 linking to task 12. Since then:
+   reactions (👍 ❤️ 😄 🎉 👀 ✅), editing and deleting posts (authors; team owners may delete
+   any), conversations that mention you highlighted, and a new-post count on the Chat tab.
 7. **Online (in progress):** *Done:* team owners invite through the server; optional open
    sign-up (`--open-signup`); `--public-url` for invites; Dockerfile and `docs/deploy.md`
    (Fly.io recommended, or any Linux server with Caddy); the app's sign-in offers "create my

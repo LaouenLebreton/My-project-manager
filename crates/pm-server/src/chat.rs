@@ -42,6 +42,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/teams/{id}/channels", get(channels).post(create_channel))
         .route("/api/channels/{id}/posts", get(posts).post(add_post))
         .route("/api/channels/{id}/read", post(mark_read))
+        .route("/api/posts/{id}", axum::routing::put(edit_post).delete(delete_post))
+        .route("/api/posts/{id}/reactions", post(react))
         .route("/api/chat/live", get(live))
 }
 
@@ -177,7 +179,18 @@ async fn add_post(State(state): State<AppState>, Auth(me): Auth, Path(channel): 
         return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "this post is too long; split it into several"));
     }
     let c = channel_for(&state, channel, me.id).await?;
-    let post = Post { id: Uuid::now_v7(), channel_id: channel, parent_id: req.parent_id, author_id: me.id, author_name: me.name.clone(), at: now(), body };
+    let post = Post {
+        id: Uuid::now_v7(),
+        channel_id: channel,
+        parent_id: req.parent_id,
+        author_id: me.id,
+        author_name: me.name.clone(),
+        at: now(),
+        body,
+        edited_at: None,
+        deleted: false,
+        reactions: Vec::new(),
+    };
     let stored = post.clone();
     let ok = db(&state, move |s| {
         // Replies go to posts in the same channel, one level deep, as in Teams.
@@ -197,6 +210,78 @@ async fn add_post(State(state): State<AppState>, Auth(me): Auth, Path(channel): 
     }
     let _ = state.hub.chat.send(Arc::new(ChatEvent::Post { team_id: c.team_id, post: post.clone() }));
     Ok(Json(post))
+}
+
+/// The emoji people can react with, as in Teams.
+pub const REACTIONS: [&str; 6] = ["👍", "❤️", "😄", "🎉", "👀", "✅"];
+
+/// A post the caller can see, with its team; and whether they own the team.
+async fn post_for(state: &AppState, post: Uuid, user: Uuid) -> Result<(Post, Uuid, bool), ApiError> {
+    db(state, move |s| {
+        let Some(p) = s.post(post)? else { return Ok(None) };
+        let Some(c) = s.channel(p.channel_id)? else { return Ok(None) };
+        Ok(s.team_role(c.team_id, user)?.map(|role| (p, c.team_id, role == crate::storage::TeamRole::Owner)))
+    })
+    .await?
+    .ok_or_else(not_found)
+}
+
+/// Sends the post as it is now to everyone in the team.
+async fn announce(state: &AppState, post: Uuid, team: Uuid) -> Result<Post, ApiError> {
+    let p = db(state, move |s| s.post(post)).await?.ok_or_else(not_found)?;
+    let _ = state.hub.chat.send(Arc::new(ChatEvent::Post { team_id: team, post: p.clone() }));
+    Ok(p)
+}
+
+#[derive(Deserialize)]
+pub struct EditPost {
+    pub body: String,
+}
+
+/// Authors edit their own posts.
+async fn edit_post(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>, Json(req): Json<EditPost>) -> ApiResult<Post> {
+    let (p, team, _) = post_for(&state, id, me.id).await?;
+    if p.author_id != me.id {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "you can only edit your own posts"));
+    }
+    if p.deleted {
+        return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "this post was deleted"));
+    }
+    let body = req.body.trim().to_owned();
+    if body.is_empty() {
+        return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "write something, or delete the post instead"));
+    }
+    let at = now();
+    db(&state, move |s| s.edit_post(id, &body, &at)).await?;
+    Ok(Json(announce(&state, id, team).await?))
+}
+
+/// Authors delete their own posts; team owners can delete any. Replies stay.
+async fn delete_post(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>) -> ApiResult<Post> {
+    let (p, team, owner) = post_for(&state, id, me.id).await?;
+    if p.author_id != me.id && !owner {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "you can only delete your own posts"));
+    }
+    db(&state, move |s| s.delete_post(id)).await?;
+    Ok(Json(announce(&state, id, team).await?))
+}
+
+#[derive(Deserialize)]
+pub struct React {
+    pub emoji: String,
+}
+
+/// Adds the caller's reaction, or takes it back.
+async fn react(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>, Json(req): Json<React>) -> ApiResult<Post> {
+    if !REACTIONS.contains(&req.emoji.as_str()) {
+        return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "that reaction is not available"));
+    }
+    let (p, team, _) = post_for(&state, id, me.id).await?;
+    if p.deleted {
+        return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "this post was deleted"));
+    }
+    db(&state, move |s| s.toggle_reaction(id, me.id, &req.emoji)).await?;
+    Ok(Json(announce(&state, id, team).await?))
 }
 
 /// The caller has seen everything in the channel so far.

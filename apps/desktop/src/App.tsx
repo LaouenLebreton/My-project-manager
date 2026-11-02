@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { api, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
+import { api, chat, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
 import { AddAccountSheet, CreateTeamSheet, InvitePeopleSheet, InvitesSheet, JoinSheet, OpenSharedSheet, SignInSheet, SyncPill } from "./TeamSheets";
 import type { Invite } from "./api";
 import { formatDate, formatMoney } from "./format";
@@ -47,6 +47,9 @@ export function App() {
   // The team server account, and this window's sync state (shared projects only).
   const [teamStatus, setTeamStatus] = useState<TeamStatus | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  // New chat posts by others while the Chat tab is not showing.
+  const [chatUnread, setChatUnread] = useState(0);
+  const viewRef = useRef<string>("tasks");
   const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | "account" | "join" | "invite" | "invites" | "members" | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
   /** Closes a team sheet unless it has already been replaced by the next one. */
@@ -115,6 +118,10 @@ export function App() {
     (title: string, message: string, action: string) => new Promise<boolean>((answer) => setQuestion({ title, message, action, answer })),
     [],
   );
+  useEffect(() => {
+    viewRef.current = view;
+    if (view === "chat") setChatUnread(0);
+  }, [view]);
   const pendingRow = useRef<number | null>(null);
   const showTask = useCallback((row: number) => {
     pendingRow.current = row - 1;
@@ -158,6 +165,13 @@ export function App() {
       listen<IpcError>("error", (e) => setError(e.payload.message)),
       listen<SyncStatus>("team-status", (e) => setSyncStatus(e.payload)),
       listen<string>("team-notice", (e) => setNotice(e.payload)),
+      listen<{ kind: string; post?: { authorId: string; editedAt: string | null; deleted: boolean; reactions: unknown[] } }>("chat-event", (e) => {
+        const p = e.payload.post;
+        if (!p || p.editedAt || p.deleted || p.reactions.length || viewRef.current === "chat") return;
+        void chat.me().then((me) => {
+          if (p.authorId !== me) setChatUnread((n) => n + 1);
+        });
+      }),
       listen<ReportView>("import-report", (e) => {
         setReport(e.payload);
         void api.takeImportReport(); // shown now, so it is no longer waiting
@@ -421,6 +435,11 @@ export function App() {
           {teamStatus?.user && (
             <button role="tab" aria-selected={view === "chat"} className={view === "chat" ? "on" : undefined} onClick={() => setView("chat")}>
               Chat
+              {chatUnread > 0 && view !== "chat" && (
+                <span className="tab-badge" aria-label={`${chatUnread} new`}>
+                  {chatUnread}
+                </span>
+              )}
             </button>
           )}
         </div>
@@ -449,7 +468,7 @@ export function App() {
         </p>
       ))}
       {view === "chat" ? (
-        <ChatView snapshot={snapshot} onShowTask={showTask} />
+        <ChatView snapshot={snapshot} onShowTask={showTask} onConfirm={confirm} />
       ) : view === "history" && snapshot.project.team ? (
         <HistoryView snapshot={snapshot} onShowTask={showTask} onConfirm={confirm} />
       ) : view === "board" ? (

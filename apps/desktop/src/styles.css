@@ -1523,3 +1523,60 @@ label.indent {
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* Chat: post actions on hover, reactions, mentions, the Chat tab's badge. */
+.post .chat-meta {
+  position: relative;
+}
+.post-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  opacity: 0;
+}
+.post:hover > .chat-meta .post-actions,
+.post:focus-within > .chat-meta .post-actions {
+  opacity: 1;
+}
+.post-actions .react {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0 32px;
+}
+.reactions .chip {
+  border: 1px solid var(--gantt-grid);
+  background: Canvas;
+  color: inherit;
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.reactions .chip.mine {
+  border-color: var(--gantt-accent);
+  background: color-mix(in srgb, var(--gantt-accent) 15%, Canvas);
+}
+.thread.mentioned {
+  border-color: var(--gantt-accent);
+  box-shadow: inset 3px 0 0 var(--gantt-accent);
+}
+.chat-edit {
+  margin-left: 32px;
+}
+.tab-badge {
+  background: var(--gantt-critical);
+  color: white;
+  border-radius: 8px;
+  font-size: 10px;
+  padding: 0 5px;
+  margin-left: 5px;
+}

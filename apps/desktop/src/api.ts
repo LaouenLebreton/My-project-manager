@@ -82,6 +82,9 @@ export const chat = {
   send: (channelId: string, body: string, parentId: string | null) => invoke<ChatPost>("chat_send", { channelId, body, parentId }),
   read: (channelId: string) => invoke<void>("chat_read", { channelId }),
   createChannel: (teamId: string, name: string) => invoke<ChatChannel>("chat_create_channel", { teamId, name }),
+  edit: (postId: string, body: string) => invoke<ChatPost>("chat_edit", { postId, body }),
+  remove: (postId: string) => invoke<ChatPost>("chat_delete", { postId }),
+  react: (postId: string, emoji: string) => invoke<ChatPost>("chat_react", { postId, emoji }),
 };
 
 export function errorMessage(e: unknown): string {

@@ -288,11 +288,13 @@ export function install() {
         case "chat_posts": {
           const post = (id: string, authorName: string, body: string, minutesAgo: number, parentId: string | null = null) => ({
             id, channelId: args.channelId, parentId, authorId: authorName === "Laouen" ? "u1" : "u2", authorName, at: new Date(Date.now() - minutesAgo * 60_000).toISOString(), body,
+            editedAt: null, deleted: false,
+            reactions: id === "p1" ? [{ emoji: "👍", userId: "u2", userName: "Alex" }, { emoji: "👍", userId: "u3", userName: "Sam" }] : [],
           });
           return {
             hasMore: false,
             threads: [
-              { post: post("p3", "Sam", "Movers confirmed for #5. I'll send the quote here.", 12), replies: [] },
+              { post: post("p3", "Sam", "@Laouen movers confirmed for #5. I'll send the quote here.", 12), replies: [] },
               {
                 post: post("p1", "Laouen", "Kick-off tomorrow at 9. @Alex can you book the big room?", 95),
                 replies: [post("p2", "Alex", "Booked ✓ — and I moved #3 by a day, see the History tab.", 80, "p1")],
@@ -301,7 +303,11 @@ export function install() {
           };
         }
         case "chat_send":
-          return { id: `p${Date.now()}`, channelId: args.channelId, parentId: args.parentId ?? null, authorId: "u1", authorName: "Laouen", at: new Date().toISOString(), body: args.body };
+          return { id: `p${Date.now()}`, channelId: args.channelId, parentId: args.parentId ?? null, authorId: "u1", authorName: "Laouen", at: new Date().toISOString(), body: args.body, editedAt: null, deleted: false, reactions: [] };
+        case "chat_react":
+        case "chat_edit":
+        case "chat_delete":
+          return { id: args.postId, channelId: "c-project", parentId: null, authorId: "u1", authorName: "Laouen", at: new Date().toISOString(), body: cmd === "chat_delete" ? "" : String(args.body ?? "Kick-off tomorrow at 9. @Alex can you book the big room?"), editedAt: cmd === "chat_edit" ? new Date().toISOString() : null, deleted: cmd === "chat_delete", reactions: cmd === "chat_react" ? [{ emoji: args.emoji, userId: "u1", userName: "Laouen" }] : [] };
         case "chat_read":
           return null;
         case "chat_create_channel":

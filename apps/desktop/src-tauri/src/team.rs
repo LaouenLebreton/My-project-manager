@@ -885,7 +885,42 @@ pub struct ChatPost {
     pub author_id: String,
     pub author_name: String,
     pub at: String,
+    /// Empty once deleted.
     pub body: String,
+    pub edited_at: Option<String>,
+    pub deleted: bool,
+    pub reactions: Vec<ChatReaction>,
+}
+
+/// One person's emoji on a post.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatReaction {
+    pub emoji: String,
+    pub user_id: String,
+    pub user_name: String,
+}
+
+/// Authors edit their own posts.
+#[tauri::command]
+pub async fn chat_edit(app: AppHandle, post_id: String, body: String) -> Result<ChatPost, IpcError> {
+    let a = signed_in(&app)?;
+    Ok(call(reqwest::Method::PUT, &a.server, &format!("/api/posts/{post_id}"), Some(&a.token), Some(serde_json::json!({ "body": body }))).await?)
+}
+
+/// Authors delete their own posts; team owners any.
+#[tauri::command]
+pub async fn chat_delete(app: AppHandle, post_id: String) -> Result<ChatPost, IpcError> {
+    let a = signed_in(&app)?;
+    Ok(call(reqwest::Method::DELETE, &a.server, &format!("/api/posts/{post_id}"), Some(&a.token), None).await?)
+}
+
+/// Adds the person's reaction to a post, or takes it back.
+#[tauri::command]
+pub async fn chat_react(app: AppHandle, post_id: String, emoji: String) -> Result<ChatPost, IpcError> {
+    let a = signed_in(&app)?;
+    Ok(call(reqwest::Method::POST, &a.server, &format!("/api/posts/{post_id}/reactions"), Some(&a.token), Some(serde_json::json!({ "emoji": emoji }))).await?)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]

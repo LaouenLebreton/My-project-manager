@@ -1,10 +1,21 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { chat, errorMessage, type Snapshot } from "./api";
+import { chat, errorMessage, team as teamApi, type Snapshot } from "./api";
 import type { ChatChannel } from "./bindings/ChatChannel";
 import type { ChatPost } from "./bindings/ChatPost";
 import type { ChatTeam } from "./bindings/ChatTeam";
 import type { ChatThread } from "./bindings/ChatThread";
+
+/** Puts a new or changed post in its place: a conversation, or a reply in one. */
+function upsert(list: ChatThread[], p: ChatPost): ChatThread[] {
+  if (p.parentId) {
+    return list.map((t) =>
+      t.post.id !== p.parentId ? t : { ...t, replies: t.replies.some((r) => r.id === p.id) ? t.replies.map((r) => (r.id === p.id ? p : r)) : [...t.replies, p] },
+    );
+  }
+  if (list.some((t) => t.post.id === p.id)) return list.map((t) => (t.post.id === p.id ? { ...t, post: p } : t));
+  return [{ post: p, replies: [] }, ...list];
+}
 
 type ChatEvent = { kind: "post"; teamId: string; post: ChatPost } | { kind: "channel"; teamId: string; channel: ChatChannel };
 
@@ -46,14 +57,99 @@ function Body({ text, onTask, rowCount }: { text: string; onTask: ((row: number)
   );
 }
 
-function Author({ post, mine }: { post: ChatPost; mine: boolean }) {
+const REACTIONS = ["👍", "❤️", "😄", "🎉", "👀", "✅"];
+
+/** One post or reply: who, when, the text, reactions, and (on hover) react / edit / delete. */
+function PostView({
+  post,
+  me,
+  onTask,
+  rowCount,
+  onChanged,
+  onError,
+  onConfirm,
+}: {
+  post: ChatPost;
+  me: string | null;
+  onTask: ((row: number) => void) | null;
+  rowCount: number;
+  onChanged: (p: ChatPost) => void;
+  onError: (message: string) => void;
+  onConfirm: (title: string, message: string, action: string) => Promise<boolean>;
+}) {
+  const mine = post.authorId === me;
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(post.body);
+  const run = (p: Promise<ChatPost>) => p.then(onChanged, (e) => onError(errorMessage(e)));
+  // Reactions grouped by emoji, in the order first used.
+  const groups = new Map<string, { names: string[]; mine: boolean }>();
+  for (const r of post.reactions) {
+    const g = groups.get(r.emoji) ?? { names: [], mine: false };
+    g.names.push(r.userName);
+    g.mine ||= r.userId === me;
+    groups.set(r.emoji, g);
+  }
   return (
-    <div className="chat-meta">
-      <span className="avatar" aria-hidden>
-        {post.authorName.slice(0, 1).toUpperCase()}
-      </span>
-      <strong>{mine ? `${post.authorName} (you)` : post.authorName}</strong>
-      <span className="secondary small">{when(post.at)}</span>
+    <div className="post">
+      <div className="chat-meta">
+        <span className="avatar" aria-hidden>
+          {post.authorName.slice(0, 1).toUpperCase()}
+        </span>
+        <strong>{mine ? `${post.authorName} (you)` : post.authorName}</strong>
+        <span className="secondary small">
+          {when(post.at)}
+          {post.editedAt && !post.deleted ? " · edited" : ""}
+        </span>
+        {!post.deleted && !editing && (
+          <span className="post-actions">
+            {REACTIONS.map((e) => (
+              <button key={e} className="react" title={`React with ${e}`} aria-label={`React with ${e}`} onClick={() => void run(chat.react(post.id, e))}>
+                {e}
+              </button>
+            ))}
+            {mine && (
+              <button className="link small" onClick={() => setEditing(true)}>
+                Edit
+              </button>
+            )}
+            <button
+              className="link small"
+              onClick={() => void onConfirm("Delete this post?", "It is removed for everyone. Replies to it stay.", "Delete").then((yes) => yes && run(chat.remove(post.id)))} title={mine ? "Delete your post" : "Delete (team owners can delete any post)"}>
+              Delete
+            </button>
+          </span>
+        )}
+      </div>
+      {post.deleted ? (
+        <div className="chat-body secondary">This post was deleted.</div>
+      ) : editing ? (
+        <form
+          className="composer chat-edit"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(chat.edit(post.id, text)).then(() => setEditing(false));
+          }}
+        >
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(6, Math.max(1, text.split("\n").length))} autoFocus aria-label="Edit post" />
+          <button type="button" onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+          <button className="primary" type="submit">
+            Save
+          </button>
+        </form>
+      ) : (
+        <Body text={post.body} onTask={onTask} rowCount={rowCount} />
+      )}
+      {groups.size > 0 && (
+        <div className="reactions">
+          {[...groups].map(([emoji, g]) => (
+            <button key={emoji} className={g.mine ? "chip mine" : "chip"} title={g.names.join(", ")} onClick={() => void run(chat.react(post.id, emoji))}>
+              {emoji} {g.names.length}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -99,13 +195,22 @@ function Composer({ placeholder, onSend, autoFocus }: { placeholder: string; onS
  * Chat, as in Microsoft Teams: teams and their channels on the left; in a channel, conversations
  * (a post and its replies) with the newest at the bottom.
  */
-export function ChatView({ snapshot, onShowTask }: { snapshot: Snapshot; onShowTask: (row: number) => void }) {
+export function ChatView({
+  snapshot,
+  onShowTask,
+  onConfirm,
+}: {
+  snapshot: Snapshot;
+  onShowTask: (row: number) => void;
+  onConfirm: (title: string, message: string, action: string) => Promise<boolean>;
+}) {
   const [teams, setTeams] = useState<ChatTeam[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [me, setMe] = useState<string | null>(null);
+  const [meName, setMeName] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
   const [adding, setAdding] = useState<string | null>(null);
   const [newChannel, setNewChannel] = useState("");
@@ -130,6 +235,7 @@ export function ChatView({ snapshot, onShowTask }: { snapshot: Snapshot; onShowT
 
   useEffect(() => {
     void chat.me().then(setMe);
+    void teamApi.status().then((s) => setMeName(s.user?.name ?? null));
     loadTeams();
   }, [loadTeams]);
 
@@ -177,14 +283,10 @@ export function ChatView({ snapshot, onShowTask }: { snapshot: Snapshot; onShowT
       }
       const p = ev.post;
       if (p.channelId === selectedRef.current) {
-        setThreads((list) => {
-          if (list.some((t) => t.post.id === p.id || t.replies.some((r) => r.id === p.id))) return list;
-          if (p.parentId) return list.map((t) => (t.post.id === p.parentId ? { ...t, replies: [...t.replies, p] } : t));
-          return [{ post: p, replies: [] }, ...list];
-        });
+        setThreads((list) => upsert(list, p));
         markRead(p.channelId);
         requestAnimationFrame(() => bottom.current?.scrollIntoView({ behavior: "smooth" }));
-      } else if (p.authorId !== me) {
+      } else if (p.authorId !== me && !p.editedAt && !p.deleted && p.reactions.length === 0) {
         setTeams((t) => t && t.map((team) => ({ ...team, channels: team.channels.map((c) => (c.id === p.channelId ? { ...c, unread: c.unread + 1 } : c)) })));
       }
     });
@@ -196,15 +298,20 @@ export function ChatView({ snapshot, onShowTask }: { snapshot: Snapshot; onShowT
     try {
       const p = await chat.send(selected, body, parentId);
       // The live stream brings it too; adding it now keeps the conversation snappy.
-      setThreads((list) => {
-        if (list.some((t) => t.post.id === p.id || t.replies.some((r) => r.id === p.id))) return list;
-        return parentId ? list.map((t) => (t.post.id === parentId ? { ...t, replies: [...t.replies, p] } : t)) : [{ post: p, replies: [] }, ...list];
-      });
+      setThreads((list) => upsert(list, p));
       if (!parentId) requestAnimationFrame(() => bottom.current?.scrollIntoView({ behavior: "smooth" }));
     } catch (e) {
       setProblem(errorMessage(e));
       throw e;
     }
+  };
+
+  const changed = (p: ChatPost) => setThreads((list) => upsert(list, p));
+  /** "@Alex" mentions the person whose first name is Alex. */
+  const mentionsMe = (body: string) => {
+    const first = meName?.split(" ")[0]?.toLowerCase();
+    if (!first) return false;
+    return (body.toLowerCase().match(/@[\p{L}\p{N}._-]+/gu) ?? []).some((m) => m.slice(1) === first);
   };
 
   const loadOlder = () => {
@@ -308,15 +415,13 @@ export function ChatView({ snapshot, onShowTask }: { snapshot: Snapshot; onShowT
           )}
           {channel && ordered.length === 0 && <p className="secondary chat-none">No conversations yet. Start one below.</p>}
           {ordered.map((t) => (
-            <article key={t.post.id} className="thread">
-              <Author post={t.post} mine={t.post.authorId === me} />
-              <Body text={t.post.body} onTask={isProjectHere ? onShowTask : null} rowCount={snapshot.rows.length} />
+            <article key={t.post.id} className={[t.post, ...t.replies].some((p) => mentionsMe(p.body)) ? "thread mentioned" : "thread"}>
+              <PostView post={t.post} me={me} onTask={isProjectHere ? onShowTask : null} rowCount={snapshot.rows.length} onChanged={changed} onError={setProblem} onConfirm={onConfirm} />
               {t.replies.length > 0 && (
                 <div className="replies">
                   {t.replies.map((r) => (
                     <div key={r.id} className="reply">
-                      <Author post={r} mine={r.authorId === me} />
-                      <Body text={r.body} onTask={isProjectHere ? onShowTask : null} rowCount={snapshot.rows.length} />
+                      <PostView post={r} me={me} onTask={isProjectHere ? onShowTask : null} rowCount={snapshot.rows.length} onChanged={changed} onError={setProblem} onConfirm={onConfirm} />
                     </div>
                   ))}
                 </div>
