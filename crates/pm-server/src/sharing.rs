@@ -22,6 +22,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/projects", get(my_projects).post(share_project))
         .route("/api/projects/{id}", get(open_project))
         .route("/api/projects/{id}/members", get(project_members))
+        .route("/api/projects/{id}/access", get(my_access))
         .route("/api/projects/{id}/members/{user}", put(set_project_member))
 }
 
@@ -256,6 +257,19 @@ async fn open_project(State(state): State<AppState>, Auth(me): Auth, Path(id): P
     let (project, version) = crate::live::with_live(&state, id, |l| (l.project.clone(), l.version)).await?;
     record.version = version;
     Ok(Json(OpenedProject { record, project, role, limits }))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessView {
+    pub role: Role,
+    pub limits: Limits,
+}
+
+/// What the caller may change in a project, so the app can grey out the rest.
+async fn my_access(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>) -> ApiResult<AccessView> {
+    let (_, role, limits) = access(&state, id, me.id).await?;
+    Ok(Json(AccessView { role, limits }))
 }
 
 #[derive(Serialize)]

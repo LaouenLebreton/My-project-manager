@@ -465,8 +465,41 @@ pub async fn team_history(app: AppHandle, window: WebviewWindow, before: Option<
     Ok(HistoryPage { entries, can_revert: raw.can_revert, has_more })
 }
 
+/// What the person using the app may change in a shared project.
+#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct MyAccess {
+    /// "owner", "editor" or "viewer".
+    pub role: String,
+    pub limits: MemberLimits,
+    /// Their name and email, for "only tasks they are assigned to".
+    pub name: String,
+    pub email: String,
+}
+
+/// Asks the server what this person may change, and tells the window if that changed.
+async fn refresh_access(app: &AppHandle, label: &str, a: &Account, project: Uuid) {
+    #[derive(Deserialize)]
+    struct Raw {
+        role: String,
+        limits: MemberLimits,
+    }
+    let Ok(raw) = call::<Raw>(reqwest::Method::GET, &a.server, &format!("/api/projects/{project}/access"), Some(&a.token), None).await else { return };
+    let access = MyAccess { role: raw.role, limits: raw.limits, name: a.user.name.clone(), email: a.user.email.clone() };
+    let _ = with_doc(app, label, |doc| {
+        if let Some(team) = doc.team.as_mut()
+            && team.access.as_ref() != Some(&access)
+        {
+            team.access = Some(access);
+            let _ = app.emit_to(label, crate::CHANGED_EVENT, changed(app, label, doc));
+        }
+        Ok(())
+    });
+}
+
 /// Which tasks an Editor may change (same shape as the server's).
-#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TaskScopeView {
@@ -478,7 +511,7 @@ pub enum TaskScopeView {
 }
 
 /// What an Editor may change.
-#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberLimits {
@@ -709,6 +742,7 @@ async fn session(app: &AppHandle, label: &str, a: &Account, project: Uuid, wake:
     let (ws, _) = tokio_tungstenite::connect_async(req).await.map_err(|_| format!("Offline: the team on {} cannot be reached. Your edits are kept and will be sent later.", hosting::display(&a.server)))?;
     let (mut write, mut read) = ws.split();
     emit_status(app, label, "online", None);
+    refresh_access(app, label, a, project).await;
     let mut sent = HashSet::new();
     send_outbox(app, label, a, project, &mut sent).await?;
     loop {
@@ -731,6 +765,8 @@ async fn session(app: &AppHandle, label: &str, a: &Account, project: Uuid, wake:
                 if !open(app, label) {
                     return Ok(());
                 }
+                // The owner may have changed what this person may do.
+                refresh_access(app, label, a, project).await;
             }
         }
     }
@@ -796,6 +832,7 @@ async fn send_outbox(app: &AppHandle, label: &str, a: &Account, project: Uuid, s
                     notice(app, label, format!("“{label_text}” was not accepted by the team server: {reason}.{extra}"));
                     Ok(())
                 });
+                refresh_access(app, label, a, project).await;
             }
         }
     }
@@ -804,8 +841,8 @@ async fn send_outbox(app: &AppHandle, label: &str, a: &Account, project: Uuid, s
 }
 
 /// For the snapshot: where this project syncs.
-pub fn snapshot_info(doc: &Document) -> Option<(String, u32, String)> {
-    doc.team.as_ref().map(|t| (t.server.clone(), t.outbox.pending.len() as u32, doc.project.id.0.to_string()))
+pub fn snapshot_info(doc: &Document) -> Option<(String, u32, String, Option<MyAccess>)> {
+    doc.team.as_ref().map(|t| (t.server.clone(), t.outbox.pending.len() as u32, doc.project.id.0.to_string(), t.access.clone()))
 }
 
 // ---------------------------------------------------------------------------------------------

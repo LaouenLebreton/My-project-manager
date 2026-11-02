@@ -19,6 +19,7 @@ import { CalendarView } from "./CalendarView";
 import { HistoryView } from "./HistoryView";
 import { ChatView } from "./ChatView";
 import { MembersSheet } from "./MembersSheet";
+import { accessLabel } from "./permissions";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
 import type { ReportView } from "./bindings/ReportView";
@@ -378,6 +379,16 @@ export function App() {
           </p>
         </div>
         {snapshot.project.team && <SyncPill status={syncStatus} pending={snapshot.project.team.pending} />}
+        {(() => {
+          const label = accessLabel(snapshot);
+          return (
+            label && (
+              <span className="access-pill" title={label.detail} role="note">
+                {label.text}
+              </span>
+            )
+          );
+        })()}
         <div className="segmented" role="tablist" aria-label="View">
           <button role="tab" aria-selected={view === "tasks"} className={view === "tasks" ? "on" : undefined} onClick={() => setView("tasks")}>
             Tasks
@@ -463,6 +474,7 @@ export function App() {
               onTextEditing={textEditing}
               onScrollTop={setScrollTop}
               onSelectionChange={setSelectedIds}
+              onBlocked={setNotice}
             />
           </div>
           <div

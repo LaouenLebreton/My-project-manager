@@ -4,6 +4,7 @@ import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
 import { formatDate, formatDateTime, formatDays, formatMoney } from "./format";
 import { GLOSSARY, type Term } from "./help";
+import { blocked, type Kind } from "./permissions";
 import { CONSTRAINTS } from "./Sheets";
 
 import { HEADER_HEIGHT, ROW_HEIGHT } from "./Gantt";
@@ -23,6 +24,8 @@ interface Column {
   help?: Term;
   /** Anchor for the first-run tour. */
   tour?: string;
+  /** What kind of change editing this column makes, for team limits. */
+  kind?: Kind;
 }
 
 const COLUMNS: Column[] = [
@@ -34,6 +37,7 @@ const COLUMNS: Column[] = [
     tour: "name",
     text: (r) => r.name,
     edit: { initial: (r) => r.name, make: (r, text) => ({ kind: "RenameTask", id: r.id, name: text }) },
+    kind: "schedule",
   },
   {
     label: "Duration",
@@ -42,6 +46,7 @@ const COLUMNS: Column[] = [
     help: "duration",
     text: (r, perDay) => (r.isMilestone ? "0 days" : formatDays(r.durationMinutes, perDay)),
     edit: { initial: (r) => r.durationText, make: (r, text) => ({ kind: "SetDuration", id: r.id, text }) },
+    kind: "schedule",
   },
   { label: "Start", width: "112px", text: (r) => formatDate(r.start), title: (r) => formatDateTime(r.start) },
   { label: "Finish", width: "112px", text: (r) => formatDate(r.finish), title: (r) => formatDateTime(r.finish) },
@@ -53,6 +58,7 @@ const COLUMNS: Column[] = [
     text: (r) => `${r.percentComplete}%`,
     title: (r) => (r.actualFinish ? `Finished ${formatDateTime(r.actualFinish)}` : r.actualStart ? `Started ${formatDateTime(r.actualStart)}` : "Not started"),
     edit: { initial: (r) => String(r.percentComplete), make: (r, text) => ({ kind: "SetPercentComplete", ids: [r.id], percent: parsePercent(text) }) },
+    kind: "progress",
   },
   {
     label: "Predecessors",
@@ -61,6 +67,7 @@ const COLUMNS: Column[] = [
     tour: "predecessors",
     text: (r) => r.predecessors,
     edit: { initial: (r) => r.predecessors, make: (r, text) => ({ kind: "SetPredecessors", id: r.id, text }) },
+    kind: "schedule",
   },
   {
     label: "Resources",
@@ -68,6 +75,7 @@ const COLUMNS: Column[] = [
     help: "resources",
     text: (r) => r.resourceNames,
     edit: { initial: (r) => r.resourceNames, make: (r, text) => ({ kind: "SetTaskResources", id: r.id, text }) },
+    kind: "resources",
   },
   { label: "Cost", width: "96px", align: "right", help: "cost", text: (r, _perDay, currency) => (r.costCents ? formatMoney(r.costCents, currency) : "") },
   { label: "Slack", width: "76px", align: "right", help: "slack", text: (r, perDay) => formatDays(r.totalSlackMinutes, perDay) },
@@ -109,6 +117,8 @@ export interface GridProps {
   /** Vertical scroll position, shared with the Gantt chart. */
   onScrollTop: (scrollTop: number) => void;
   onSelectionChange: (ids: Set<string>) => void;
+  /** An edit the person may not make in this team project: why, for a notice. */
+  onBlocked?: (reason: string) => void;
 }
 
 /** What the Gantt chart can ask of the grid. */
@@ -139,7 +149,7 @@ interface Editing {
  * Only visible rows are rendered, so thousands of tasks scroll smoothly.
  */
 export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
-  { snapshot, onEdit, onTextEditing, onScrollTop, onSelectionChange },
+  { snapshot, onEdit, onTextEditing, onScrollTop, onSelectionChange, onBlocked },
   handle,
 ) {
   const rows = snapshot.rows;
@@ -270,6 +280,11 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
   /** `initial`: a typed character that replaces the cell. Without it, the cell's text is selected. */
   const startEditing = (initial?: string) => {
     const col = cols[active.col];
+    const why = col.kind ? blocked(snapshot, col.kind, current ?? null) : null;
+    if (why && (current ? col.edit : active.col === NAME_COL)) {
+      onBlocked?.(why);
+      return;
+    }
     if (current && col.edit) {
       setEditing({ text: initial ?? col.edit.initial(current), error: null, selectAll: initial === undefined });
     } else if (!current && active.col === NAME_COL) {
@@ -461,8 +476,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                       key={ci}
                       id={`cell-${i}-${ci}`}
                       role="gridcell"
-                      aria-readonly={!c.edit}
-                      className={["cell", c.align === "right" ? "right" : "", isActive ? "active" : ""].filter(Boolean).join(" ")}
+                      aria-readonly={!c.edit || (!!c.kind && !!r && blocked(snapshot, c.kind, r) !== null)}
+                      className={["cell", c.align === "right" ? "right" : "", isActive ? "active" : "", c.edit && c.kind && r && blocked(snapshot, c.kind, r) ? "locked" : ""].filter(Boolean).join(" ")}
                       title={r && c.title ? c.title(r) : undefined}
                       onMouseDown={(e) => {
                         if (editing && !isEditing) void commit();

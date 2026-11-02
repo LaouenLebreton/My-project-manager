@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, u
 import type { Edit, EditResult, Snapshot } from "./api";
 import type { Row } from "./bindings/Row";
 import { formatDate } from "./format";
+import { blocked } from "./permissions";
 
 export const ROW_HEIGHT = 26;
 export const HEADER_HEIGHT = 34;
@@ -479,6 +480,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
     const h = hit(e);
     if (h.row >= 0 && h.row < rows.length) onSelectRow(h.row);
     if (!h.zone) return;
+    const why = blocked(snapshot, "schedule", rows[h.row]);
+    if (why) {
+      flash(why);
+      return;
+    }
     (e.target as Element).setPointerCapture(e.pointerId);
     setDrag(
       h.zone === "edge"

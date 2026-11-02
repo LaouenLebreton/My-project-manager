@@ -149,7 +149,7 @@ export function install() {
     costCents: 182_000,
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
   });
-  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null, team: null as { server: string; pending: number; projectId: string } | null, account: null as { server: string; name: string; email: string } | null };
+  const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null, team: null as { server: string; pending: number; projectId: string; access: import("../bindings/MyAccess").MyAccess | null } | null, account: null as { server: string; name: string; email: string } | null };
   if (state.rows[1]) {
     state.rows[1].resourceNames = "Alex";
     state.rows[1].overloaded = true;
@@ -236,7 +236,7 @@ export function install() {
             if (!String(args.myEmail ?? "").includes("@")) fail("type your name and email, so your team knows who changed what");
             state.account = { server: "this Mac", name: String(args.myName), email: String(args.myEmail) };
           }
-          state.team = { server: "local", pending: 0, projectId: "p-1" };
+          state.team = { server: "local", pending: 0, projectId: "p-1", access: null };
           setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
           return { snapshot: snapshot(), invites: mockInvites(args.emails as string[]) };
         case "team_invite":
@@ -323,11 +323,11 @@ export function install() {
           if (!state.account) fail("sign in to a team server first (Team > Sign In to Team Server)");
           return [{ id: "p-1", teamId: "team-1", name: "Office move", version: 42, updatedAt: "2026-10-09T09:30:00Z" }];
         case "team_share":
-          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0, projectId: "p-1" };
+          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0, projectId: "p-1", access: null };
           setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
           return snapshot();
         case "team_open":
-          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0, projectId: "p-1" };
+          state.team = { server: state.account?.server ?? "https://pm.example.com", pending: 0, projectId: "p-1", access: null };
           setTimeout(() => emit("team-status", { state: "online", pending: 0, message: null }), 300);
           return snapshot();
         case "get_snapshot":

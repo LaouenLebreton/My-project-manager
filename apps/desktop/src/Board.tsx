@@ -4,6 +4,7 @@ import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
 import { formatDate } from "./format";
 import { GLOSSARY } from "./help";
+import { blocked } from "./permissions";
 
 /** Microsoft Project's Task Board columns, tied to % complete as it does. */
 const COLUMNS = [
@@ -60,6 +61,11 @@ export function Board({ snapshot, onEdit, onShowTask }: { snapshot: Snapshot; on
   const move = (r: Row, to: ColumnKey) => {
     if (columnOf(r) === to) return;
     const percent = COLUMNS.find((c) => c.key === to)!.percent;
+    const why = blocked(snapshot, "progress", r);
+    if (why) {
+      setError(why);
+      return;
+    }
     setError(null);
     onEdit({ kind: "SetPercentComplete", ids: [r.id], percent }).catch((e) => setError(errorMessage(e)));
   };

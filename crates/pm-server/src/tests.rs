@@ -187,6 +187,8 @@ async fn a_project_shared_with_a_team_opens_for_its_members() {
     assert_eq!(member["limits"], limits);
     let (_, opened) = call(&app, "GET", &format!("/api/projects/{id}"), Some(&alex), None).await;
     assert_eq!(opened["limits"], limits);
+    let (_, mine) = call(&app, "GET", &format!("/api/projects/{id}/access"), Some(&alex), None).await;
+    assert_eq!(mine, json!({ "role": "editor", "limits": limits }));
     let (_, members) = call(&app, "GET", &format!("/api/projects/{id}/members"), Some(&alex), None).await;
     let roles: Vec<(&str, &str)> = members.as_array().unwrap().iter().map(|m| (m["user"]["name"].as_str().unwrap(), m["role"].as_str().unwrap())).collect();
     assert_eq!(roles, [("Alex", "editor"), ("Laouen", "owner")]);

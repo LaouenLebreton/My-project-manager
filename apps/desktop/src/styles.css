@@ -1507,3 +1507,19 @@ label.indent {
   padding: 6px 8px;
   border-radius: 8px;
 }
+
+/* Team limits: cells the person may not change, and the header label. */
+.cell.locked {
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+.access-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--gantt-warning);
+  color: var(--gantt-warning);
+  margin-right: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}

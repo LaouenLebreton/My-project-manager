@@ -58,6 +58,8 @@ pub struct TeamLink {
     pub outbox: Outbox,
     /// Wakes the sync task when there is something to send.
     pub wake: Arc<tokio::sync::Notify>,
+    /// What the person using the app may change here, once the server has said.
+    pub access: Option<crate::team::MyAccess>,
 }
 
 /// What a change from the team did here, for the window to report.
@@ -90,6 +92,7 @@ impl Document {
             server,
             outbox: store.meta(TEAM_OUTBOX).ok().flatten().and_then(|o| serde_json::from_str(&o).ok()).unwrap_or_default(),
             wake: Arc::default(),
+            access: None,
         });
         Document { path: path.to_owned(), store, project, schedule, loads, backed_up_seq: None, team }
     }
@@ -141,7 +144,7 @@ impl Document {
         let outbox = Outbox::new(version);
         self.store.set_meta(TEAM_SERVER, Some(server))?;
         self.store.set_meta(TEAM_OUTBOX, Some(&outbox_json(&outbox)))?;
-        self.team = Some(TeamLink { server: server.to_owned(), outbox, wake: Arc::default() });
+        self.team = Some(TeamLink { server: server.to_owned(), outbox, wake: Arc::default(), access: None });
         Ok(())
     }
 
