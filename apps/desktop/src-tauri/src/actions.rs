@@ -59,7 +59,7 @@ pub fn set_focused(app: &AppHandle, label: &str) {
 fn show(window: &WebviewWindow) {
     let _ = window.show();
     if window.label() != crate::portfolio::WINDOW {
-        crate::platform::show_tab_bar(window);
+        crate::platform::show_tab_bar(window, false);
     }
     let _ = window.unminimize();
     let _ = window.set_focus();
@@ -118,13 +118,19 @@ fn tab_into_front(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-/// File > New Tab and the Home button: the start page (new, open, recent, portfolio, team) in a
-/// tab. An existing empty tab is reused rather than opening another.
+/// File > New Tab, the tab bar's "+" and the Home button: the start page (new, open, recent,
+/// portfolio, team) in a new tab, as Safari does. A hidden empty window (left after closing
+/// projects) is reused rather than making another.
 pub fn show_home(app: &AppHandle) {
     let docs = app.state::<AppState>();
     let empty: Vec<String> = {
         let docs = docs.docs.lock().expect("lock");
-        let mut labels: Vec<String> = app.webview_windows().into_keys().filter(|l| l != crate::portfolio::WINDOW && !docs.contains_key(l)).collect();
+        let mut labels: Vec<String> = app
+            .webview_windows()
+            .into_iter()
+            .filter(|(l, w)| l != crate::portfolio::WINDOW && !docs.contains_key(l) && !w.is_visible().unwrap_or(false))
+            .map(|(l, _)| l)
+            .collect();
         labels.sort();
         labels
     };
