@@ -5,6 +5,7 @@
 
 pub mod access;
 pub mod auth;
+pub mod chat;
 pub mod live;
 pub mod permissions;
 pub mod sharing;
@@ -111,6 +112,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/users", post(create_user))
         .merge(sharing::routes())
         .merge(live::routes())
+        .merge(chat::routes())
         .with_state(state)
 }
 

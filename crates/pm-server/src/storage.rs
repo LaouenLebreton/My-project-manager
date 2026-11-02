@@ -67,6 +67,33 @@ pub struct ProjectRecord {
     pub updated_at: String,
 }
 
+/// A chat channel in a team (General, a team project's channel, or one people made).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Channel {
+    pub id: Uuid,
+    pub team_id: Uuid,
+    pub name: String,
+    /// Set for the channel that belongs to a team project.
+    pub project_id: Option<Uuid>,
+    pub created_at: String,
+    /// Posts by others the caller has not seen (filled in per request).
+    pub unread: u32,
+}
+
+/// A post in a channel, or a reply to one (`parent_id`). Ids are UUID v7, so they sort by time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Post {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub author_id: Uuid,
+    pub author_name: String,
+    pub at: String,
+    pub body: String,
+}
+
 /// Everything the handlers need from storage. Calls are blocking; handlers run them on
 /// Tokio's blocking pool.
 pub trait Storage: Send + Sync + 'static {
@@ -118,6 +145,21 @@ pub trait Storage: Send + Sync + 'static {
     fn changes_since(&self, project: Uuid, since: i64, limit: u32) -> Result<Vec<Change>>;
     /// The change made from this client edit, if it was accepted (resends are idempotent).
     fn change_by_client(&self, project: Uuid, client_change: Uuid) -> Result<Option<Change>>;
+
+    /// A team's channels (unread counts left at 0).
+    fn channels(&self, team: Uuid) -> Result<Vec<Channel>>;
+    fn channel(&self, id: Uuid) -> Result<Option<Channel>>;
+    fn create_channel(&self, channel: &Channel) -> Result<()>;
+    fn add_post(&self, post: &Post) -> Result<()>;
+    fn post(&self, id: Uuid) -> Result<Option<Post>>;
+    /// Posts (not replies) before `before`, newest first.
+    fn posts(&self, channel: Uuid, before: Option<Uuid>, limit: u32) -> Result<Vec<Post>>;
+    /// Replies to these posts, oldest first.
+    fn replies(&self, parents: &[Uuid]) -> Result<Vec<Post>>;
+    /// The user has seen the channel up to this id.
+    fn mark_read(&self, user: Uuid, channel: Uuid, upto: Uuid) -> Result<()>;
+    /// Per channel of the team: posts and replies by others the user has not seen.
+    fn unread(&self, user: Uuid, team: Uuid) -> Result<Vec<(Uuid, u32)>>;
 }
 
 /// Forward-only migrations; `PRAGMA user_version` holds the version.
@@ -190,6 +232,33 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE change ADD COLUMN summary TEXT NOT NULL DEFAULT '';
     ALTER TABLE change ADD COLUMN inverse TEXT NOT NULL DEFAULT '';
+    "#,
+    // 4 -> 5: chat. Ids are UUID v7 text, which sorts in time order.
+    r#"
+    CREATE TABLE channel (
+        id         TEXT PRIMARY KEY,
+        team_id    TEXT NOT NULL REFERENCES team (id) ON DELETE CASCADE,
+        name       TEXT NOT NULL,
+        project_id TEXT,
+        created_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX channel_name ON channel (team_id, name COLLATE NOCASE);
+    CREATE TABLE post (
+        id         TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL REFERENCES channel (id) ON DELETE CASCADE,
+        parent_id  TEXT REFERENCES post (id) ON DELETE CASCADE,
+        author_id  TEXT NOT NULL REFERENCES user (id),
+        at         TEXT NOT NULL,
+        body       TEXT NOT NULL
+    );
+    CREATE INDEX post_channel ON post (channel_id, parent_id, id);
+    CREATE INDEX post_parent ON post (parent_id, id);
+    CREATE TABLE channel_read (
+        user_id    TEXT NOT NULL REFERENCES user (id) ON DELETE CASCADE,
+        channel_id TEXT NOT NULL REFERENCES channel (id) ON DELETE CASCADE,
+        upto       TEXT NOT NULL,
+        PRIMARY KEY (user_id, channel_id)
+    );
     "#,
 ];
 
@@ -275,6 +344,29 @@ fn change_from_row(r: &rusqlite::Row) -> rusqlite::Result<std::result::Result<Ch
     Ok(serde_json::from_str(&command)
         .map(|command| Change { version, client_change, author, author_name, at, label, summary, command })
         .map_err(|e| format!("change {version}: {e}")))
+}
+
+fn opt_uuid_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<Option<Uuid>> {
+    let s: Option<String> = r.get(i)?;
+    s.map(|s| Uuid::parse_str(&s).map_err(|e| rusqlite::Error::FromSqlConversionFailure(i, rusqlite::types::Type::Text, Box::new(e)))).transpose()
+}
+
+fn channel_from_row(r: &rusqlite::Row) -> rusqlite::Result<Channel> {
+    Ok(Channel { id: uuid_at(r, 0)?, team_id: uuid_at(r, 1)?, name: r.get(2)?, project_id: opt_uuid_at(r, 3)?, created_at: r.get(4)?, unread: 0 })
+}
+
+const POST_COLUMNS: &str = "p.id, p.channel_id, p.parent_id, p.author_id, u.name, p.at, p.body";
+
+fn post_from_row(r: &rusqlite::Row) -> rusqlite::Result<Post> {
+    Ok(Post {
+        id: uuid_at(r, 0)?,
+        channel_id: uuid_at(r, 1)?,
+        parent_id: opt_uuid_at(r, 2)?,
+        author_id: uuid_at(r, 3)?,
+        author_name: r.get(4)?,
+        at: r.get(5)?,
+        body: r.get(6)?,
+    })
 }
 
 impl Storage for SqliteStorage {
@@ -520,5 +612,84 @@ impl Storage for SqliteStorage {
             )
             .optional()?;
         found.transpose().map_err(StorageError::Damaged)
+    }
+
+    fn channels(&self, team: Uuid) -> Result<Vec<Channel>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT id, team_id, name, project_id, created_at FROM channel WHERE team_id = ?1")?;
+        let rows = stmt.query_map([team.to_string()], channel_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn channel(&self, id: Uuid) -> Result<Option<Channel>> {
+        Ok(self.conn().query_row("SELECT id, team_id, name, project_id, created_at FROM channel WHERE id = ?1", [id.to_string()], channel_from_row).optional()?)
+    }
+
+    fn create_channel(&self, c: &Channel) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO channel (id, team_id, name, project_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![c.id.to_string(), c.team_id.to_string(), c.name, c.project_id.map(|p| p.to_string()), c.created_at],
+        )?;
+        Ok(())
+    }
+
+    fn add_post(&self, p: &Post) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO post (id, channel_id, parent_id, author_id, at, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![p.id.to_string(), p.channel_id.to_string(), p.parent_id.map(|x| x.to_string()), p.author_id.to_string(), p.at, p.body],
+        )?;
+        Ok(())
+    }
+
+    fn post(&self, id: Uuid) -> Result<Option<Post>> {
+        Ok(self
+            .conn()
+            .query_row(&format!("SELECT {POST_COLUMNS} FROM post p JOIN user u ON u.id = p.author_id WHERE p.id = ?1"), [id.to_string()], post_from_row)
+            .optional()?)
+    }
+
+    fn posts(&self, channel: Uuid, before: Option<Uuid>, limit: u32) -> Result<Vec<Post>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {POST_COLUMNS} FROM post p JOIN user u ON u.id = p.author_id
+             WHERE p.channel_id = ?1 AND p.parent_id IS NULL AND p.id < ?2 ORDER BY p.id DESC LIMIT ?3"
+        ))?;
+        // "~" sorts after every hex digit, so no `before` means everything.
+        let before = before.map_or_else(|| "~".to_owned(), |b| b.to_string());
+        let rows = stmt.query_map(params![channel.to_string(), before, limit], post_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn replies(&self, parents: &[Uuid]) -> Result<Vec<Post>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!("SELECT {POST_COLUMNS} FROM post p JOIN user u ON u.id = p.author_id WHERE p.parent_id = ?1 ORDER BY p.id"))?;
+        let mut out = Vec::new();
+        for parent in parents {
+            let rows = stmt.query_map([parent.to_string()], post_from_row)?;
+            out.extend(rows.collect::<rusqlite::Result<Vec<_>>>()?);
+        }
+        Ok(out)
+    }
+
+    fn mark_read(&self, user: Uuid, channel: Uuid, upto: Uuid) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO channel_read (user_id, channel_id, upto) VALUES (?1, ?2, ?3)
+             ON CONFLICT (user_id, channel_id) DO UPDATE SET upto = MAX(upto, ?3)",
+            params![user.to_string(), channel.to_string(), upto.to_string()],
+        )?;
+        Ok(())
+    }
+
+    fn unread(&self, user: Uuid, team: Uuid) -> Result<Vec<(Uuid, u32)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, COUNT(p.id) FROM channel c
+             JOIN post p ON p.channel_id = c.id AND p.author_id <> ?1
+             LEFT JOIN channel_read r ON r.channel_id = c.id AND r.user_id = ?1
+             WHERE c.team_id = ?2 AND (r.upto IS NULL OR p.id > r.upto)
+             GROUP BY c.id",
+        )?;
+        let rows = stmt.query_map([user.to_string(), team.to_string()], |r| Ok((uuid_at(r, 0)?, r.get::<_, u32>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 }

@@ -157,14 +157,15 @@ async fn share_project(State(state): State<AppState>, Auth(me): Auth, Json(req):
     let stored = record.clone();
     let shared = db(&state, move |s| {
         if s.team_role(stored.team_id, me.id)?.is_none() {
-            return Ok(false);
+            return Ok(None);
         }
-        s.create_project(&stored, &data).map(|_| true)
+        s.create_project(&stored, &data)?;
+        // Each team project gets its own channel, as in Teams.
+        crate::chat::make_channel(s, stored.team_id, &stored.name, Some(stored.id)).map(Some)
     })
     .await?;
-    if !shared {
-        return Err(not_found("team"));
-    }
+    let Some(channel) = shared else { return Err(not_found("team")) };
+    let _ = state.hub.chat.send(std::sync::Arc::new(crate::chat::ChatEvent::Channel { team_id: record.team_id, channel }));
     Ok(Json(record))
 }
 

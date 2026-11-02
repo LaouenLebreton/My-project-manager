@@ -28,9 +28,16 @@ pub const SNAPSHOT_EVERY: i64 = 100;
 /// Most changes sent in one catch-up reply; clients ask again from where it ended.
 const PAGE: u32 = 500;
 
-#[derive(Default)]
 pub struct Hub {
     rooms: Mutex<HashMap<Uuid, Arc<Room>>>,
+    /// Chat events for everyone connected; each stream keeps those of its user's teams.
+    pub chat: broadcast::Sender<Arc<crate::chat::ChatEvent>>,
+}
+
+impl Default for Hub {
+    fn default() -> Self {
+        Hub { rooms: Mutex::default(), chat: broadcast::channel(1024).0 }
+    }
 }
 
 pub struct Room {

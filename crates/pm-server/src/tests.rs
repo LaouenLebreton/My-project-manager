@@ -321,3 +321,51 @@ async fn the_history_reads_in_plain_words_and_the_owner_can_revert() {
     assert_eq!(status, StatusCode::CONFLICT);
     assert!(body["message"].as_str().unwrap().starts_with("this change cannot be reverted any more"));
 }
+
+#[tokio::test]
+async fn teams_have_channels_with_posts_and_replies() {
+    let storage = Arc::new(SqliteStorage::in_memory().unwrap());
+    let state = AppState { storage, hub: Arc::default() };
+    let app = router(state.clone());
+    let p = people(&app).await;
+    let (_, team) = call(&app, "POST", "/api/teams", Some(&p[0].0), Some(json!({ "name": "Office move" }))).await;
+    let team_id = team["team"]["id"].as_str().unwrap().to_owned();
+    call(&app, "POST", &format!("/api/teams/{team_id}/members"), Some(&p[0].0), Some(json!({ "email": "alex@example.com" }))).await;
+    let project = sample_project("Office move");
+    call(&app, "POST", "/api/projects", Some(&p[0].0), Some(json!({ "teamId": team_id, "project": project }))).await;
+
+    // General first, then the project's own channel.
+    let (status, channels) = call(&app, "GET", &format!("/api/teams/{team_id}/channels"), Some(&p[1].0), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let names: Vec<&str> = channels.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["General", "Office move"]);
+    assert!(channels[1]["projectId"].is_string());
+    let general = channels[0]["id"].as_str().unwrap().to_owned();
+
+    let mut rx = state.hub.chat.subscribe();
+    let (status, post) = call(&app, "POST", &format!("/api/channels/{general}/posts"), Some(&p[0].0), Some(json!({ "body": "Kick-off tomorrow at 9, @Alex can you book the room?" }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(matches!(&*rx.recv().await.unwrap(), chat::ChatEvent::Post { .. }), "everyone in the team hears it");
+    let post_id = post["id"].as_str().unwrap().to_owned();
+    let (status, reply) = call(&app, "POST", &format!("/api/channels/{general}/posts"), Some(&p[1].0), Some(json!({ "body": "Booked.", "parentId": post_id }))).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(&app, "POST", &format!("/api/channels/{general}/posts"), Some(&p[0].0), Some(json!({ "body": "Thanks", "parentId": reply["id"] }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "replies are one level deep");
+
+    let (_, page) = call(&app, "GET", &format!("/api/channels/{general}/posts"), Some(&p[1].0), None).await;
+    assert_eq!(page["threads"][0]["post"]["authorName"], "Laouen");
+    assert_eq!(page["threads"][0]["replies"][0]["body"], "Booked.");
+
+    // Unread: Laouen has one reply to read; reading the channel clears it.
+    let (_, channels) = call(&app, "GET", &format!("/api/teams/{team_id}/channels"), Some(&p[0].0), None).await;
+    assert_eq!(channels[0]["unread"], 1);
+    call(&app, "POST", &format!("/api/channels/{general}/read"), Some(&p[0].0), None).await;
+    let (_, channels) = call(&app, "GET", &format!("/api/teams/{team_id}/channels"), Some(&p[0].0), None).await;
+    assert_eq!(channels[0]["unread"], 0);
+
+    // People outside the team see nothing.
+    let (status, _) = call(&app, "GET", &format!("/api/channels/{general}/posts"), Some(&p[2].0), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, channel) = call(&app, "POST", &format!("/api/teams/{team_id}/channels"), Some(&p[1].0), Some(json!({ "name": "general" }))).await;
+    assert_eq!((status, channel["name"].as_str()), (StatusCode::OK, Some("general 2")), "names stay distinct");
+}
