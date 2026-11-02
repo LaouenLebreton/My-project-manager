@@ -1755,3 +1755,23 @@ label.indent {
   padding: 0;
   border-radius: 6px;
 }
+
+/* Keep the + in view: the view tabs give up space (and scroll) before it is pushed off. */
+.toolbar .segmented {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.toolbar .segmented::-webkit-scrollbar {
+  display: none;
+}
+.toolbar .new-tab-button,
+.toolbar .home-button {
+  flex-shrink: 0;
+}
+.start-new-tab {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+}

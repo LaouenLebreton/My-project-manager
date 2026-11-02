@@ -352,10 +352,11 @@ pub fn show(app: &AppHandle) {
     }
 }
 
-/// The Home button and File > New Tab: the start page in a tab.
+/// The Home button (`newTab` false: go to the start page tab) and the + (`newTab` true: a new
+/// one).
 #[tauri::command]
-pub fn show_home(app: AppHandle) {
-    crate::actions::show_home(&app);
+pub fn show_home(app: AppHandle, new_tab: bool) {
+    crate::actions::show_home(&app, new_tab);
 }
 
 /// The start screen's and command bar's way to Window > Portfolio.

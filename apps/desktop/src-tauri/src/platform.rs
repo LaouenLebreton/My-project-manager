@@ -88,7 +88,7 @@ pub fn enable_new_tab_button(app: &AppHandle<tauri::Wry>, window: &tauri::Webvie
         if let Some(app) = APP.get() {
             let app = app.clone();
             // Off the AppKit call: opening a window from inside it is not safe everywhere.
-            tauri::async_runtime::spawn(async move { crate::actions::show_home(&app) });
+            tauri::async_runtime::spawn(async move { crate::actions::show_home(&app, true) });
         }
     }
 

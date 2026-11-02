@@ -54,7 +54,7 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
         menu::id::OPEN_5K => ipc::open_generated(app, label.as_deref(), 5_000).map(|_| ()),
         menu::id::SECOND_USER => team::open_second_user(),
         menu::id::NEW_TAB => {
-            actions::show_home(app);
+            actions::show_home(app, true);
             Ok(())
         }
         menu::id::PORTFOLIO => {

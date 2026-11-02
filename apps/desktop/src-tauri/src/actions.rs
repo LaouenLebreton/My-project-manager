@@ -118,20 +118,22 @@ fn tab_into_front(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-/// File > New Tab, the tab bar's "+" and the Home button: the start page (new, open, recent,
-/// portfolio, team) in a new tab, as Safari does. A hidden empty window (left after closing
-/// projects) is reused rather than making another.
-pub fn show_home(app: &AppHandle) {
+/// The start page (new, open, recent, portfolio, team). `new_tab` (the + and File > New Tab):
+/// always a new tab, as Safari does. Otherwise (Home): go to the start page tab already open,
+/// making one only if there is none. A hidden empty window (left after closing projects) is
+/// reused rather than making another.
+pub fn show_home(app: &AppHandle, new_tab: bool) {
     let docs = app.state::<AppState>();
     let empty: Vec<String> = {
         let docs = docs.docs.lock().expect("lock");
         let mut labels: Vec<String> = app
             .webview_windows()
             .into_iter()
-            .filter(|(l, w)| l != crate::portfolio::WINDOW && !docs.contains_key(l) && !w.is_visible().unwrap_or(false))
+            .filter(|(l, w)| l != crate::portfolio::WINDOW && !docs.contains_key(l) && (!new_tab || !w.is_visible().unwrap_or(false)))
             .map(|(l, _)| l)
             .collect();
-        labels.sort();
+        // Home prefers a start page that is already showing.
+        labels.sort_by_key(|l| (!app.get_webview_window(l).is_some_and(|w| w.is_visible().unwrap_or(false)), l.clone()));
         labels
     };
     let window = match empty.first().and_then(|l| app.get_webview_window(l)) {

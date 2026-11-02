@@ -27,8 +27,10 @@ import type { ReportView } from "./bindings/ReportView";
 
 /** Window > Portfolio, from inside the page (start screen, command bar). */
 const openPortfolio = () => invoke("open_portfolio").catch(() => {});
-/** File > New Tab: the start page in a tab, to open or create another project. */
-const openHome = () => invoke("show_home").catch(() => {});
+/** Home: the start page tab (made if none is open). */
+const openHome = () => invoke("show_home", { newTab: false }).catch(() => {});
+/** The + and File > New Tab: the start page in a new tab, to open or create another project. */
+const openNewTab = () => invoke("show_home", { newTab: true }).catch(() => {});
 
 export function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -257,7 +259,8 @@ export function App() {
       { name: "Show History (every change in a team project)", shortcut: "⌘7", run: () => setView("history") },
       { name: "Show Chat (teams, channels, posts)", shortcut: "⌘8", run: () => setView("chat") },
       { name: "Open Portfolio (all projects)", shortcut: "⌘0", run: () => void openPortfolio() },
-      { name: "New Tab (Home: open or create another project)", shortcut: "⌘T", run: () => void openHome() },
+      { name: "New Tab (open or create another project)", shortcut: "⌘T", run: () => void openNewTab() },
+      { name: "Home (start page)", run: () => void openHome() },
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
@@ -371,6 +374,9 @@ export function App() {
     return (
       <main className="empty">
         {overlays}
+        <button className="new-tab-button start-new-tab" onClick={() => void openNewTab()} title="New tab (⌘T)" aria-label="New tab">
+          +
+        </button>
         <h1>Super PM</h1>
         <p>Plan a project with tasks, links and a calendar. Every change is saved as you go.</p>
         <div className="start-actions">
@@ -408,7 +414,7 @@ export function App() {
   return (
     <main className="document">
       <header className="toolbar">
-        <button className="home-button" onClick={() => void openHome()} title="Home: open or create another project in a new tab (⌘T)" aria-label="Home">
+        <button className="home-button" onClick={() => void openHome()} title="Home: the start page, to open or create projects" aria-label="Home">
           ⌂
         </button>
         <div>
@@ -469,7 +475,7 @@ export function App() {
             </button>
           )}
         </div>
-        <button className="new-tab-button" onClick={() => void openHome()} title="New tab: open or create another project (⌘T)" aria-label="New tab">
+        <button className="new-tab-button" onClick={() => void openNewTab()} title="New tab: open or create another project (⌘T)" aria-label="New tab">
           +
         </button>
       </header>
