@@ -97,11 +97,7 @@ pub fn run() {
             actions::set_focused(app.handle(), actions::START_WINDOW);
             if let Some(main) = app.get_webview_window(actions::START_WINDOW) {
                 platform::enable_new_tab_button(app.handle(), &main);
-                // Its tab bar was built before the "+" existed: rebuild it once it is on screen.
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-                    platform::show_tab_bar(&main, true);
-                });
+                platform::show_tab_bar(&main);
             }
             team::on_launch(app.handle());
             // Local backups on a schedule (spec 4.7); only projects that changed are copied.

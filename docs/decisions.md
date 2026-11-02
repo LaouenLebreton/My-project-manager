@@ -158,6 +158,7 @@ each new project window added as a tab of the front one through AppKit's
 make a window, Window > Merge All Windows, ⌃Tab to switch. File > New Tab (⌘T) and the ⌂
 button in every project's header open the start page as a tab; opening a project there turns
 that tab into the project. The Portfolio keeps its own window. Windows and Linux get separate
-windows (no native tabs there). The tab bar stays visible even with one tab, and its "+"
-button opens the start page in a new tab: macOS shows that button for windows that answer
-`newWindowForTab:`, which the app adds to its windows' class at launch (platform.rs).
+windows (no native tabs there). The tab bar stays visible even with one tab. macOS's own tab-bar "+"
+did not show reliably for these windows (it depends on when AppKit builds the bar), so the
+app has its own + at the right of every project's header, opening the start page in a new
+tab like ⌘T. The app still answers `newWindowForTab:` for the native one, where it appears.

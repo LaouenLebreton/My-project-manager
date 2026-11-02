@@ -72,9 +72,9 @@ pub fn tab_into<R: Runtime>(app: &AppHandle<R>, front: tauri::WebviewWindow<R>, 
 #[cfg(not(target_os = "macos"))]
 pub fn tab_into<R: Runtime>(_app: &AppHandle<R>, _front: tauri::WebviewWindow<R>, _window: tauri::WebviewWindow<R>) {}
 
-/// Shows the "+" button at the right of the tab bar: macOS shows it for windows that answer
-/// `newWindowForTab:`, so that answer is added to the windows' class once. Clicking it opens
-/// the start page in a new tab (File > New Tab).
+/// Answers macOS's "new tab" request (`newWindowForTab:`), for its tab bar "+" where macOS
+/// shows one, by opening the start page in a new tab (File > New Tab). macOS does not reliably
+/// show that "+" for these windows, so the app also has its own (App.tsx).
 #[cfg(target_os = "macos")]
 pub fn enable_new_tab_button(app: &AppHandle<tauri::Wry>, window: &tauri::WebviewWindow<tauri::Wry>) {
     use objc2::runtime::{AnyObject, Imp, Sel};
@@ -122,27 +122,20 @@ pub fn enable_new_tab_button(app: &AppHandle<tauri::Wry>, window: &tauri::Webvie
 #[cfg(not(target_os = "macos"))]
 pub fn enable_new_tab_button(_app: &AppHandle<tauri::Wry>, _window: &tauri::WebviewWindow<tauri::Wry>) {}
 
-/// Keeps the tab bar showing even with one tab, so its "+" button is always there (as Safari
-/// can). `rebuild`: hide and show it once, for a window whose bar was built before the "+"
-/// existed (the start window). Must run on the main thread; this hands the work to it.
+/// Keeps the tab bar showing even with one tab, as Safari can. AppKit must be called on the
+/// main thread; this hands the work to it.
 #[cfg(target_os = "macos")]
-pub fn show_tab_bar(window: &tauri::WebviewWindow<tauri::Wry>, rebuild: bool) {
+pub fn show_tab_bar(window: &tauri::WebviewWindow<tauri::Wry>) {
     let w = window.clone();
     let _ = window.run_on_main_thread(move || {
-        use objc2_app_kit::NSWindow;
         let Ok(ns) = w.ns_window() else { return };
         // SAFETY: the window's live NSWindow, on the main thread.
-        let ns = unsafe { &*(ns as *const NSWindow) };
-        let Some(group) = ns.tabGroup() else { return };
-        if group.isTabBarVisible() {
-            if !rebuild {
-                return;
-            }
+        let ns = unsafe { &*(ns as *const objc2_app_kit::NSWindow) };
+        if ns.tabGroup().is_some_and(|g| !g.isTabBarVisible()) {
             ns.toggleTabBar(None);
         }
-        ns.toggleTabBar(None);
     });
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn show_tab_bar(_window: &tauri::WebviewWindow<tauri::Wry>, _rebuild: bool) {}
+pub fn show_tab_bar(_window: &tauri::WebviewWindow<tauri::Wry>) {}

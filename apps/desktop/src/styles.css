@@ -1743,3 +1743,15 @@ label.indent {
   padding: 4px 8px;
   border-radius: 6px;
 }
+
+/* New tab, at the right of the header (macOS's own tab bar "+" is not reliable here). */
+.new-tab-button {
+  flex-shrink: 0;
+  margin-left: 10px;
+  font-size: 18px;
+  line-height: 1;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+}

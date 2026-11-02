@@ -469,6 +469,9 @@ export function App() {
             </button>
           )}
         </div>
+        <button className="new-tab-button" onClick={() => void openHome()} title="New tab: open or create another project (⌘T)" aria-label="New tab">
+          +
+        </button>
       </header>
       {error && (
         <p role="alert" className="banner error">
