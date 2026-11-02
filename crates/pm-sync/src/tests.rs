@@ -65,6 +65,7 @@ impl Server {
             author_name: format!("C{author}"),
             at: String::new(),
             label: p.command.label(),
+            summary: String::new(),
             command: p.command.clone(),
         });
         Ok(())
@@ -213,7 +214,7 @@ proptest! {
 }
 
 fn change(version: i64, client_change: Uuid, command: Command) -> Change {
-    Change { version, client_change, author: Uuid::nil(), author_name: "Alex".into(), at: String::new(), label: command.label(), command }
+    Change { version, client_change, author: Uuid::nil(), author_name: "Alex".into(), at: String::new(), label: command.label(), summary: String::new(), command }
 }
 
 #[test]

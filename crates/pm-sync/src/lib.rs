@@ -8,6 +8,8 @@
 //! re-apply the edits that still fit (rebase). Edits that no longer fit are dropped and
 //! reported. The app applies the delta like any other command, so its file stays consistent.
 
+pub mod describe;
+
 use pm_core::{apply, Command, CommandError, Project};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -26,6 +28,10 @@ pub struct Change {
     pub at: String,
     /// What happened, in plain words ("Change Duration").
     pub label: String,
+    /// The change as a sentence, written by the server from the project as it was just before
+    /// ("changed the duration of “Survey” from 3 days to 5 days").
+    #[serde(default)]
+    pub summary: String,
     pub command: Command,
 }
 

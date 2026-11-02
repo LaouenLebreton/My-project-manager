@@ -108,7 +108,12 @@ pub trait Storage: Send + Sync + 'static {
     fn project_snapshot(&self, id: Uuid) -> Result<Option<(String, i64)>>;
     /// Records change `change.version`, which must follow the stored version directly; false
     /// if another server instance got there first. `snapshot` also saves the whole project.
-    fn append_change(&self, project: Uuid, change: &Change, snapshot: Option<&str>) -> Result<bool>;
+    fn append_change(&self, project: Uuid, change: &Change, inverse: &str, snapshot: Option<&str>) -> Result<bool>;
+    /// The newest changes before version `before` (all if `None`), newest first.
+    fn changes_before(&self, project: Uuid, before: Option<i64>, limit: u32) -> Result<Vec<Change>>;
+    /// A change and the command that undoes it (JSON; empty for changes made before the
+    /// history recorded it).
+    fn change_with_inverse(&self, project: Uuid, version: i64) -> Result<Option<(Change, String)>>;
     /// Changes after `since`, oldest first, at most `limit`.
     fn changes_since(&self, project: Uuid, since: i64, limit: u32) -> Result<Vec<Change>>;
     /// The change made from this client edit, if it was accepted (resends are idempotent).
@@ -179,6 +184,12 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE change ADD COLUMN client_change TEXT NOT NULL DEFAULT '';
     CREATE UNIQUE INDEX change_client ON change (project_id, client_change);
     ALTER TABLE project ADD COLUMN data_version INTEGER NOT NULL DEFAULT 0;
+    "#,
+    // 3 -> 4: the History view. Each change keeps its sentence and the command that undoes it,
+    // so the owner can revert it.
+    r#"
+    ALTER TABLE change ADD COLUMN summary TEXT NOT NULL DEFAULT '';
+    ALTER TABLE change ADD COLUMN inverse TEXT NOT NULL DEFAULT '';
     "#,
 ];
 
@@ -260,9 +271,9 @@ fn change_from_row(r: &rusqlite::Row) -> rusqlite::Result<std::result::Result<Ch
     let version = r.get(0)?;
     let client_change = uuid_at(r, 1)?;
     let author = uuid_at(r, 2)?;
-    let (author_name, at, label) = (r.get(3)?, r.get(4)?, r.get(5)?);
+    let (author_name, at, label, summary) = (r.get(3)?, r.get(4)?, r.get(5)?, r.get(7)?);
     Ok(serde_json::from_str(&command)
-        .map(|command| Change { version, client_change, author, author_name, at, label, command })
+        .map(|command| Change { version, client_change, author, author_name, at, label, summary, command })
         .map_err(|e| format!("change {version}: {e}")))
 }
 
@@ -440,7 +451,7 @@ impl Storage for SqliteStorage {
         Ok(self.conn().query_row("SELECT data, data_version FROM project WHERE id = ?1", [id.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)
     }
 
-    fn append_change(&self, project: Uuid, c: &Change, snapshot: Option<&str>) -> Result<bool> {
+    fn append_change(&self, project: Uuid, c: &Change, inverse: &str, snapshot: Option<&str>) -> Result<bool> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let updated = match snapshot {
@@ -458,8 +469,8 @@ impl Storage for SqliteStorage {
         }
         let command = serde_json::to_string(&c.command).map_err(|e| StorageError::Damaged(e.to_string()))?;
         tx.execute(
-            "INSERT INTO change (project_id, version, author_id, at, label, command, client_change) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![project.to_string(), c.version, c.author.to_string(), c.at, c.label, command, c.client_change.to_string()],
+            "INSERT INTO change (project_id, version, author_id, at, label, command, client_change, summary, inverse) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![project.to_string(), c.version, c.author.to_string(), c.at, c.label, command, c.client_change.to_string(), c.summary, inverse],
         )?;
         tx.commit()?;
         Ok(true)
@@ -468,18 +479,41 @@ impl Storage for SqliteStorage {
     fn changes_since(&self, project: Uuid, since: i64, limit: u32) -> Result<Vec<Change>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT c.version, c.client_change, c.author_id, u.name, c.at, c.label, c.command FROM change c JOIN user u ON u.id = c.author_id
+            "SELECT c.version, c.client_change, c.author_id, u.name, c.at, c.label, c.command, c.summary FROM change c JOIN user u ON u.id = c.author_id
              WHERE c.project_id = ?1 AND c.version > ?2 ORDER BY c.version LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![project.to_string(), since, limit], change_from_row)?;
         rows.map(|r| r?.map_err(StorageError::Damaged)).collect()
     }
 
+    fn changes_before(&self, project: Uuid, before: Option<i64>, limit: u32) -> Result<Vec<Change>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT c.version, c.client_change, c.author_id, u.name, c.at, c.label, c.command, c.summary FROM change c JOIN user u ON u.id = c.author_id
+             WHERE c.project_id = ?1 AND c.version < ?2 ORDER BY c.version DESC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![project.to_string(), before.unwrap_or(i64::MAX), limit], change_from_row)?;
+        rows.map(|r| r?.map_err(StorageError::Damaged)).collect()
+    }
+
+    fn change_with_inverse(&self, project: Uuid, version: i64) -> Result<Option<(Change, String)>> {
+        let found = self
+            .conn()
+            .query_row(
+                "SELECT c.version, c.client_change, c.author_id, u.name, c.at, c.label, c.command, c.summary, c.inverse FROM change c JOIN user u ON u.id = c.author_id
+                 WHERE c.project_id = ?1 AND c.version = ?2",
+                params![project.to_string(), version],
+                |r| Ok((change_from_row(r)?, r.get::<_, String>(8)?)),
+            )
+            .optional()?;
+        found.map(|(c, inv)| c.map(|c| (c, inv)).map_err(StorageError::Damaged)).transpose()
+    }
+
     fn change_by_client(&self, project: Uuid, client_change: Uuid) -> Result<Option<Change>> {
         let found = self
             .conn()
             .query_row(
-                "SELECT c.version, c.client_change, c.author_id, u.name, c.at, c.label, c.command FROM change c JOIN user u ON u.id = c.author_id
+                "SELECT c.version, c.client_change, c.author_id, u.name, c.at, c.label, c.command, c.summary FROM change c JOIN user u ON u.id = c.author_id
                  WHERE c.project_id = ?1 AND c.client_change = ?2",
                 [project.to_string(), client_change.to_string()],
                 change_from_row,

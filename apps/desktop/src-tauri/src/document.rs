@@ -221,7 +221,7 @@ mod tests {
     use pm_core::TaskChange;
 
     fn change(version: i64, command: Command) -> Change {
-        Change { version, client_change: Uuid::now_v7(), author: Uuid::nil(), author_name: "Alex".into(), at: String::new(), label: command.label(), command }
+        Change { version, client_change: Uuid::now_v7(), author: Uuid::nil(), author_name: "Alex".into(), at: String::new(), label: command.label(), summary: String::new(), command }
     }
 
     #[test]

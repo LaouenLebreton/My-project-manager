@@ -285,3 +285,39 @@ async fn a_restarted_server_rebuilds_projects_from_snapshots_and_changes() {
     assert_eq!(opened["record"]["version"].as_i64(), Some(105));
     assert_eq!(opened["project"]["tasks"][&task]["name"], "Name 105");
 }
+
+#[tokio::test]
+async fn the_history_reads_in_plain_words_and_the_owner_can_revert() {
+    let app = server();
+    let p = people(&app).await;
+    let (id, task) = shared(&app, &p).await;
+    let edit = |command: Value| json!({ "clientChange": uuid::Uuid::now_v7().to_string(), "command": command });
+    call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(rename(&task, "Site survey")))).await;
+    let duration = json!({ "type": "SetTask", "id": task, "change": { "field": "Duration", "value": 2400 } });
+    call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[2].0), Some(edit(duration))).await;
+
+    let (status, history) = call(&app, "GET", &format!("/api/projects/{id}/history"), Some(&p[1].0), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let lines: Vec<(&str, &str)> = history["changes"].as_array().unwrap().iter().map(|c| (c["authorName"].as_str().unwrap(), c["summary"].as_str().unwrap())).collect();
+    assert_eq!(lines, [("Sam", "changed the duration of “Site survey” from 2 days to 5 days"), ("Alex", "renamed “Survey” to “Site survey”")]);
+    assert_eq!(history["canRevert"], false, "only the owner reverts");
+    let (_, page) = call(&app, "GET", &format!("/api/projects/{id}/history?before=2&limit=10"), Some(&p[1].0), None).await;
+    assert_eq!(page["changes"].as_array().unwrap().len(), 1);
+
+    // Alex may not revert; the owner may, and the revert is a new change in the history.
+    let (status, _) = call(&app, "POST", &format!("/api/projects/{id}/revert"), Some(&p[1].0), Some(json!({ "version": 2 }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, reverted) = call(&app, "POST", &format!("/api/projects/{id}/revert"), Some(&p[0].0), Some(json!({ "version": 2 }))).await;
+    assert_eq!(status, StatusCode::OK, "{reverted}");
+    assert_eq!(reverted["version"], 3);
+    assert_eq!(reverted["summary"], "reverted Sam's change: changed the duration of “Site survey” from 2 days to 5 days");
+    let (_, opened) = call(&app, "GET", &format!("/api/projects/{id}"), Some(&p[0].0), None).await;
+    assert_eq!(opened["project"]["tasks"][&task]["duration"], 960);
+
+    // A change that later changes depend on cannot be reverted.
+    let delete = json!({ "type": "DeleteTasks", "ids": [task] });
+    call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[0].0), Some(edit(delete))).await;
+    let (status, body) = call(&app, "POST", &format!("/api/projects/{id}/revert"), Some(&p[0].0), Some(json!({ "version": 1 }))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["message"].as_str().unwrap().starts_with("this change cannot be reverted any more"));
+}

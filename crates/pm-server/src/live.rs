@@ -85,6 +85,8 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/projects/{id}/changes", post(submit).get(changes))
         .route("/api/projects/{id}/live", get(live))
+        .route("/api/projects/{id}/history", get(history))
+        .route("/api/projects/{id}/revert", post(revert))
 }
 
 #[derive(Deserialize)]
@@ -100,35 +102,53 @@ async fn submit(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uu
     if role == Role::Viewer {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "you can view this project but not change it"));
     }
+    commit(&state, id, &me, role, &limits, req.client_change, req.command, None).await.map(Json)
+}
+
+/// Applies, stores and broadcasts one change, in the project's order. `summary` replaces the
+/// sentence worked out from the command (for reverts).
+#[allow(clippy::too_many_arguments)]
+async fn commit(
+    state: &AppState,
+    id: Uuid,
+    me: &crate::storage::User,
+    role: Role,
+    limits: &crate::access::Limits,
+    client_change: Uuid,
+    command: Command,
+    summary: Option<String>,
+) -> Result<Change, ApiError> {
     let room = state.hub.room(id);
     let mut guard = room.state.lock().await;
-    let client_change = req.client_change;
-    if let Some(done) = db(&state, move |s| s.change_by_client(id, client_change)).await? {
-        return Ok(Json(done));
+    if let Some(done) = db(state, move |s| s.change_by_client(id, client_change)).await? {
+        return Ok(done);
     }
     if guard.is_none() {
-        *guard = Some(load(&state, id).await?);
+        *guard = Some(load(state, id).await?);
     }
     let live = guard.as_mut().expect("loaded");
-    crate::permissions::check(role, &limits, &me, &live.project, &req.command).map_err(|m| ApiError::new(StatusCode::FORBIDDEN, m))?;
-    let inverse = apply(&mut live.project, &req.command).map_err(|e| ApiError::new(StatusCode::CONFLICT, format!("this change no longer fits the project: {e}")))?;
+    crate::permissions::check(role, limits, me, &live.project, &command).map_err(|m| ApiError::new(StatusCode::FORBIDDEN, m))?;
+    let summary = summary.unwrap_or_else(|| pm_sync::describe::summary(&live.project, &command));
+    let inverse = apply(&mut live.project, &command).map_err(|e| ApiError::new(StatusCode::CONFLICT, format!("this change no longer fits the project: {e}")))?;
     let change = Change {
         version: live.version + 1,
         client_change,
         author: me.id,
         author_name: me.name.clone(),
         at: now(),
-        label: req.command.label(),
-        command: req.command,
+        label: command.label(),
+        summary,
+        command,
     };
     let snapshot = (change.version % SNAPSHOT_EVERY == 0).then(|| serde_json::to_string(&live.project).expect("projects serialize"));
+    let inverse_json = serde_json::to_string(&inverse).expect("commands serialize");
     let stored = change.clone();
-    let saved = db(&state, move |s| s.append_change(id, &stored, snapshot.as_deref())).await;
+    let saved = db(state, move |s| s.append_change(id, &stored, &inverse_json, snapshot.as_deref())).await;
     match saved {
         Ok(true) => {
             live.version = change.version;
             let _ = room.tx.send(Arc::new(change.clone()));
-            Ok(Json(change))
+            Ok(change)
         }
         other => {
             // Not stored: undo it here. If another instance wrote first, reload next time.
@@ -141,6 +161,61 @@ async fn submit(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uu
             }
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct Before {
+    pub before: Option<i64>,
+    pub limit: Option<u32>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct History {
+    /// Newest first.
+    pub changes: Vec<Change>,
+    /// The caller owns the project and may revert changes.
+    pub can_revert: bool,
+}
+
+/// The History view: changes newest first, a page at a time.
+async fn history(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>, Query(q): Query<Before>) -> ApiResult<History> {
+    let (_, role, _) = access(&state, id, me.id).await?;
+    let limit = q.limit.unwrap_or(100).clamp(1, PAGE);
+    let before = q.before;
+    let changes = db(&state, move |s| s.changes_before(id, before, limit)).await?;
+    Ok(Json(History { changes, can_revert: role == Role::Owner }))
+}
+
+#[derive(Deserialize)]
+pub struct Revert {
+    pub version: i64,
+}
+
+/// The owner reverts a change: its undo is applied now, as a new change, so the history keeps
+/// both. Refused if later changes depend on it.
+async fn revert(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>, Json(req): Json<Revert>) -> ApiResult<Change> {
+    let (_, role, limits) = access(&state, id, me.id).await?;
+    if role != Role::Owner {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "only the project's owner can revert changes"));
+    }
+    let version = req.version;
+    let (original, inverse) = db(&state, move |s| s.change_with_inverse(id, version))
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "that change is not in this project's history"))?;
+    if inverse.is_empty() {
+        return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "this change was made before the history could undo changes, so it cannot be reverted"));
+    }
+    let command: Command = serde_json::from_str(&inverse).map_err(damaged)?;
+    let what = if original.summary.is_empty() { original.label.to_lowercase() } else { original.summary.clone() };
+    let summary = format!("reverted {}'s change: {what}", original.author_name);
+    commit(&state, id, &me, role, &limits, Uuid::now_v7(), command, Some(summary)).await.map_err(|e| {
+        if e.status == StatusCode::CONFLICT {
+            ApiError::new(StatusCode::CONFLICT, format!("this change cannot be reverted any more: later changes depend on it ({})", e.message))
+        } else {
+            e
+        }
+    }).map(Json)
 }
 
 #[derive(Deserialize)]
