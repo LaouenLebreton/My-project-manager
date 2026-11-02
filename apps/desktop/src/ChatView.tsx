@@ -114,7 +114,10 @@ function PostView({
             )}
             <button
               className="link small"
-              onClick={() => void onConfirm("Delete this post?", "It is removed for everyone. Replies to it stay.", "Delete").then((yes) => yes && run(chat.remove(post.id)))} title={mine ? "Delete your post" : "Delete (team owners can delete any post)"}>
+              onClick={() => void onConfirm("Delete this post?", "It is removed for everyone. Replies to it stay.", "Delete").then((yes) => {
+                  if (yes) void run(chat.remove(post.id));
+                })
+              } title={mine ? "Delete your post" : "Delete (team owners can delete any post)"}>
               Delete
             </button>
           </span>
