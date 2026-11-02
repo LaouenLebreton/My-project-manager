@@ -220,7 +220,7 @@ fn rename(task: &str, name: &str) -> Value {
 #[tokio::test]
 async fn changes_are_ordered_stored_and_broadcast() {
     let storage = Arc::new(SqliteStorage::in_memory().unwrap());
-    let state = AppState { storage: storage.clone(), hub: Arc::default() };
+    let state = AppState { storage: storage.clone(), hub: Arc::default(), config: Arc::default() };
     let app = router(state.clone());
     let p = people(&app).await;
     let (id, task) = shared(&app, &p).await;
@@ -266,7 +266,7 @@ async fn changes_are_ordered_stored_and_broadcast() {
 #[tokio::test]
 async fn a_restarted_server_rebuilds_projects_from_snapshots_and_changes() {
     let storage = Arc::new(SqliteStorage::in_memory().unwrap());
-    let app = router(AppState { storage: storage.clone(), hub: Arc::default() });
+    let app = router(AppState { storage: storage.clone(), hub: Arc::default(), config: Arc::default() });
     let p = people(&app).await;
     let (id, task) = shared(&app, &p).await;
     // Past one saved snapshot (every 100 changes), then a few more.
@@ -280,7 +280,7 @@ async fn a_restarted_server_rebuilds_projects_from_snapshots_and_changes() {
     assert!(snapshot.contains("Name 100"));
 
     // A new server process: nothing in memory.
-    let restarted = router(AppState { storage, hub: Arc::default() });
+    let restarted = router(AppState { storage, hub: Arc::default(), config: Arc::default() });
     let (_, opened) = call(&restarted, "GET", &format!("/api/projects/{id}"), Some(&p[1].0), None).await;
     assert_eq!(opened["record"]["version"].as_i64(), Some(105));
     assert_eq!(opened["project"]["tasks"][&task]["name"], "Name 105");
@@ -325,7 +325,7 @@ async fn the_history_reads_in_plain_words_and_the_owner_can_revert() {
 #[tokio::test]
 async fn teams_have_channels_with_posts_and_replies() {
     let storage = Arc::new(SqliteStorage::in_memory().unwrap());
-    let state = AppState { storage, hub: Arc::default() };
+    let state = AppState { storage, hub: Arc::default(), config: Arc::default() };
     let app = router(state.clone());
     let p = people(&app).await;
     let (_, team) = call(&app, "POST", "/api/teams", Some(&p[0].0), Some(json!({ "name": "Office move" }))).await;
@@ -368,4 +368,34 @@ async fn teams_have_channels_with_posts_and_replies() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, channel) = call(&app, "POST", &format!("/api/teams/{team_id}/channels"), Some(&p[1].0), Some(json!({ "name": "general" }))).await;
     assert_eq!((status, channel["name"].as_str()), (StatusCode::OK, Some("general 2")), "names stay distinct");
+}
+
+#[tokio::test]
+async fn team_owners_invite_people_and_open_servers_take_sign_ups() {
+    let app = server();
+    let p = people(&app).await;
+    let (_, team) = call(&app, "POST", "/api/teams", Some(&p[1].0), Some(json!({ "name": "Alex's team" }))).await;
+    let team_id = team["team"]["id"].as_str().unwrap().to_owned();
+    // Alex is not the server administrator, but owns the team.
+    let (status, invites) = call(&app, "POST", &format!("/api/teams/{team_id}/invites"), Some(&p[1].0), Some(json!({ "emails": ["new.person@example.com", "sam@example.com", "nope"] }))).await;
+    assert_eq!(status, StatusCode::OK, "{invites}");
+    let code = invites[0]["code"].as_str().unwrap().to_owned();
+    assert!(invites[1]["code"].is_null(), "Sam already has an account");
+    assert_eq!(invites[2]["note"], "not an email address");
+    let (status, session) = call(&app, "POST", "/api/sessions", None, Some(json!({ "email": "new.person@example.com", "password": code }))).await;
+    assert_eq!((status, session["user"]["name"].as_str()), (StatusCode::OK, Some("New Person")));
+    let (_, teams) = call(&app, "GET", "/api/teams", Some(session["token"].as_str().unwrap()), None).await;
+    assert_eq!(teams[0]["team"]["name"], "Alex's team");
+    // Members who do not own the team cannot invite.
+    let (status, _) = call(&app, "POST", &format!("/api/teams/{team_id}/invites"), Some(&p[2].0), Some(json!({ "emails": ["x@example.com"] }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Sign-ups: refused here, accepted on an open server.
+    let (status, _) = call(&app, "POST", "/api/signup", None, Some(account("Kim", "kim@example.com"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let open = router(AppState::with_config(SqliteStorage::in_memory().unwrap(), Config { public_url: Some("https://pm.example.com".into()), open_signup: true }));
+    let (status, s) = call(&open, "POST", "/api/signup", None, Some(account("Kim", "kim@example.com"))).await;
+    assert_eq!((status, s["user"]["isAdmin"].as_bool()), (StatusCode::OK, Some(false)));
+    let (_, info) = call(&open, "GET", "/api/server", None, None).await;
+    assert_eq!(info, json!({ "openSignup": true, "publicUrl": "https://pm.example.com" }));
 }

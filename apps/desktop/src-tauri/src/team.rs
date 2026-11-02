@@ -312,54 +312,38 @@ pub async fn team_share(app: AppHandle, window: WebviewWindow, team_id: String) 
     share(&app, window.label(), &a, &team_id).await
 }
 
-fn random_code(len: usize) -> String {
-    Uuid::new_v4().simple().to_string()[..len].to_owned()
-}
-
-/// "alex.martin@example.com" → "Alex Martin", until they are known by a better name.
-fn name_from_email(email: &str) -> String {
-    let local = email.split('@').next().unwrap_or(email);
-    let words: Vec<String> = local
-        .split(['.', '_', '-'])
-        .filter(|w| !w.is_empty())
-        .map(|w| {
-            let mut c = w.chars();
-            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
-        })
-        .collect();
-    if words.is_empty() { email.to_owned() } else { words.join(" ") }
-}
-
 const INVITE_PREFIX: &str = "SuperPM-Invite";
 
 /// Adds people to a team by email. Whoever hosts the team (or administers the server) can
 /// create their accounts on the spot; each new person gets an invite to paste into Join a Team.
 async fn invite_people(a: &Account, team_id: &str, emails: &[String]) -> Vec<Invite> {
-    let address = if a.server == LOCAL { hosting::invite_address() } else { a.server.clone() };
-    let mut out = Vec::new();
-    for email in emails.iter().map(|e| e.trim().to_lowercase()).filter(|e| !e.is_empty()) {
-        let mut invite = None;
-        let mut note = None;
-        if a.user.is_admin {
-            let code = random_code(16);
-            let body = serde_json::json!({ "name": name_from_email(&email), "email": email, "password": code });
-            match call::<serde_json::Value>(reqwest::Method::POST, &a.server, "/api/users", Some(&a.token), Some(body)).await {
-                Ok(_) => invite = Some(format!("{INVITE_PREFIX}|{address}|{email}|{code}")),
-                Err(CallError::Refused(m)) if m.starts_with("there is already an account") => note = Some("Already has an account; added to the team.".to_owned()),
-                Err(CallError::Refused(m)) | Err(CallError::Offline(m)) => {
-                    out.push(Invite { email, invite: None, note: Some(format!("Could not be invited: {m}.")) });
-                    continue;
-                }
-            }
-        }
-        let added = call::<serde_json::Value>(reqwest::Method::POST, &a.server, &format!("/api/teams/{team_id}/members"), Some(&a.token), Some(serde_json::json!({ "email": email }))).await;
-        if let Err(CallError::Refused(m) | CallError::Offline(m)) = added {
-            invite = None;
-            note = Some(format!("Could not be added to the team: {m}."));
-        }
-        out.push(Invite { email, invite, note });
+    #[derive(Deserialize)]
+    struct Raw {
+        email: String,
+        code: Option<String>,
+        note: Option<String>,
+        server: Option<String>,
     }
-    out
+    let fallback = if a.server == LOCAL { hosting::invite_address() } else { a.server.clone() };
+    let body = serde_json::json!({ "emails": emails });
+    match call::<Vec<Raw>>(reqwest::Method::POST, &a.server, &format!("/api/teams/{team_id}/invites"), Some(&a.token), Some(body)).await {
+        Ok(list) => list
+            .into_iter()
+            .map(|r| {
+                // The server's public address when it has one; otherwise how we reach it.
+                let address = r.server.unwrap_or_else(|| fallback.clone());
+                Invite { invite: r.code.map(|code| format!("{INVITE_PREFIX}|{address}|{}|{code}", r.email)), note: r.note.map(|n| capitalized(&n)), email: r.email }
+            })
+            .collect(),
+        Err(CallError::Refused(m) | CallError::Offline(m)) => {
+            emails.iter().map(|e| Invite { email: e.trim().to_lowercase(), invite: None, note: Some(format!("Could not be invited: {m}.")) }).collect()
+        }
+    }
+}
+
+fn capitalized(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str() + if s.ends_with('.') { "" } else { "." }).unwrap_or_default()
 }
 
 /// Team > Create Team Project: makes the project in this window a team project. The first time,

@@ -18,6 +18,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/teams", get(my_teams).post(create_team))
         .route("/api/teams/{id}/members", get(team_members).post(add_team_member))
+        .route("/api/teams/{id}/invites", axum::routing::post(invite))
         .route("/api/projects", get(my_projects).post(share_project))
         .route("/api/projects/{id}", get(open_project))
         .route("/api/projects/{id}/members", get(project_members))
@@ -128,6 +129,73 @@ async fn add_team_member(State(state): State<AppState>, Auth(me): Auth, Path(tea
         Outcome::NotOwner => Err(forbidden("only the team's owners can add people")),
         Outcome::NoAccount => Err(ApiError::new(StatusCode::NOT_FOUND, "there is no account with that email on this server; ask the administrator to create one")),
         Outcome::Added(user) => Ok(Json(TeamMemberView { user, role })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct InviteRequest {
+    pub emails: Vec<String>,
+}
+
+/// One person invited to a team.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteResult {
+    pub email: String,
+    /// For someone new to the server: the one-time code to sign in with. None if they already
+    /// had an account (they were just added to the team).
+    pub code: Option<String>,
+    /// Anything to tell the person inviting, in plain words.
+    pub note: Option<String>,
+    /// The server address to put in the invite, when the server knows it.
+    pub server: Option<String>,
+}
+
+/// A team's owners invite people by email. New people get an account with a one-time code;
+/// everyone is added to the team.
+async fn invite(State(state): State<AppState>, Auth(me): Auth, Path(team): Path<Uuid>, Json(req): Json<InviteRequest>) -> ApiResult<Vec<InviteResult>> {
+    let emails: Vec<String> = req.emails.iter().map(|e| crate::normalized_email(e)).filter(|e| !e.is_empty()).collect();
+    let server = state.config.public_url.clone();
+    // Codes are hashed like passwords, before taking the storage lock.
+    let prepared: Vec<(String, String, String)> = emails
+        .into_iter()
+        .map(|e| {
+            let code = crate::invite_code();
+            let hash = crate::auth::hash_password(&code);
+            (e, code, hash)
+        })
+        .collect();
+    let results = db(&state, move |s| {
+        match s.team_role(team, me.id)? {
+            Some(TeamRole::Owner) => {}
+            Some(TeamRole::Member) => return Ok(Err("only the team's owners can invite people")),
+            None => return Ok(Err("")),
+        }
+        let mut out = Vec::new();
+        for (email, code, hash) in prepared {
+            if !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
+                out.push(InviteResult { email, code: None, note: Some("not an email address".into()), server: server.clone() });
+                continue;
+            }
+            let (user, code) = match s.user_by_email(&email)? {
+                Some((u, _)) => (u, None),
+                None => {
+                    let u = User { id: Uuid::now_v7(), name: crate::name_from_email(&email), email: email.clone(), is_admin: false, created_at: now() };
+                    s.create_user(&u, &hash)?;
+                    (u, Some(code))
+                }
+            };
+            s.set_team_member(team, user.id, s.team_role(team, user.id)?.unwrap_or(TeamRole::Member))?;
+            let note = code.is_none().then(|| "already has an account; added to the team".to_owned());
+            out.push(InviteResult { email, code, note, server: server.clone() });
+        }
+        Ok(Ok(out))
+    })
+    .await?;
+    match results {
+        Ok(list) => Ok(Json(list)),
+        Err("") => Err(not_found("team")),
+        Err(m) => Err(forbidden(m)),
     }
 }
 

@@ -28,11 +28,25 @@ use storage::{Storage, StorageError, User};
 pub struct AppState {
     pub storage: Arc<dyn Storage>,
     pub hub: Arc<live::Hub>,
+    pub config: Arc<Config>,
+}
+
+/// How this server runs.
+#[derive(Clone, Debug, Default)]
+pub struct Config {
+    /// The address people use to reach it, e.g. `https://pm.example.com` (for invites).
+    pub public_url: Option<String>,
+    /// Anyone may create an account (an online service); otherwise only by invitation.
+    pub open_signup: bool,
 }
 
 impl AppState {
     pub fn new(storage: impl Storage) -> Self {
-        AppState { storage: Arc::new(storage), hub: Arc::default() }
+        AppState { storage: Arc::new(storage), hub: Arc::default(), config: Arc::default() }
+    }
+
+    pub fn with_config(storage: impl Storage, config: Config) -> Self {
+        AppState { storage: Arc::new(storage), hub: Arc::default(), config: Arc::new(config) }
     }
 }
 
@@ -110,6 +124,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions", post(sign_in).delete(sign_out))
         .route("/api/me", get(me))
         .route("/api/users", post(create_user))
+        .route("/api/signup", post(signup))
+        .route("/api/server", get(server_info))
         .merge(sharing::routes())
         .merge(live::routes())
         .merge(chat::routes())
@@ -138,11 +154,30 @@ pub struct Session {
     pub user: User,
 }
 
+/// A one-time code for an invited person: their first password, sent inside the invite.
+pub(crate) fn invite_code() -> String {
+    auth::new_token().0[..20].to_owned()
+}
+
+/// "alex.martin@example.com" → "Alex Martin", until they are known by a better name.
+pub(crate) fn name_from_email(email: &str) -> String {
+    let local = email.split('@').next().unwrap_or(email);
+    let words: Vec<String> = local
+        .split(['.', '_', '-', '+'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        })
+        .collect();
+    if words.is_empty() { email.to_owned() } else { words.join(" ") }
+}
+
 pub(crate) fn now() -> String {
     jiff::Timestamp::now().to_string()
 }
 
-fn normalized_email(email: &str) -> String {
+pub(crate) fn normalized_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
@@ -190,6 +225,22 @@ async fn create_user(State(state): State<AppState>, Auth(me): Auth, Json(a): Jso
     let created = user.clone();
     db(&state, move |s| s.create_user(&created, &hash)).await?;
     Ok(Json(user))
+}
+
+/// What the app needs to know about this server before signing in.
+async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "openSignup": state.config.open_signup, "publicUrl": state.config.public_url }))
+}
+
+/// Creating your own account, on servers that allow it (an online service).
+async fn signup(State(state): State<AppState>, Json(a): Json<NewAccount>) -> ApiResult<Session> {
+    if !state.config.open_signup {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "this server does not take sign-ups; ask someone in your team for an invite"));
+    }
+    let (user, hash) = account(&a, false)?;
+    let created = user.clone();
+    db(&state, move |s| s.create_user(&created, &hash)).await?;
+    Ok(Json(start_session(&state, user).await?))
 }
 
 async fn sign_in(State(state): State<AppState>, Json(c): Json<Credentials>) -> ApiResult<Session> {
