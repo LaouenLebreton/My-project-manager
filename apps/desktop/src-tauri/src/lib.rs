@@ -79,6 +79,7 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(actions::AppState::default())
         .setup(|app| {
             let (menu, handles) = menu::build(app.handle())?;

@@ -18,6 +18,7 @@ tauri-build = { version = "2.7.1", features = [] }
 tauri = { version = "2.12.1", features = [] }
 # 2.7.x: 2.8 was released days ago; see docs/decisions.md.
 tauri-plugin-dialog = "~2.7.3"
+tauri-plugin-notification = "~2.8.0"
 serde.workspace = true
 serde_json.workspace = true
 pm-core.workspace = true

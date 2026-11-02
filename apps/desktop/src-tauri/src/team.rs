@@ -990,6 +990,33 @@ pub async fn chat_create_channel(app: AppHandle, team_id: String, name: String) 
     Ok(call(reqwest::Method::POST, &a.server, &format!("/api/teams/{team_id}/channels"), Some(&a.token), Some(serde_json::json!({ "name": name }))).await?)
 }
 
+/// Does `body` @mention someone called `name` (by first name, any case)?
+fn mentions(body: &str, name: &str) -> bool {
+    let Some(first) = name.split_whitespace().next().map(str::to_lowercase) else { return false };
+    let body = body.to_lowercase();
+    body.match_indices('@').any(|(i, _)| {
+        let word: String = body[i + 1..].chars().take_while(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-')).collect();
+        word.trim_end_matches(['.', '-', '_']) == first
+    })
+}
+
+/// A macOS notification when someone mentions you while Super PM is in the background.
+fn notify_mention(app: &AppHandle, me: &TeamUser, event: &serde_json::Value) {
+    use tauri_plugin_notification::NotificationExt;
+    let post = &event["post"];
+    let fresh = event["kind"] == "post" && post["editedAt"].is_null() && post["deleted"] == false && post["reactions"].as_array().is_some_and(|r| r.is_empty());
+    let body = post["body"].as_str().unwrap_or_default();
+    if !fresh || post["authorId"].as_str() == Some(me.id.as_str()) || !mentions(body, &me.name) {
+        return;
+    }
+    if app.webview_windows().values().any(|w| w.is_focused().unwrap_or(false)) {
+        return; // in front: the Chat tab's badge and highlight are enough
+    }
+    let short: String = body.chars().take(140).collect();
+    let author = post["authorName"].as_str().unwrap_or("Someone");
+    let _ = app.notification().builder().title(format!("{author} mentioned you")).body(short).show();
+}
+
 /// Keeps one live chat connection for the signed-in account and passes every event to all
 /// windows. Restarted when the account changes.
 pub fn start_chat(app: &AppHandle) {
@@ -1024,6 +1051,7 @@ pub fn start_chat(app: &AppHandle) {
                         msg = read.next() => match msg {
                             Some(Ok(Message::Text(text))) => {
                                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    notify_mention(&app, &a.user, &v);
                                     let _ = app.emit(CHAT_EVENT, v);
                                 }
                             }
@@ -1042,4 +1070,16 @@ pub fn start_chat(app: &AppHandle) {
             pause = (pause * 2).min(Duration::from_secs(30));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mentions_are_by_first_name_in_any_case() {
+        assert!(super::mentions("Kick-off at 9, @alex can you book?", "Alex Martin"));
+        assert!(super::mentions("thanks @Alex.", "Alex"));
+        assert!(!super::mentions("@alexandra please", "Alex"));
+        assert!(!super::mentions("email alex@example.com", "Alex"));
+        assert!(!super::mentions("no mention", "Alex"));
+    }
 }

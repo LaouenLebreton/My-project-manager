@@ -139,3 +139,11 @@ Team > Team Server.
 
 For testing on one Mac: Help > Open Second Test User Window (development builds) starts a
 second copy with its own settings (`SUPER_PM_PROFILE`).
+
+## Notifications (2026-11-02)
+
+tauri-plugin-notification 2.8.0 (the 2.x line; 3.0 is an alpha). Notifications are sent from
+Rust, so the web view gets no new permission. Only when someone @mentions you by first name and
+no Super PM window is in front; inside the app the Chat tab's badge and highlighting do the job.
+Development builds are not app bundles, so macOS may show them under another name or not at
+all; the bundled app shows them as Super PM.
