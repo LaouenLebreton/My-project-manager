@@ -126,6 +126,10 @@ function sampleReport() {
   };
 }
 
+
+/** Portfolio groups chosen in this session. */
+const portfolioGroups: Record<string, string> = { "/Users/me/Office move.pmproj": "Clients", "/Users/me/Website relaunch.pmproj": "Clients" };
+
 export function install() {
   const n = Number(new URLSearchParams(location.search).get("n") ?? 0);
   const generated = n > 0 ? generate(n) : { rows: [row("Alpha"), row("Beta"), row("Gamma")], links: [] };
@@ -222,7 +226,7 @@ export function install() {
       switch (cmd) {
         case "portfolio_data": {
           const proj = (name: string, status: string, start: string, finish: string, done: number, slip: number | null, reasons: string[], shared = false) => ({
-            path: `/Users/me/${name}.pmproj`, name, shared, status, reasons, start, finish, baselineFinish: slip === null ? null : finish, finishVarianceMinutes: slip,
+            path: `/Users/me/${name}.pmproj`, name, shared, group: portfolioGroups[`/Users/me/${name}.pmproj`] ?? null, status, reasons, start, finish, baselineFinish: slip === null ? null : finish, finishVarianceMinutes: slip,
             percentComplete: done, costCents: 1_250_000 + done * 1000, baselineCostCents: slip === null ? null : 1_200_000, currency: "€", overallocated: 0, overdue: 0,
             nextMilestone: { name: "Go live", date: finish }, milestones: [{ name: "Design approved", date: start.replace("-05", "-12") }, { name: "Go live", date: finish }],
           });
@@ -240,10 +244,17 @@ export function install() {
               { name: "Alex", projectCount: 2, weeks: [week(2400, [["Office move", 2400]]), week(3360, [["Office move", 1920], ["Website relaunch", 1440]]), week(2880, [["Website relaunch", 2880]]), week(1200, [["Website relaunch", 1200]])] },
               { name: "Sam", projectCount: 1, weeks: [week(0, []), week(1440, [["Year-end audit", 1440]]), week(2400, [["Year-end audit", 2400]]), week(2400, [["Year-end audit", 2400]])] },
             ],
+            groups: [...new Set(Object.values(portfolioGroups))].sort(),
           };
         }
         case "portfolio_add":
           return false;
+        case "portfolio_set_group": {
+          const g = String(args.group).trim();
+          if (g) portfolioGroups[String(args.path)] = g;
+          else delete portfolioGroups[String(args.path)];
+          return null;
+        }
         case "portfolio_remove":
         case "portfolio_open":
         case "open_portfolio":

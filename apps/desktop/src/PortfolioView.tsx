@@ -31,13 +31,100 @@ function StatusChip({ row }: { row: PortfolioRow }) {
   );
 }
 
-function Projects({ data, onOpen, onRemove }: { data: Data; onOpen: (p: string) => void; onRemove: (p: string) => void }) {
-  const rows = [...data.projects].sort((a, b) => (STATUS[a.status]?.order ?? 9) - (STATUS[b.status]?.order ?? 9) || a.name.localeCompare(b.name));
+/** Cost and baseline added up per currency (projects may use different ones). */
+/** `budgetedCost` is the cost of the projects that have a baseline, to compare with it. */
+type Total = { currency: string; cost: number; baseline: number; budgetedCost: number; unplanned: number };
+function totals(rows: PortfolioRow[]): Total[] {
+  const by = new Map<string, Total>();
+  for (const r of rows) {
+    if (r.status === "problem") continue;
+    const t = by.get(r.currency) ?? { currency: r.currency, cost: 0, baseline: 0, budgetedCost: 0, unplanned: 0 };
+    t.cost += r.costCents;
+    if (r.baselineCostCents === null) t.unplanned += 1;
+    else {
+      t.baseline += r.baselineCostCents;
+      t.budgetedCost += r.costCents;
+    }
+    by.set(r.currency, t);
+  }
+  return [...by.values()].filter((t) => t.cost || t.baseline);
+}
+
+function TotalLine({ rows, label }: { rows: PortfolioRow[]; label: string }) {
+  const sums = totals(rows);
+  return (
+    <tr className="portfolio-total">
+      <th scope="row" colSpan={6}>
+        {label}
+      </th>
+      <td className="right">
+        {sums.length === 0
+          ? "—"
+          : sums.map((t) => (
+              <div key={t.currency}>
+                {formatMoney(t.cost, t.currency)}
+                {t.baseline > 0 && (
+                  <div
+                    className={`small ${t.budgetedCost > t.baseline ? "late-text" : "secondary"}`}
+                    title={t.unplanned > 0 ? `Budget: the baseline cost of the projects that have a baseline (${formatMoney(t.budgetedCost, t.currency)} now)` : "Budget: the baseline cost"}
+                  >
+                    budget {formatMoney(t.baseline, t.currency)}
+                    {t.budgetedCost !== t.baseline && ` (${t.budgetedCost > t.baseline ? "over" : "under"} by ${formatMoney(Math.abs(t.budgetedCost - t.baseline), t.currency)})`}
+                    {t.unplanned > 0 && <div className="secondary">{t.unplanned} without a budget</div>}
+                  </div>
+                )}
+              </div>
+            ))}
+      </td>
+      <td colSpan={2} />
+    </tr>
+  );
+}
+
+function GroupField({ row, onGroup }: { row: PortfolioRow; onGroup: (path: string, group: string) => void }) {
+  const [value, setValue] = useState(row.group ?? "");
+  useEffect(() => setValue(row.group ?? ""), [row.group]);
+  const commit = () => value.trim() !== (row.group ?? "") && onGroup(row.path, value);
+  return (
+    <input
+      className="group-field"
+      list="portfolio-groups"
+      value={value}
+      placeholder="No group"
+      aria-label={`Group of ${row.name}`}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        // Return saves even while the suggestion list has the key.
+        if (e.key === "Enter") {
+          commit();
+          e.currentTarget.blur();
+        }
+        if (e.key === "Escape") setValue(row.group ?? "");
+      }}
+    />
+  );
+}
+
+function Projects({ rows: all, groups, grouped, onOpen, onRemove, onGroup }: { rows: PortfolioRow[]; groups: string[]; grouped: boolean; onOpen: (p: string) => void; onRemove: (p: string) => void; onGroup: (path: string, group: string) => void }) {
+  const rows = [...all].sort((a, b) => (STATUS[a.status]?.order ?? 9) - (STATUS[b.status]?.order ?? 9) || a.name.localeCompare(b.name));
+  // Grouped: each group (A–Z, then projects without one) with its own total.
+  const sections: { name: string | null; rows: PortfolioRow[] }[] = grouped
+    ? [...new Set(rows.map((r) => r.group ?? null))]
+        .sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)))
+        .map((name) => ({ name, rows: rows.filter((r) => (r.group ?? null) === name) }))
+    : [{ name: null, rows }];
   return (
     <table className="portfolio-table">
+      <datalist id="portfolio-groups">
+        {groups.map((g) => (
+          <option key={g} value={g} />
+        ))}
+      </datalist>
       <thead>
         <tr>
           <th>Project</th>
+          <th>Group</th>
           <th>Status</th>
           <th>Finish</th>
           <th title="Against the baseline finish">Slip</th>
@@ -47,14 +134,25 @@ function Projects({ data, onOpen, onRemove }: { data: Data; onOpen: (p: string) 
           <th />
         </tr>
       </thead>
-      <tbody>
-        {rows.map((r) => (
+      {sections.map((sec) => (
+      <tbody key={sec.name ?? ""}>
+        {grouped && (
+          <tr className="portfolio-group">
+            <th scope="rowgroup" colSpan={9}>
+              {sec.name ?? "No group"} <span className="secondary small">· {sec.rows.length}</span>
+            </th>
+          </tr>
+        )}
+        {sec.rows.map((r) => (
           <tr key={r.path}>
             <td>
               <button className="link project-link" onClick={() => onOpen(r.path)} title={r.path}>
                 {r.name}
               </button>
               {r.shared && <span className="secondary small"> · team</span>}
+            </td>
+            <td>
+              <GroupField row={r} onGroup={onGroup} />
             </td>
             <td>
               <StatusChip row={r} />
@@ -91,9 +189,35 @@ function Projects({ data, onOpen, onRemove }: { data: Data; onOpen: (p: string) 
             </td>
           </tr>
         ))}
+        {grouped && sections.length > 1 && <TotalLine rows={sec.rows} label={`${sec.name ?? "No group"} total`} />}
       </tbody>
+      ))}
+      <tfoot>
+        <TotalLine rows={rows} label={`Total · ${rows.length} project${rows.length === 1 ? "" : "s"}`} />
+      </tfoot>
     </table>
   );
+}
+
+/** What the portfolio shows; kept between launches (this Mac only). */
+type Filter = { status: string; where: "all" | "team" | "local"; group: string; grouped: boolean };
+const FILTER_KEY = "portfolio-filter";
+const NO_FILTER: Filter = { status: "all", where: "all", group: "all", grouped: false };
+function savedFilter(): Filter {
+  try {
+    return { ...NO_FILTER, ...JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}") };
+  } catch {
+    return NO_FILTER;
+  }
+}
+const NO_GROUP = "\u0000none";
+function matches(r: PortfolioRow, f: Filter): boolean {
+  if (f.status !== "all" && r.status !== f.status) return false;
+  if (f.where === "team" && !r.shared) return false;
+  if (f.where === "local" && r.shared) return false;
+  if (f.group === NO_GROUP) return !r.group;
+  if (f.group !== "all" && r.group !== f.group) return false;
+  return true;
 }
 
 /** Every project as one bar on a shared time scale, with milestones and today. */
@@ -204,6 +328,17 @@ export function PortfolioView() {
   const [data, setData] = useState<Data | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [tab, setTab] = useState<"projects" | "timeline" | "people">("projects");
+  const [filter, setFilterState] = useState<Filter>(savedFilter);
+  const setFilter = (f: Partial<Filter>) =>
+    setFilterState((old) => {
+      const next = { ...old, ...f };
+      try {
+        localStorage.setItem(FILTER_KEY, JSON.stringify(next));
+      } catch {
+        // Not kept; still applies now.
+      }
+      return next;
+    });
 
   const load = useCallback(() => {
     portfolio.data().then(
@@ -224,13 +359,32 @@ export function PortfolioView() {
   const open = (path: string) => void portfolio.open(path).catch((e) => setProblem(errorMessage(e)));
   const remove = (path: string) => void portfolio.remove(path).then(load);
   const add = () => void portfolio.add().then((added) => added && load(), (e) => setProblem(errorMessage(e)));
+  const setGroup = (path: string, group: string) => void portfolio.setGroup(path, group).then(load, (e) => setProblem(errorMessage(e)));
+
+  // The filter applies to every view, so the timeline and people match the list.
+  const shown = useMemo(() => (data ? data.projects.filter((r) => matches(r, filter)) : []), [data, filter]);
+  const view = useMemo(() => {
+    if (!data) return null;
+    const names = new Set(shown.map((p) => p.name));
+    const people = data.people
+      .map((p) => {
+        const weeks = p.weeks.map((w) => {
+          const projects = w.projects.filter(([n]) => names.has(n));
+          return { ...w, projects, minutes: projects.reduce((s, [, m]) => s + m, 0) };
+        });
+        return { ...p, weeks, projectCount: new Set(weeks.flatMap((w) => w.projects.map(([n]) => n))).size };
+      })
+      .filter((p) => p.projectCount > 0);
+    return { ...data, projects: shown, people };
+  }, [data, shown]);
+  const filtered = filter.status !== "all" || filter.where !== "all" || filter.group !== "all";
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
-    for (const p of data?.projects ?? []) c[p.status] = (c[p.status] ?? 0) + 1;
+    for (const p of shown) c[p.status] = (c[p.status] ?? 0) + 1;
     return c;
-  }, [data]);
-  const overbooked = data?.people.filter((p) => p.weeks.some((w) => w.minutes > w.capacity)).length ?? 0;
+  }, [shown]);
+  const overbooked = view?.people.filter((p) => p.weeks.some((w) => w.minutes > w.capacity)).length ?? 0;
 
   return (
     <main className="portfolio">
@@ -238,7 +392,7 @@ export function PortfolioView() {
         <div>
           <h1>Portfolio</h1>
           <p className="secondary">
-            {data ? `${data.projects.length} project${data.projects.length === 1 ? "" : "s"}` : "Loading…"}
+            {data ? `${shown.length}${filtered ? ` of ${data.projects.length}` : ""} project${data.projects.length === 1 ? "" : "s"}` : "Loading…"}
             {(["late", "atRisk", "onTrack", "done"] as const).filter((k) => counts[k]).map((k) => ` · ${counts[k]} ${STATUS[k].label.toLowerCase()}`)}
             {overbooked > 0 && ` · ${overbooked} overbooked ${overbooked === 1 ? "person" : "people"}`}
           </p>
@@ -262,11 +416,57 @@ export function PortfolioView() {
           {problem}
         </p>
       )}
+      {data && data.projects.length > 0 && (
+        <div className="portfolio-filters" role="group" aria-label="Show">
+          <label>
+            Status{" "}
+            <select value={filter.status} onChange={(e) => setFilter({ status: e.target.value })}>
+              <option value="all">Any</option>
+              {Object.entries(STATUS).map(([k, s]) => (
+                <option key={k} value={k}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Projects{" "}
+            <select value={filter.where} onChange={(e) => setFilter({ where: e.target.value as Filter["where"] })}>
+              <option value="all">Team and local</option>
+              <option value="team">Team only</option>
+              <option value="local">Local only</option>
+            </select>
+          </label>
+          <label>
+            Group{" "}
+            <select value={filter.group} onChange={(e) => setFilter({ group: e.target.value })}>
+              <option value="all">Any</option>
+              {data.groups.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+              <option value={NO_GROUP}>No group</option>
+            </select>
+          </label>
+          {tab === "projects" && (
+            <label>
+              <input type="checkbox" checked={filter.grouped} onChange={(e) => setFilter({ grouped: e.target.checked })} /> Show by group
+            </label>
+          )}
+          {filtered && (
+            <button className="link small" onClick={() => setFilter({ status: "all", where: "all", group: "all" })}>
+              Show all
+            </button>
+          )}
+        </div>
+      )}
       <div className="portfolio-body">
         {data && data.projects.length === 0 && <p className="secondary">No projects yet. Projects you open appear here; Add Project brings in others.</p>}
-        {data && data.projects.length > 0 && tab === "projects" && <Projects data={data} onOpen={open} onRemove={remove} />}
-        {data && data.projects.length > 0 && tab === "timeline" && <Timeline data={data} onOpen={open} />}
-        {data && data.projects.length > 0 && tab === "people" && <People data={data} />}
+        {data && data.projects.length > 0 && shown.length === 0 && <p className="secondary">No projects match. <button className="link" onClick={() => setFilter({ status: "all", where: "all", group: "all" })}>Show all</button></p>}
+        {view && shown.length > 0 && tab === "projects" && <Projects rows={shown} groups={data!.groups} grouped={filter.grouped} onOpen={open} onRemove={remove} onGroup={setGroup} />}
+        {view && shown.length > 0 && tab === "timeline" && <Timeline data={view} onOpen={open} />}
+        {view && shown.length > 0 && tab === "people" && <People data={view} />}
       </div>
     </main>
   );

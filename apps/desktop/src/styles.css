@@ -1775,3 +1775,42 @@ label.indent {
   top: 12px;
   right: 16px;
 }
+
+/* Portfolio: filters, groups and totals. */
+.portfolio-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 0 16px 8px;
+  font-size: 12px;
+}
+.group-field {
+  width: 110px;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.group-field:hover,
+.group-field:focus {
+  border-color: color-mix(in srgb, CanvasText 15%, transparent);
+}
+.group-field::placeholder {
+  color: var(--text-secondary);
+}
+.portfolio-table .portfolio-group th {
+  text-align: left;
+  padding-top: 14px;
+  font-weight: 600;
+}
+.portfolio-table .portfolio-total th,
+.portfolio-table .portfolio-total td {
+  font-weight: 600;
+  border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+}
+.portfolio-table tfoot .portfolio-total th,
+.portfolio-table tfoot .portfolio-total td {
+  border-top-width: 2px;
+}

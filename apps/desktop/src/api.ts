@@ -84,6 +84,8 @@ export const portfolio = {
   /** Resolves true if a project was chosen. */
   add: () => invoke<boolean>("portfolio_add"),
   remove: (path: string) => invoke<void>("portfolio_remove", { path }),
+  /** A blank group takes the project out of its group. */
+  setGroup: (path: string, group: string) => invoke<void>("portfolio_set_group", { path, group }),
   open: (path: string) => invoke<void>("portfolio_open", { path }),
 };
 

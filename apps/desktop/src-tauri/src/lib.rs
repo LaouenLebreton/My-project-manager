@@ -151,6 +151,7 @@ pub fn run() {
             portfolio::portfolio_data,
             portfolio::portfolio_add,
             portfolio::portfolio_remove,
+            portfolio::portfolio_set_group,
             portfolio::portfolio_open,
             portfolio::open_portfolio,
             portfolio::show_home,

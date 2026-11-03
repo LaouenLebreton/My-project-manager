@@ -6,4 +6,8 @@ export type PortfolioView = { projects: Array<PortfolioRow>,
 /**
  * Mondays (`YYYY-MM-DD`) of the weeks shown for people.
  */
-weeks: Array<string>, people: Array<PortfolioPerson>, today: string, };
+weeks: Array<string>, people: Array<PortfolioPerson>, today: string, 
+/**
+ * Every group name in use, sorted.
+ */
+groups: Array<string>, };

@@ -39,6 +39,8 @@ pub struct PortfolioRow {
     pub name: String,
     /// A team project (shared through a team).
     pub shared: bool,
+    /// The group the owner put it in ("Clients", "Internal"), if any.
+    pub group: Option<String>,
     /// "onTrack", "atRisk", "late", "done", or "problem" (could not be read or scheduled).
     pub status: String,
     pub reasons: Vec<String>,
@@ -94,13 +96,35 @@ pub struct PortfolioView {
     pub weeks: Vec<String>,
     pub people: Vec<PortfolioPerson>,
     pub today: String,
+    /// Every group name in use, sorted.
+    pub groups: Vec<String>,
 }
 
-/// Paths added by hand and taken out, kept between launches.
+/// Paths added by hand and taken out, and each project's group, kept between launches.
 #[derive(Default, Serialize, Deserialize)]
 struct Choices {
     added: Vec<PathBuf>,
     removed: Vec<PathBuf>,
+    #[serde(default)]
+    groups: BTreeMap<PathBuf, String>,
+}
+
+impl Choices {
+    /// Puts a project in a group; a blank name takes it out of its group.
+    fn set_group(&mut self, path: PathBuf, group: &str) {
+        let group = group.trim();
+        if group.is_empty() {
+            self.groups.remove(&path);
+        } else {
+            self.groups.insert(path, group.to_owned());
+        }
+    }
+
+    /// The group names in use, sorted, without duplicates.
+    fn group_names(&self) -> Vec<String> {
+        let names: std::collections::BTreeSet<&String> = self.groups.values().collect();
+        names.into_iter().cloned().collect()
+    }
 }
 
 fn choices_file(app: &AppHandle) -> Option<PathBuf> {
@@ -171,6 +195,7 @@ fn status_code(s: Status) -> &'static str {
 /// Window > Portfolio: everything it shows.
 #[tauri::command]
 pub fn portfolio_data(app: AppHandle) -> PortfolioView {
+    let chosen = choices(&app);
     let today = Moment::from_datetime(jiff::Zoned::now().datetime());
     let mut projects = Vec::new();
     // Per person (lower-case name): display name, capacity source, day → (project → minutes).
@@ -188,6 +213,7 @@ pub fn portfolio_data(app: AppHandle) -> PortfolioView {
             path: path.display().to_string(),
             name,
             shared: false,
+            group: chosen.groups.get(&path).cloned(),
             status: status.into(),
             reasons: vec![reason],
             start: None,
@@ -231,6 +257,7 @@ pub fn portfolio_data(app: AppHandle) -> PortfolioView {
             path: path.display().to_string(),
             name: p.name.clone(),
             shared,
+            group: chosen.groups.get(&path).cloned(),
             status: status_code(sum.status).into(),
             reasons: sum.reasons,
             start: Some(iso(sum.start)),
@@ -295,7 +322,7 @@ pub fn portfolio_data(app: AppHandle) -> PortfolioView {
             PortfolioPerson { name: p.name, weeks: weeks_out, project_count: projects_seen.len() as u32 }
         })
         .collect();
-    PortfolioView { projects, weeks: weeks.into_iter().map(date).collect(), people, today: iso(today) }
+    PortfolioView { projects, weeks: weeks.into_iter().map(date).collect(), people, today: iso(today), groups: chosen.group_names() }
 }
 
 /// Adds a project file chosen in a dialog.
@@ -322,6 +349,14 @@ pub fn portfolio_remove(app: AppHandle, path: String) {
     if !c.removed.contains(&path) {
         c.removed.push(path);
     }
+    save_choices(&app, &c);
+}
+
+/// Puts a project in a group ("Clients"); a blank name takes it out.
+#[tauri::command]
+pub fn portfolio_set_group(app: AppHandle, path: String, group: String) {
+    let mut c = choices(&app);
+    c.set_group(PathBuf::from(path), &group);
     save_choices(&app, &c);
 }
 
@@ -363,4 +398,30 @@ pub fn show_home(app: AppHandle, new_tab: bool) {
 #[tauri::command]
 pub fn open_portfolio(app: AppHandle) {
     show(&app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn choices_saved_before_groups_still_read() {
+        let c: Choices = serde_json::from_str(r#"{"added":["/a.pmproj"],"removed":[]}"#).unwrap();
+        assert_eq!(c.added, vec![PathBuf::from("/a.pmproj")]);
+        assert!(c.groups.is_empty());
+    }
+
+    #[test]
+    fn groups_are_set_trimmed_and_cleared() {
+        let mut c = Choices::default();
+        c.set_group("/a.pmproj".into(), "  Clients ");
+        c.set_group("/b.pmproj".into(), "Internal");
+        c.set_group("/c.pmproj".into(), "Clients");
+        assert_eq!(c.groups.get(Path::new("/a.pmproj")).map(String::as_str), Some("Clients"));
+        assert_eq!(c.group_names(), vec!["Clients".to_owned(), "Internal".to_owned()]);
+        c.set_group("/b.pmproj".into(), "   ");
+        assert_eq!(c.group_names(), vec!["Clients".to_owned()]);
+        let back: Choices = serde_json::from_slice(&serde_json::to_vec(&c).unwrap()).unwrap();
+        assert_eq!(back.groups, c.groups);
+    }
 }

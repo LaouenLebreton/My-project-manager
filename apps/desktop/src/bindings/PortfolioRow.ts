@@ -7,6 +7,10 @@ export type PortfolioRow = { path: string, name: string,
  */
 shared: boolean, 
 /**
+ * The group the owner put it in ("Clients", "Internal"), if any.
+ */
+group: string | null, 
+/**
  * "onTrack", "atRisk", "late", "done", or "problem" (could not be read or scheduled).
  */
 status: string, reasons: Array<string>, start: string | null, finish: string | null, baselineFinish: string | null, finishVarianceMinutes: number | null, percentComplete: number, costCents: number, baselineCostCents: number | null, currency: string, overallocated: number, overdue: number, nextMilestone: Milestone | null, milestones: Array<Milestone>, };

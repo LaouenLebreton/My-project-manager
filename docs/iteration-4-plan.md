@@ -13,9 +13,14 @@ Owner (2026-11-02): portfolio first. `.mpp` reading stays last.
    the baseline finish and today.
 3. **[Done]** **People:** each person's hours per week across all projects (matched by
    resource name), red where it is more than they have.
-4. **Next:** filters (team, status), saved groupings ("Clients", "Internal"), a portfolio
-   budget total, and the portfolio for a whole team on the team server (projects you have not
-   opened on this Mac).
+4. **[Done]** **Filters, groups, totals:** filter by status, team or local, and group (the
+   filter applies to Timeline and People too, and is remembered on this Mac). Type a group
+   ("Clients", "Internal") in a project's Group cell; Show by group lists each group with its
+   own total. Totals add cost per currency; "budget" is the baseline cost, compared with the
+   current cost of the projects that have one (projects without a baseline are counted apart).
+   Groups are kept on this Mac (portfolio.json), not in the project files.
+5. **Next:** the portfolio for a whole team on the team server (projects you have not opened
+   on this Mac), with groups shared by the team.
 
 ## Automation (after the portfolio)
 
