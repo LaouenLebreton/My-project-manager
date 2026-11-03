@@ -1775,3 +1775,96 @@ label.indent {
   top: 12px;
   right: 16px;
 }
+
+/* The app's own tab line (TabStrip.tsx): open projects and Home, + at the end. */
+.tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  height: 30px;
+  padding: 0 6px;
+  background: color-mix(in srgb, CanvasText 6%, Canvas);
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.tab-strip::-webkit-scrollbar {
+  display: none;
+}
+.app-tab {
+  display: flex;
+  align-items: center;
+  min-width: 90px;
+  max-width: 220px;
+  flex: 0 1 200px;
+  border-radius: 6px 6px 0 0;
+  margin-top: 4px;
+  color: var(--text-secondary);
+}
+.app-tab.active {
+  background: Canvas;
+  color: var(--text);
+  box-shadow: 0 -1px 0 color-mix(in srgb, CanvasText 12%, transparent) inset;
+}
+.app-tab:not(.active):hover {
+  background: color-mix(in srgb, CanvasText 4%, transparent);
+}
+.app-tab-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  font-size: 12px;
+  padding: 0 4px 0 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+.app-tab-close {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  border-radius: 4px;
+  opacity: 0;
+}
+.app-tab:hover .app-tab-close,
+.app-tab.active .app-tab-close,
+.app-tab-close:focus-visible {
+  opacity: 0.7;
+}
+.app-tab-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, CanvasText 10%, transparent);
+}
+.app-tab-add {
+  flex-shrink: 0;
+  align-self: center;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  width: 26px;
+  height: 24px;
+  margin-left: 2px;
+  border-radius: 5px;
+}
+.app-tab-add:hover {
+  background: color-mix(in srgb, CanvasText 10%, transparent);
+  color: var(--text);
+}
+main.empty > .tab-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}

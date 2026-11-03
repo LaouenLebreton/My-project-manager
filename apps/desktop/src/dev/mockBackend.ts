@@ -248,7 +248,15 @@ export function install() {
         case "portfolio_open":
         case "open_portfolio":
         case "show_home":
+        case "select_tab":
+        case "close_tab":
           return null;
+        case "tab_list":
+          return [
+            { label: "doc-a", title: "Mock Project", active: true, shared: false },
+            { label: "doc-b", title: "Website relaunch", active: false, shared: true },
+            { label: "main", title: "Home", active: false, shared: false },
+          ];
         case "team_status":
           return teamStatus();
         case "team_sign_in": {

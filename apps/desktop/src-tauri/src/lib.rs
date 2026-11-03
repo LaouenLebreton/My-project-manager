@@ -112,7 +112,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             let app = window.app_handle();
             match event {
-                WindowEvent::Focused(true) => actions::set_focused(app, window.label()),
+                WindowEvent::Focused(true) => {
+                    actions::set_focused(app, window.label());
+                    actions::tabs_changed(app);
+                }
                 // Closing a window closes its project. The last window stays (hidden) so the
                 // app keeps running in the Dock with a start window, like Mac document apps.
                 // The portfolio window just closes.
@@ -123,7 +126,10 @@ pub fn run() {
                         let _ = window.hide();
                     }
                 }
-                WindowEvent::Destroyed => actions::forget_window(app, window.label()),
+                WindowEvent::Destroyed => {
+                    actions::forget_window(app, window.label());
+                    actions::tabs_changed(app);
+                }
                 _ => {}
             }
         })
@@ -155,6 +161,9 @@ pub fn run() {
             portfolio::portfolio_open,
             portfolio::open_portfolio,
             portfolio::show_home,
+            portfolio::tab_list,
+            portfolio::select_tab,
+            portfolio::close_tab,
             team::team_history,
             team::team_revert,
             team::team_members,

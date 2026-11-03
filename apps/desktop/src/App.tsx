@@ -15,6 +15,7 @@ import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { WbsChart } from "./WbsChart";
 import { Workload } from "./Workload";
+import { TabStrip } from "./TabStrip";
 import { Board } from "./Board";
 import { CalendarView } from "./CalendarView";
 import { HistoryView } from "./HistoryView";
@@ -373,10 +374,8 @@ export function App() {
     // The start screen always offers the next step (spec 5.1.5).
     return (
       <main className="empty">
+        <TabStrip />
         {overlays}
-        <button className="new-tab-button start-new-tab" onClick={() => void openNewTab()} title="New tab (⌘T)" aria-label="New tab">
-          +
-        </button>
         <h1>Super PM</h1>
         <p>Plan a project with tasks, links and a calendar. Every change is saved as you go.</p>
         <div className="start-actions">
@@ -413,6 +412,7 @@ export function App() {
 
   return (
     <main className="document">
+      <TabStrip refreshKey={snapshot.project.name} />
       <header className="toolbar">
         <button className="home-button" onClick={() => void openHome()} title="Home: the start page, to open or create projects" aria-label="Home">
           ⌂
@@ -475,9 +475,6 @@ export function App() {
             </button>
           )}
         </div>
-        <button className="new-tab-button" onClick={() => void openNewTab()} title="New tab: open or create another project (⌘T)" aria-label="New tab">
-          +
-        </button>
       </header>
       {error && (
         <p role="alert" className="banner error">
