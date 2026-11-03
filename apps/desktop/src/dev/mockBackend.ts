@@ -127,6 +127,9 @@ function sampleReport() {
 }
 
 
+/** Automation rules of the mock team project. */
+let mockRules: { postWhenDone: boolean; weeklySummary: { weekday: number; hour: number } | null } = { postWhenDone: true, weeklySummary: null };
+
 /** Portfolio groups chosen in this session. */
 const portfolioGroups: Record<string, string> = { "/Users/me/Office move.pmproj": "Clients", "/Users/me/Website relaunch.pmproj": "Clients" };
 
@@ -156,7 +159,7 @@ export function install() {
   const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null, team: null as { server: string; pending: number; projectId: string; access: import("../bindings/MyAccess").MyAccess | null } | null, account: null as { server: string; name: string; email: string } | null };
   // `?team`: start as a team project, signed in.
   if (new URLSearchParams(location.search).has("team")) {
-    state.team = { server: "local", pending: 0, projectId: "p-1", access: null };
+    state.team = { server: "local", pending: 0, projectId: "p-1", access: { role: "owner", name: "Laouen", email: "laouen@example.com", limits: { schedule: true, progress: true, resources: true, costs: true, project: true, tasks: { kind: "all" } } } };
     state.account = { server: "this Mac", name: "Laouen", email: "laouen@example.com" };
   }
   if (state.rows[1]) {
@@ -322,6 +325,11 @@ export function install() {
         }
         case "team_set_member":
           return null;
+        case "team_rules":
+          return mockRules;
+        case "team_set_rules":
+          mockRules = args.rules as typeof mockRules;
+          return mockRules;
         case "chat_me":
           return "u1";
         case "chat_teams":

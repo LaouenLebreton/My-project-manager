@@ -191,6 +191,7 @@ async fn add_post(State(state): State<AppState>, Auth(me): Auth, Path(channel): 
         edited_at: None,
         deleted: false,
         reactions: Vec::new(),
+        automatic: false,
     };
     let stored = post.clone();
     let ok = db(&state, move |s| {

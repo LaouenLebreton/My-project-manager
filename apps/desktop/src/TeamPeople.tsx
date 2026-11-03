@@ -20,7 +20,7 @@ function hue(id: string): number {
 
 function Avatar({ m }: { m: Member }) {
   return (
-    <span className="avatar" style={{ background: `hsl(${hue(m.userId)} 55% 45%)` }} aria-hidden="true">
+    <span className="team-avatar" style={{ background: `hsl(${hue(m.userId)} 55% 45%)` }} aria-hidden="true">
       {initials(m.name || m.email)}
     </span>
   );

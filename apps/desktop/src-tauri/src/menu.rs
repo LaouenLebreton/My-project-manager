@@ -63,6 +63,7 @@ pub mod id {
     pub const TEAM_JOIN: &str = "team.join";
     pub const TEAM_INVITE: &str = "team.invite";
     pub const TEAM_MEMBERS: &str = "team.members";
+    pub const TEAM_RULES: &str = "team.rules";
     pub const TEAM_MOVE: &str = "team.move";
     pub const PORTFOLIO: &str = "window.portfolio";
     pub const NEW_TAB: &str = "file.new_tab";
@@ -256,6 +257,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     // opening work without a project; a separate server is the advanced route.
     let team_share = item(app, id::TEAM_SHARE, "Create Team Project…", None)?;
     let team_members = item(app, id::TEAM_MEMBERS, "Members & Permissions…", None)?;
+    let team_rules = item(app, id::TEAM_RULES, "Automation Rules…", None)?;
     let server = SubmenuBuilder::new(app, "Team Server")
         .item(&enabled(id::TEAM_MOVE, "Connect Teams to a Server…", None)?)
         .separator()
@@ -266,6 +268,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&team_share)
         .item(&enabled(id::TEAM_INVITE, "Invite People…", None)?)
         .item(&team_members)
+        .item(&team_rules)
         .separator()
         .item(&enabled(id::TEAM_JOIN, "Join a Team…", None)?)
         .item(&enabled(id::TEAM_OPEN, "Open Team Project…", None)?)
@@ -296,7 +299,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, recurring, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members];
+    let document_items = vec![find, task_info, recurring, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

@@ -44,7 +44,10 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let app = router(AppState::with_config(storage, Config { public_url, open_signup }));
+    let state = AppState::with_config(storage, Config { public_url, open_signup });
+    // Weekly summaries and other timed rules.
+    pm_server::rules::start(state.clone());
+    let app = router(state);
     let listener = match tokio::net::TcpListener::bind(&listen).await {
         Ok(l) => l,
         Err(e) => {

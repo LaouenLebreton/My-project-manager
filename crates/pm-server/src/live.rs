@@ -136,6 +136,7 @@ async fn commit(
     let live = guard.as_mut().expect("loaded");
     crate::permissions::check(role, limits, me, &live.project, &command).map_err(|m| ApiError::new(StatusCode::FORBIDDEN, m))?;
     let summary = summary.unwrap_or_else(|| pm_sync::describe::summary(&live.project, &command));
+    let open_before = crate::rules::watch_done(state, id, &live.project).await;
     let inverse = apply(&mut live.project, &command).map_err(|e| ApiError::new(StatusCode::CONFLICT, format!("this change no longer fits the project: {e}")))?;
     let change = Change {
         version: live.version + 1,
@@ -155,6 +156,9 @@ async fn commit(
         Ok(true) => {
             live.version = change.version;
             let _ = room.tx.send(Arc::new(change.clone()));
+            if let Some(before) = open_before {
+                crate::rules::after_change(state, id, &live.project, &before, &me.name).await;
+            }
             Ok(change)
         }
         other => {

@@ -1830,10 +1830,10 @@ label.indent {
 .team-people .avatars {
   display: inline-flex;
 }
-.team-people .avatars .avatar + .avatar {
+.team-people .avatars .team-avatar + .team-avatar {
   margin-left: -6px;
 }
-.avatar {
+.team-avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1913,4 +1913,31 @@ label.indent {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Automation Rules sheet, and posts written by rules. */
+.rules {
+  border: 0;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rule {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.rule > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rule-when {
+  margin-left: 24px;
+}
+.chat-meta .avatar.automatic {
+  background: color-mix(in srgb, CanvasText 12%, Canvas);
+  color: var(--text-secondary);
 }

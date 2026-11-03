@@ -9,4 +9,8 @@ parentId: string | null, authorId: string, authorName: string, at: string,
 /**
  * Empty once deleted.
  */
-body: string, editedAt: string | null, deleted: boolean, reactions: Array<ChatReaction>, };
+body: string, editedAt: string | null, deleted: boolean, reactions: Array<ChatReaction>, 
+/**
+ * Written by one of the project's rules (shown as from Super PM).
+ */
+automatic: boolean, };

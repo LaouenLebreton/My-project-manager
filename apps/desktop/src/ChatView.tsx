@@ -77,7 +77,8 @@ function PostView({
   onError: (message: string) => void;
   onConfirm: (title: string, message: string, action: string) => Promise<boolean>;
 }) {
-  const mine = post.authorId === me;
+  // A rule's post belongs to no one, though it is stored under whoever set the rule.
+  const mine = post.authorId === me && !post.automatic;
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(post.body);
   const run = (p: Promise<ChatPost>) => p.then(onChanged, (e) => onError(errorMessage(e)));
@@ -92,10 +93,11 @@ function PostView({
   return (
     <div className="post">
       <div className="chat-meta">
-        <span className="avatar" aria-hidden>
-          {post.authorName.slice(0, 1).toUpperCase()}
+        <span className={post.automatic ? "avatar automatic" : "avatar"} aria-hidden>
+          {post.automatic ? "⚙︎" : post.authorName.slice(0, 1).toUpperCase()}
         </span>
         <strong>{mine ? `${post.authorName} (you)` : post.authorName}</strong>
+        {post.automatic && <span className="secondary small" title="Written by one of the project's automation rules (Team > Automation Rules)">automatic</span>}
         <span className="secondary small">
           {when(post.at)}
           {post.editedAt && !post.deleted ? " · edited" : ""}

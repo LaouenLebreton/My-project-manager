@@ -21,6 +21,7 @@ import { HistoryView } from "./HistoryView";
 import { ChatView } from "./ChatView";
 import { MembersSheet } from "./MembersSheet";
 import { TeamPeople } from "./TeamPeople";
+import { RulesSheet } from "./RulesSheet";
 import { accessLabel } from "./permissions";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
@@ -59,7 +60,7 @@ export function App() {
   // New chat posts by others while the Chat tab is not showing.
   const [chatUnread, setChatUnread] = useState(0);
   const viewRef = useRef<string>("tasks");
-  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | "account" | "join" | "invite" | "invites" | "members" | "connect" | null>(null);
+  const [teamSheet, setTeamSheet] = useState<"signin" | "share" | "open" | "account" | "join" | "invite" | "invites" | "members" | "connect" | "rules" | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
   /** Closes a team sheet unless it has already been replaced by the next one. */
   const closeTeamSheet = (which: string) => setTeamSheet((s) => (s === which ? null : s));
@@ -222,6 +223,7 @@ export function App() {
         if (e.payload === "team.add_account") setTeamSheet("account");
         if (e.payload === "team.join") setTeamSheet("join");
         if (e.payload === "team.invite") setTeamSheet("invite");
+        if (e.payload === "team.rules") setTeamSheet("rules");
         if (e.payload === "team.members") setTeamSheet("members");
         if (e.payload === "team.move") setTeamSheet("connect");
         if (e.payload === "project.statistics") setOverlay("stats");
@@ -273,6 +275,7 @@ export function App() {
       { name: "Clear Baseline", run: () => void edit({ kind: "ClearBaseline" }).catch((e) => setError(errorMessage(e))) },
       { name: "Create Team Project…", run: () => setTeamSheet("share") },
       { name: "Members & Permissions…", run: () => setTeamSheet("members") },
+      { name: "Automation Rules… (posts when tasks are done, weekly summary)", run: () => setTeamSheet("rules") },
       { name: "Project Statistics… (earned value)", run: () => setOverlay("stats") },
       { name: "Update Project… (progress up to a day)", run: () => setOverlay("update") },
       ...[0, 25, 50, 75, 100].map((n) => ({
@@ -340,6 +343,7 @@ export function App() {
         />
       )}
       {teamSheet === "members" && snapshot && <MembersSheet snapshot={snapshot} onClose={() => closeTeamSheet("members")} />}
+      {teamSheet === "rules" && snapshot && <RulesSheet snapshot={snapshot} onClose={() => closeTeamSheet("rules")} />}
       {teamSheet === "invites" && <InvitesSheet invites={invites} hostedHere={teamStatus?.hostedHere ?? false} onClose={() => closeTeamSheet("invites")} />}
       {teamSheet === "share" && snapshot && (
         <CreateTeamSheet

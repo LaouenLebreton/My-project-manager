@@ -171,6 +171,8 @@ pub fn run() {
             team::team_revert,
             team::team_members,
             team::team_set_member,
+            team::team_rules,
+            team::team_set_rules,
             team::chat_me,
             team::chat_teams,
             team::chat_posts,

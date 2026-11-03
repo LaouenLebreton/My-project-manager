@@ -8,6 +8,7 @@ pub mod auth;
 pub mod chat;
 pub mod live;
 pub mod permissions;
+pub mod rules;
 pub mod sharing;
 pub mod storage;
 pub mod transfer;
@@ -115,6 +116,7 @@ fn bearer(parts: &Parts) -> Option<String> {
 /// Serves the API on `listener` until the task is dropped or the listener fails. Used by the
 /// `super-pm-server` binary and by the app when it hosts a team itself.
 pub async fn serve(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
+    rules::start(state.clone());
     axum::serve(listener, router(state)).await
 }
 
@@ -131,6 +133,7 @@ pub fn router(state: AppState) -> Router {
         .merge(live::routes())
         .merge(chat::routes())
         .merge(transfer::routes())
+        .merge(rules::routes())
         .with_state(state)
 }
 

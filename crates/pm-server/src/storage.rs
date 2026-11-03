@@ -97,6 +97,9 @@ pub struct Post {
     pub edited_at: Option<String>,
     pub deleted: bool,
     pub reactions: Vec<Reaction>,
+    /// Written by a rule (shown as from Super PM); `author_id` is whoever set the rule.
+    #[serde(default)]
+    pub automatic: bool,
 }
 
 /// One person's emoji on a post.
@@ -189,6 +192,22 @@ pub trait Storage: Send + Sync + 'static {
     fn set_team_moved(&self, team: Uuid, to: Option<&str>) -> Result<()>;
     /// Where the team went, if it moved.
     fn team_moved(&self, team: Uuid) -> Result<Option<String>>;
+
+    /// A project's rules (JSON), who set them, and the day the last weekly summary went out.
+    fn rules(&self, project: Uuid) -> Result<Option<StoredRules>>;
+    fn set_rules(&self, project: Uuid, rules: &str, set_by: Uuid) -> Result<()>;
+    /// Every project that has rules.
+    fn all_rules(&self) -> Result<Vec<(Uuid, StoredRules)>>;
+    fn set_last_summary(&self, project: Uuid, day: &str) -> Result<()>;
+    /// The chat channel that belongs to a team project.
+    fn project_channel(&self, project: Uuid) -> Result<Option<Channel>>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredRules {
+    pub rules: String,
+    pub set_by: Uuid,
+    pub last_summary: Option<String>,
 }
 
 /// Forward-only migrations; `PRAGMA user_version` holds the version.
@@ -304,6 +323,16 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE team ADD COLUMN moved_to TEXT;
     "#,
+    // 7 -> 8: automation rules (iteration 4). Posts written by a rule are marked.
+    r#"
+    ALTER TABLE post ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE project_rules (
+        project_id   TEXT PRIMARY KEY REFERENCES project (id) ON DELETE CASCADE,
+        rules        TEXT NOT NULL,
+        set_by       TEXT NOT NULL REFERENCES user (id),
+        last_summary TEXT
+    );
+    "#,
 ];
 
 /// A team server's storage: one SQLite file.
@@ -399,7 +428,7 @@ fn channel_from_row(r: &rusqlite::Row) -> rusqlite::Result<Channel> {
     Ok(Channel { id: uuid_at(r, 0)?, team_id: uuid_at(r, 1)?, name: r.get(2)?, project_id: opt_uuid_at(r, 3)?, created_at: r.get(4)?, unread: 0 })
 }
 
-const POST_COLUMNS: &str = "p.id, p.channel_id, p.parent_id, p.author_id, u.name, p.at, p.body, p.edited_at, p.deleted";
+const POST_COLUMNS: &str = "p.id, p.channel_id, p.parent_id, p.author_id, CASE WHEN p.automatic THEN 'Super PM' ELSE u.name END, p.at, p.body, p.edited_at, p.deleted, p.automatic";
 
 fn post_from_row(r: &rusqlite::Row) -> rusqlite::Result<Post> {
     Ok(Post {
@@ -413,6 +442,7 @@ fn post_from_row(r: &rusqlite::Row) -> rusqlite::Result<Post> {
         edited_at: r.get(7)?,
         deleted: r.get(8)?,
         reactions: Vec::new(),
+        automatic: r.get(9)?,
     })
 }
 
@@ -692,8 +722,8 @@ impl Storage for SqliteStorage {
 
     fn add_post(&self, p: &Post) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO post (id, channel_id, parent_id, author_id, at, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![p.id.to_string(), p.channel_id.to_string(), p.parent_id.map(|x| x.to_string()), p.author_id.to_string(), p.at, p.body],
+            "INSERT INTO post (id, channel_id, parent_id, author_id, at, body, automatic) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![p.id.to_string(), p.channel_id.to_string(), p.parent_id.map(|x| x.to_string()), p.author_id.to_string(), p.at, p.body, p.automatic],
         )?;
         Ok(())
     }
@@ -767,13 +797,50 @@ impl Storage for SqliteStorage {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT c.id, COUNT(p.id) FROM channel c
-             JOIN post p ON p.channel_id = c.id AND p.author_id <> ?1
+             JOIN post p ON p.channel_id = c.id AND (p.author_id <> ?1 OR p.automatic)
              LEFT JOIN channel_read r ON r.channel_id = c.id AND r.user_id = ?1
              WHERE c.team_id = ?2 AND (r.upto IS NULL OR p.id > r.upto)
              GROUP BY c.id",
         )?;
         let rows = stmt.query_map([user.to_string(), team.to_string()], |r| Ok((uuid_at(r, 0)?, r.get::<_, u32>(1)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn rules(&self, project: Uuid) -> Result<Option<StoredRules>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT rules, set_by, last_summary FROM project_rules WHERE project_id = ?1", [project.to_string()], |r| {
+                Ok(StoredRules { rules: r.get(0)?, set_by: uuid_at(r, 1)?, last_summary: r.get(2)? })
+            })
+            .optional()?)
+    }
+
+    fn set_rules(&self, project: Uuid, rules: &str, set_by: Uuid) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO project_rules (project_id, rules, set_by) VALUES (?1, ?2, ?3)
+             ON CONFLICT (project_id) DO UPDATE SET rules = excluded.rules, set_by = excluded.set_by",
+            params![project.to_string(), rules, set_by.to_string()],
+        )?;
+        Ok(())
+    }
+
+    fn all_rules(&self) -> Result<Vec<(Uuid, StoredRules)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT project_id, rules, set_by, last_summary FROM project_rules")?;
+        let rows = stmt.query_map([], |r| Ok((uuid_at(r, 0)?, StoredRules { rules: r.get(1)?, set_by: uuid_at(r, 2)?, last_summary: r.get(3)? })))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn set_last_summary(&self, project: Uuid, day: &str) -> Result<()> {
+        self.conn().execute("UPDATE project_rules SET last_summary = ?2 WHERE project_id = ?1", params![project.to_string(), day])?;
+        Ok(())
+    }
+
+    fn project_channel(&self, project: Uuid) -> Result<Option<Channel>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT id, team_id, name, project_id, created_at FROM channel WHERE project_id = ?1", [project.to_string()], channel_from_row)
+            .optional()?)
     }
 
     fn export_team(&self, team: Uuid) -> Result<crate::transfer::TeamExport> {

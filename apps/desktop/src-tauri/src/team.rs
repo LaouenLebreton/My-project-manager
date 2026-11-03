@@ -594,6 +594,41 @@ pub async fn team_set_member(app: AppHandle, window: WebviewWindow, user_id: Str
     Ok(())
 }
 
+/// A team project's automation rules, run by the team server.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRules {
+    /// Post in the project's channel when tasks reach 100%.
+    pub post_when_done: bool,
+    /// A status summary in the project's channel every week.
+    pub weekly_summary: Option<WeeklySummary>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct WeeklySummary {
+    /// Monday = 0 … Sunday = 6.
+    pub weekday: u8,
+    /// Hour of the day on the team server's clock, 0–23.
+    pub hour: u8,
+}
+
+#[tauri::command]
+pub async fn team_rules(app: AppHandle, window: WebviewWindow) -> Result<ProjectRules, IpcError> {
+    let (a, project) = shared_in(&app, window.label())?;
+    Ok(call(reqwest::Method::GET, &a.server, &format!("/api/projects/{project}/rules"), Some(&a.token), None).await?)
+}
+
+/// The owner sets the project's rules.
+#[tauri::command]
+pub async fn team_set_rules(app: AppHandle, window: WebviewWindow, rules: ProjectRules) -> Result<ProjectRules, IpcError> {
+    let (a, project) = shared_in(&app, window.label())?;
+    let body = serde_json::to_value(&rules).expect("rules serialize");
+    Ok(call(reqwest::Method::PUT, &a.server, &format!("/api/projects/{project}/rules"), Some(&a.token), Some(body)).await?)
+}
+
 /// The owner reverts a change; the result arrives like any other change.
 #[tauri::command]
 pub async fn team_revert(app: AppHandle, window: WebviewWindow, version: i64) -> Result<(), IpcError> {
@@ -1074,6 +1109,9 @@ pub struct ChatPost {
     pub edited_at: Option<String>,
     pub deleted: bool,
     pub reactions: Vec<ChatReaction>,
+    /// Written by one of the project's rules (shown as from Super PM).
+    #[serde(default)]
+    pub automatic: bool,
 }
 
 /// One person's emoji on a post.

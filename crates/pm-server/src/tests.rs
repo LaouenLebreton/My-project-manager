@@ -488,3 +488,56 @@ async fn a_team_moves_to_another_server_with_its_history_and_chat() {
     let (status, body) = call(&source, "GET", &format!("/api/projects/{id}/access"), Some(&p[1].0), None).await;
     assert_eq!((status, body["message"].as_str()), (StatusCode::GONE, Some("this team has moved to https://pm.example.com")));
 }
+
+#[tokio::test]
+async fn rules_post_when_tasks_are_done_and_send_a_weekly_summary() {
+    let storage = Arc::new(SqliteStorage::in_memory().unwrap());
+    let state = AppState { storage: storage.clone(), hub: Arc::default(), config: Arc::default() };
+    let app = router(state.clone());
+    let p = people(&app).await;
+    let (id, task) = shared(&app, &p).await;
+    let pid: uuid::Uuid = id.parse().unwrap();
+    let rules_path = format!("/api/projects/{id}/rules");
+
+    // No rules yet; only the owner sets them.
+    let (status, none) = call(&app, "GET", &rules_path, Some(&p[1].0), None).await;
+    assert_eq!((status, none), (StatusCode::OK, json!({ "postWhenDone": false, "weeklySummary": null })));
+    let rules = json!({ "postWhenDone": true, "weeklySummary": { "weekday": 0, "hour": 9 } });
+    let (status, body) = call(&app, "PUT", &rules_path, Some(&p[1].0), Some(rules.clone())).await;
+    assert_eq!((status, body["message"].as_str()), (StatusCode::FORBIDDEN, Some("only the project's owner can change its rules")));
+    let (status, _) = call(&app, "PUT", &rules_path, Some(&p[0].0), Some(json!({ "postWhenDone": true, "weeklySummary": { "weekday": 7, "hour": 9 } }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, saved) = call(&app, "PUT", &rules_path, Some(&p[0].0), Some(rules.clone())).await;
+    assert_eq!((status, saved), (StatusCode::OK, rules));
+
+    let channel = storage.project_channel(pid).unwrap().expect("a team project has a channel");
+    let posts = || storage.posts(channel.id, None, 50).unwrap();
+    let before = posts().len();
+
+    // Alex renames the task: nothing to say. Alex marks it 100%: one post, from Super PM.
+    let edit = |command: Value| json!({ "clientChange": uuid::Uuid::now_v7().to_string(), "command": command });
+    call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(rename(&task, "Survey")))).await;
+    assert_eq!(posts().len(), before);
+    let done = json!({ "type": "SetTask", "id": task, "change": { "field": "PercentComplete", "value": 100 } });
+    let (status, change) = call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(done))).await;
+    assert_eq!(status, StatusCode::OK, "{change}");
+    let list = posts();
+    assert_eq!(list.len(), before + 1);
+    assert_eq!((list[0].body.as_str(), list[0].author_name.as_str(), list[0].automatic), ("✅ “Survey” is done (marked by Alex).", "Super PM", true));
+    // It counts as new for everyone, the owner who set the rule included.
+    let unread = storage.unread(uuid::Uuid::parse_str(&p[0].1).unwrap(), channel.team_id).unwrap();
+    assert!(unread.iter().any(|(c, n)| *c == channel.id && *n >= 1));
+
+    // Weekly summary: Monday 9:00 and later that day, once; not on Sunday or at 8:00.
+    let at = |d: i8, h: i8| jiff::civil::date(2026, 11, d).at(h, 0, 0, 0);
+    rules::tick(&state, at(1, 10)).await; // Sunday
+    rules::tick(&state, at(2, 8)).await;
+    assert_eq!(posts().len(), before + 1);
+    rules::tick(&state, at(2, 9)).await;
+    rules::tick(&state, at(2, 15)).await;
+    let list = posts();
+    assert_eq!(list.len(), before + 2, "once that day");
+    assert!(list[0].body.starts_with("📊 Weekly status for Live: Done · 100% done"), "{}", list[0].body);
+    rules::tick(&state, at(9, 9)).await;
+    assert_eq!(posts().len(), before + 3, "and again the next Monday");
+}

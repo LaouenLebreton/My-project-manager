@@ -41,5 +41,12 @@ In slices, each usable on its own:
    team project, only tasks assigned to you (resource name = your team name). Window > Task
    Reminders turns them off. Checked every 15 minutes. Rule in `pm_core::reminders`.
    Later: projects that are not open, and clicking a notification to show the task.
-3. **Next: rules** for team projects: "when a task is 100% done, post in its channel", "every
-   Monday, send a status summary" (run once, by the team server, not by every Mac).
+3. **[Done]** **Rules** for team projects (Team > Automation Rules…; the owner sets them,
+   members see them): when tasks reach 100%, a post in the project's channel; every week on a
+   chosen day and hour (the server's clock), a status summary there (status and why, % done,
+   finish, late tasks, due in the coming week, next milestone). The team server runs them, so
+   each happens once; a team hosted on a Mac runs them while Super PM is open there. Posts are
+   marked automatic and shown as from Super PM (stored under whoever set the rules, since a
+   post needs an account); they count as unread for everyone.
+   Later: more triggers (a task becomes late, a milestone is reached) and actions (notify
+   people), and keeping the "automatic" mark when a team moves server.

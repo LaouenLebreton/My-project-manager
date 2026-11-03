@@ -1,6 +1,7 @@
 // Typed wrappers for the Tauri commands in src-tauri/src/ipc.rs.
 // The types in ./bindings are generated from Rust: run `cargo test -p super-pm` after changing them.
 import { invoke } from "@tauri-apps/api/core";
+import type { ProjectRules } from "./bindings/ProjectRules";
 import type { Edit } from "./bindings/Edit";
 import type { EditResult } from "./bindings/EditResult";
 import type { IpcError } from "./bindings/IpcError";
@@ -74,6 +75,8 @@ export const team = {
   history: (before: number | null) => invoke<HistoryPage>("team_history", { before }),
   revert: (version: number) => invoke<void>("team_revert", { version }),
   members: () => invoke<Member[]>("team_members"),
+  rules: () => invoke<ProjectRules>("team_rules"),
+  setRules: (rules: ProjectRules) => invoke<ProjectRules>("team_set_rules", { rules }),
   setMember: (userId: string, role: string, limits: MemberLimits) => invoke<void>("team_set_member", { userId, role, limits }),
   open: (projectId: string) => invoke<Snapshot | null>("team_open", { projectId }),
 };
