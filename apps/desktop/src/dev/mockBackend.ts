@@ -154,6 +154,11 @@ export function install() {
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
   });
   const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null, team: null as { server: string; pending: number; projectId: string; access: import("../bindings/MyAccess").MyAccess | null } | null, account: null as { server: string; name: string; email: string } | null };
+  // `?team`: start as a team project, signed in.
+  if (new URLSearchParams(location.search).has("team")) {
+    state.team = { server: "local", pending: 0, projectId: "p-1", access: null };
+    state.account = { server: "this Mac", name: "Laouen", email: "laouen@example.com" };
+  }
   if (state.rows[1]) {
     state.rows[1].resourceNames = "Alex";
     state.rows[1].overloaded = true;

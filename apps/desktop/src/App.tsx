@@ -20,6 +20,7 @@ import { CalendarView } from "./CalendarView";
 import { HistoryView } from "./HistoryView";
 import { ChatView } from "./ChatView";
 import { MembersSheet } from "./MembersSheet";
+import { TeamPeople } from "./TeamPeople";
 import { accessLabel } from "./permissions";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
@@ -422,6 +423,7 @@ export function App() {
           </p>
         </div>
         {snapshot.project.team && <SyncPill status={syncStatus} pending={snapshot.project.team.pending} />}
+        {snapshot.project.team && <TeamPeople online={syncStatus?.state === "online"} onInvite={() => setTeamSheet("invite")} onManage={() => setTeamSheet("members")} />}
         {(() => {
           const label = accessLabel(snapshot);
           return (
