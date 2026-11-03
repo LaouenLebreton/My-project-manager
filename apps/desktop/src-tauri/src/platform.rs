@@ -122,9 +122,8 @@ pub fn enable_new_tab_button(app: &AppHandle<tauri::Wry>, window: &tauri::Webvie
 #[cfg(not(target_os = "macos"))]
 pub fn enable_new_tab_button(_app: &AppHandle<tauri::Wry>, _window: &tauri::WebviewWindow<tauri::Wry>) {}
 
-/// Hides macOS's own tab bar: the app draws its tab line itself (TabStrip.tsx), with the
-/// "+" macOS would not show. Windows stay grouped as tabs. AppKit must be called on the main
-/// thread; this hands the work to it.
+/// Keeps the tab bar showing even with one tab, as Safari can. AppKit must be called on the
+/// main thread; this hands the work to it.
 #[cfg(target_os = "macos")]
 pub fn show_tab_bar(window: &tauri::WebviewWindow<tauri::Wry>) {
     let w = window.clone();
@@ -132,42 +131,10 @@ pub fn show_tab_bar(window: &tauri::WebviewWindow<tauri::Wry>) {
         let Ok(ns) = w.ns_window() else { return };
         // SAFETY: the window's live NSWindow, on the main thread.
         let ns = unsafe { &*(ns as *const objc2_app_kit::NSWindow) };
-        if ns.tabGroup().is_some_and(|g| g.isTabBarVisible()) {
+        if ns.tabGroup().is_some_and(|g| !g.isTabBarVisible()) {
             ns.toggleTabBar(None);
         }
     });
-}
-
-/// The windows grouped with `window` as tabs, in tab order, as NSWindow addresses (to match
-/// with Tauri's windows). Just `window` when it is alone. Waits for the main thread.
-#[cfg(target_os = "macos")]
-pub fn tab_order(window: &tauri::WebviewWindow<tauri::Wry>) -> Vec<usize> {
-    let w = window.clone();
-    let read = move || -> Vec<usize> {
-        let Ok(ns) = w.ns_window() else { return Vec::new() };
-        // SAFETY: the window's live NSWindow, on the main thread.
-        let ns = unsafe { &*(ns as *const objc2_app_kit::NSWindow) };
-        match ns.tabGroup() {
-            Some(group) => {
-                let list = group.windows();
-                (0..list.count()).map(|i| objc2::rc::Retained::as_ptr(&list.objectAtIndex(i)) as usize).collect()
-            }
-            None => vec![ns as *const _ as usize],
-        }
-    };
-    if objc2::MainThreadMarker::new().is_some() {
-        return read();
-    }
-    let (tx, rx) = std::sync::mpsc::channel();
-    let _ = window.run_on_main_thread(move || {
-        let _ = tx.send(read());
-    });
-    rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default()
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn tab_order(window: &tauri::WebviewWindow<tauri::Wry>) -> Vec<usize> {
-    vec![window.label().as_ptr() as usize]
 }
 
 #[cfg(not(target_os = "macos"))]

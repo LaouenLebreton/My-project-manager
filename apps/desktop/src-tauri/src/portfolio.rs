@@ -359,29 +359,6 @@ pub fn show_home(app: AppHandle, new_tab: bool) {
     crate::actions::show_home(&app, new_tab);
 }
 
-/// The app's own tab line: the tabs of the asking window, in order.
-#[tauri::command]
-pub fn tab_list(app: AppHandle, window: WebviewWindow) -> Vec<crate::actions::TabView> {
-    crate::actions::tabs_of(&app, window.label())
-}
-
-/// Switches to a tab.
-#[tauri::command]
-pub fn select_tab(app: AppHandle, label: String) {
-    if let Some(w) = app.get_webview_window(&label) {
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
-}
-
-/// Closes a tab (its project closes, as with ⌘W).
-#[tauri::command]
-pub fn close_tab(app: AppHandle, label: String) {
-    if let Some(w) = app.get_webview_window(&label) {
-        let _ = w.close();
-    }
-}
-
 /// The start screen's and command bar's way to Window > Portfolio.
 #[tauri::command]
 pub fn open_portfolio(app: AppHandle) {

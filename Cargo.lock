@@ -4001,7 +4001,6 @@ dependencies = [
  "jiff",
  "objc2",
  "objc2-app-kit",
- "objc2-foundation",
  "pm-core",
  "pm-interop",
  "pm-server",

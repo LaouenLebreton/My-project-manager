@@ -118,57 +118,6 @@ fn tab_into_front(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-/// One tab in the app's own tab line.
-#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
-#[ts(export)]
-#[serde(rename_all = "camelCase")]
-pub struct TabView {
-    pub label: String,
-    /// The project's name, or "Home" for a start page.
-    pub title: String,
-    /// The window asking.
-    pub active: bool,
-    pub shared: bool,
-}
-
-/// Sent to every window when tabs open, close or change name, so each tab line redraws.
-pub const TABS_EVENT: &str = "tabs-changed";
-
-pub fn tabs_changed(app: &AppHandle) {
-    let _ = app.emit(TABS_EVENT, ());
-}
-
-/// The tabs of the window `label` belongs to, in order.
-pub fn tabs_of(app: &AppHandle, label: &str) -> Vec<TabView> {
-    let Some(me) = app.get_webview_window(label) else { return Vec::new() };
-    let windows = app.webview_windows();
-    let docs = app.state::<AppState>();
-    let docs = docs.docs.lock().expect("lock");
-    let view = |l: &str| {
-        let doc = docs.get(l);
-        TabView {
-            label: l.to_owned(),
-            title: doc.map_or_else(|| "Home".to_owned(), |d| d.project.name.clone()),
-            active: l == label,
-            shared: doc.is_some_and(|d| d.team.is_some()),
-        }
-    };
-    if cfg!(not(target_os = "macos")) {
-        return vec![view(label)];
-    }
-    let order = crate::platform::tab_order(&me);
-    let mut tabs: Vec<TabView> = order
-        .iter()
-        .filter_map(|addr| windows.iter().find(|(_, w)| w.ns_window().is_ok_and(|p| p as usize == *addr)).map(|(l, _)| l.clone()))
-        .filter(|l| l != crate::portfolio::WINDOW)
-        .map(|l| view(&l))
-        .collect();
-    if tabs.is_empty() {
-        tabs.push(view(label));
-    }
-    tabs
-}
-
 /// The start page (new, open, recent, portfolio, team). `new_tab` (the + and File > New Tab):
 /// always a new tab, as Safari does. Otherwise (Home): go to the start page tab already open,
 /// making one only if there is none. A hidden empty window (left after closing projects) is
@@ -196,7 +145,6 @@ pub fn show_home(app: &AppHandle, new_tab: bool) {
         tab_into_front(app, &w);
         show(&w);
         set_focused(app, w.label());
-        tabs_changed(app);
     }
 }
 
@@ -249,7 +197,6 @@ pub fn install(app: &AppHandle, asking: Option<&str>, doc: Document) -> Option<S
     }
     let _ = app.emit_to(label.as_str(), crate::CHANGED_EVENT, snap.clone());
     set_focused(app, &label);
-    tabs_changed(app);
     (asking == Some(label.as_str())).then_some(snap)
 }
 
@@ -275,7 +222,6 @@ pub fn close_window(app: &AppHandle, label: &str) -> bool {
         backup_logged(app, &mut doc);
     }
     state.editing_text.lock().expect("lock").remove(label);
-    tabs_changed(app);
     let others = app.webview_windows().into_iter().any(|(l, w)| l != label && w.is_visible().unwrap_or(false));
     if others {
         return false;
