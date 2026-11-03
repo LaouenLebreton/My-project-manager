@@ -537,8 +537,19 @@ export function install() {
             case "DeleteTasks":
               state.rows = state.rows.filter((r) => !e.ids.includes(r.id));
               break;
+            case "AddRecurringTask": {
+              if (!e.name.trim()) fail("give the recurring task a name");
+              const n = e.endAfter ?? 4;
+              const at0 = e.afterId ? at(e.afterId) + 1 : state.rows.length;
+              const summary = { ...row(e.name.trim(), 0), wbs: "new" };
+              const kids = Array.from({ length: n }, (_, i) => ({ ...row(`${e.name.trim()} ${i + 1}`, 1), parentId: summary.id, wbs: "new" }));
+              state.rows.splice(at0, 0, summary, ...kids);
+              createdId = summary.id;
+              break;
+            }
           }
-          const message = e.kind === "LevelResources" ? "1 task now starts later so nobody is over-allocated." : null;
+          const message =
+            e.kind === "LevelResources" ? "1 task now starts later so nobody is over-allocated." : e.kind === "AddRecurringTask" ? `${e.endAfter ?? 4} occurrences of “${e.name.trim()}”.` : null;
           return { snapshot: snapshot(), createdId, message };
         }
       }

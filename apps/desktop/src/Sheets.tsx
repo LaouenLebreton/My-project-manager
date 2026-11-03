@@ -530,3 +530,136 @@ export function ConfirmSheet({ title, message, action, onAnswer }: { title: stri
     </dialog>
   );
 }
+
+const ORDINALS = ["first", "second", "third", "fourth", "last"];
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/**
+ * Task > Recurring Task: a task that repeats (a weekly meeting, a monthly report) becomes a
+ * summary with one occurrence per date, as in Microsoft Project.
+ */
+export function RecurringTask({ afterId, send, onClose }: { afterId: string | null; send: Send; onClose: () => void }) {
+  const today = new Date();
+  const [name, setName] = useState("");
+  const [duration, setDuration] = useState("1h");
+  const [kind, setKind] = useState<"daily" | "weekly" | "monthly">("weekly");
+  const [every, setEvery] = useState(1);
+  const [weekdays, setWeekdays] = useState<boolean[]>(() => WEEKDAYS.map((_, i) => i === (today.getDay() + 6) % 7));
+  const [monthlyBy, setMonthlyBy] = useState<"day" | "weekday">("day");
+  const [day, setDay] = useState(today.getDate());
+  const [week, setWeek] = useState(1);
+  const [weekday, setWeekday] = useState(0);
+  const [start, setStart] = useState(isoDay(today));
+  const [endBy, setEndBy] = useState<"count" | "date">("count");
+  const [count, setCount] = useState(10);
+  const [until, setUntil] = useState(() => isoDay(new Date(today.getFullYear(), today.getMonth() + 3, today.getDate())));
+
+  const repeat =
+    kind === "daily"
+      ? ({ kind: "daily", every } as const)
+      : kind === "weekly"
+        ? ({ kind: "weekly", every, weekdays } as const)
+        : monthlyBy === "day"
+          ? ({ kind: "monthlyOnDay", every, day } as const)
+          : ({ kind: "monthlyOnWeekday", every, week, weekday } as const);
+  const unit = kind === "daily" ? "day" : kind === "weekly" ? "week" : "month";
+
+  return (
+    <Sheet
+      title="Recurring Task"
+      action="Add"
+      onClose={onClose}
+      onSave={() =>
+        attempt(send, {
+          kind: "AddRecurringTask",
+          afterId,
+          name,
+          durationText: duration,
+          repeat,
+          startDate: start,
+          endAfter: endBy === "count" ? count : null,
+          endDate: endBy === "date" ? until : null,
+        })
+      }
+    >
+      <div className="form recurring">
+        <label htmlFor="rt-name">Name</label>
+        <input id="rt-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Team meeting" required autoFocus />
+        <label htmlFor="rt-duration">Each lasts</label>
+        <div>
+          <input id="rt-duration" value={duration} onChange={(e) => setDuration(e.target.value)} size={8} />
+          <span className="secondary small"> e.g. 1h, 30m, 2d; 0 makes milestones</span>
+        </div>
+        <span className="label">Repeats</span>
+        <div className="segmented" role="radiogroup" aria-label="Repeats">
+          {(["daily", "weekly", "monthly"] as const).map((k) => (
+            <button key={k} type="button" role="radio" aria-checked={kind === k} className={kind === k ? "on" : undefined} onClick={() => setKind(k)}>
+              {k === "daily" ? "Daily" : k === "weekly" ? "Weekly" : "Monthly"}
+            </button>
+          ))}
+        </div>
+        <label htmlFor="rt-every">Every</label>
+        <div>
+          <input id="rt-every" type="number" min={1} max={99} value={every} onChange={(e) => setEvery(Math.max(1, Number(e.target.value) || 1))} style={{ width: 56 }} /> {unit}
+          {every === 1 ? "" : "s"}
+        </div>
+        {kind === "weekly" && (
+          <>
+            <span className="label">On</span>
+            <div className="weekday-picks" role="group" aria-label="Days of the week">
+              {WEEKDAYS.map((w, i) => (
+                <label key={w} title={w}>
+                  <input type="checkbox" checked={weekdays[i]} onChange={(e) => setWeekdays((old) => old.map((v, j) => (j === i ? e.target.checked : v)))} /> {w.slice(0, 3)}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+        {kind === "monthly" && (
+          <>
+            <span className="label">On</span>
+            <div className="monthly-picks">
+              <label>
+                <input type="radio" name="rt-monthly" checked={monthlyBy === "day"} onChange={() => setMonthlyBy("day")} /> Day{" "}
+                <input type="number" min={1} max={31} value={day} onChange={(e) => setDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))} style={{ width: 56 }} aria-label="Day of the month" />
+              </label>
+              <label>
+                <input type="radio" name="rt-monthly" checked={monthlyBy === "weekday"} onChange={() => setMonthlyBy("weekday")} /> The{" "}
+                <select value={week} onChange={(e) => setWeek(Number(e.target.value))} aria-label="Which week">
+                  {ORDINALS.map((o, i) => (
+                    <option key={o} value={i + 1}>
+                      {o}
+                    </option>
+                  ))}
+                </select>{" "}
+                <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))} aria-label="Day of the week">
+                  {WEEKDAYS.map((w, i) => (
+                    <option key={w} value={i}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </>
+        )}
+        <label htmlFor="rt-start">Starting</label>
+        <input id="rt-start" type="date" value={start} onChange={(e) => setStart(e.target.value)} required />
+        <span className="label">Ends</span>
+        <div className="monthly-picks">
+          <label>
+            <input type="radio" name="rt-end" checked={endBy === "count"} onChange={() => setEndBy("count")} /> After{" "}
+            <input type="number" min={1} max={999} value={count} onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))} style={{ width: 64 }} aria-label="Number of occurrences" /> times
+          </label>
+          <label>
+            <input type="radio" name="rt-end" checked={endBy === "date"} onChange={() => setEndBy("date")} /> By{" "}
+            <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} aria-label="End date" />
+          </label>
+        </div>
+      </div>
+      <p className="secondary small">
+        It becomes a summary task with one task per date, each starting no earlier than its date. Dates on non-working days move to the next working day.
+      </p>
+    </Sheet>
+  );
+}

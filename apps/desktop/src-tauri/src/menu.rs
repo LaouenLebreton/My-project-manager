@@ -35,6 +35,7 @@ pub mod id {
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
     pub const TASK_INFO: &str = "task.info";
+    pub const RECURRING: &str = "task.recurring";
     pub const INDENT: &str = "task.indent";
     pub const OUTDENT: &str = "task.outdent";
     pub const PROJECT_INFO: &str = "project.info";
@@ -210,10 +211,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     // Task and Project menus. Indent and Outdent show Tab and ⇧Tab without owning those
     // keys (the grid handles them), so they have no accelerator here.
     let task_info = item(app, id::TASK_INFO, "Task Info…", Some("CmdOrCtrl+I"))?;
+    let recurring = item(app, id::RECURRING, "Recurring Task…", None)?;
     let indent = item(app, id::INDENT, "Indent", None)?;
     let outdent = item(app, id::OUTDENT, "Outdent", None)?;
     let percent = id::PERCENT.iter().map(|(i, label)| item(app, i, label, None)).collect::<Result<Vec<_>, _>>()?;
-    let mut task = SubmenuBuilder::new(app, "Task").item(&task_info).separator().item(&indent).item(&outdent).separator();
+    let mut task = SubmenuBuilder::new(app, "Task").item(&task_info).item(&recurring).separator().item(&indent).item(&outdent).separator();
     for p in &percent {
         task = task.item(p);
     }
@@ -292,7 +294,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members];
+    let document_items = vec![find, task_info, recurring, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

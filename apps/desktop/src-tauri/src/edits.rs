@@ -99,6 +99,31 @@ pub enum Edit {
     SetStatusDate { date: Option<String> },
     /// Project > Update Project: work is done as scheduled up to the end of this day.
     UpdateProgress { through_date: String },
+    /// Insert > Recurring Task: a summary task with one occurrence per date, each starting no
+    /// earlier than its date, after `afterId` (or at the end). Ends after `endAfter`
+    /// occurrences or by `endDate` (`YYYY-MM-DD`).
+    AddRecurringTask {
+        after_id: Option<String>,
+        name: String,
+        duration_text: String,
+        repeat: RepeatEdit,
+        start_date: String,
+        end_after: Option<u32>,
+        end_date: Option<String>,
+    },
+}
+
+/// How a recurring task repeats. Weekdays: Monday = 0 … Sunday = 6.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[ts(export)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum RepeatEdit {
+    Daily { every: u32 },
+    /// `weekdays`: seven flags, Monday first.
+    Weekly { every: u32, weekdays: Vec<bool> },
+    MonthlyOnDay { every: u32, day: u8 },
+    /// `week`: 1–4, or 5 for the last.
+    MonthlyOnWeekday { every: u32, week: u8, weekday: u8 },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
@@ -221,6 +246,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             };
             Ok(Some(Planned { command, created: Some(id), message: None }))
         }
+        edit @ Edit::AddRecurringTask { .. } => add_recurring(p, units, edit),
         Edit::RenameTask { id, name } => plain(Command::SetTask { id: task_id(&id)?, change: TaskChange::Name(name) }),
         Edit::SetDuration { id, text } => set_duration(p, units, task_id(&id)?, &text),
         Edit::SetPredecessors { id, text } => set_predecessors(p, units, task_id(&id)?, &text),
@@ -865,6 +891,84 @@ fn update_progress(p: &Project, schedule: Option<&Schedule>, through_date: &str)
     Ok(batch("Update Project", commands).map(|command| Planned { command, created: None, message: Some(message) }))
 }
 
+fn add_recurring(p: &Project, units: &Units, edit: Edit) -> Result<Option<Planned>, IpcError> {
+    use pm_core::recurrence::{dates, on_working_days, End, Pattern};
+    let Edit::AddRecurringTask { after_id, name, duration_text, repeat, start_date, end_after, end_date } = edit else {
+        unreachable!("only called for AddRecurringTask")
+    };
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err(err("give the recurring task a name"));
+    }
+    let minutes = units.parse_duration(&duration_text)?;
+    let pattern = match repeat {
+        RepeatEdit::Daily { every } => Pattern::Daily { every },
+        RepeatEdit::Weekly { every, weekdays } => {
+            let mut days = [false; 7];
+            for (d, on) in days.iter_mut().zip(weekdays) {
+                *d = on;
+            }
+            Pattern::Weekly { every, weekdays: days }
+        }
+        RepeatEdit::MonthlyOnDay { every, day } => Pattern::MonthlyOnDay { every, day },
+        RepeatEdit::MonthlyOnWeekday { every, week, weekday } => Pattern::MonthlyOnWeekday { every, week, weekday },
+    };
+    let start = day_start(&start_date)?.day();
+    let end = match (end_after, end_date) {
+        (_, Some(d)) if !d.trim().is_empty() => End::By(day_start(d.trim())?.day()),
+        (Some(n), _) => End::After(n),
+        _ => return Err(err("choose how many times it repeats, or the date it ends")),
+    };
+    let wanted = dates(pattern, start, end).map_err(|e| err(e.to_string()))?;
+    let on = on_working_days(&wanted, &p.calendar);
+
+    // The summary goes where a new task would; the occurrences inside it, in date order.
+    let after = after_id.as_deref().map(task_id).transpose()?.map(|a| task(p, a)).transpose()?;
+    let parent = after.and_then(|t| t.parent);
+    let keys = child_keys(p, parent);
+    let (before, next) = match after {
+        Some(a) => (Some(&a.sort_key), keys.iter().copied().find(|k| **k > a.sort_key)),
+        None => (keys.last().copied(), None),
+    };
+    let blank = |id, parent, sort_key, name: String, duration: Duration, constraint| Task {
+        id,
+        parent,
+        sort_key,
+        name,
+        duration,
+        is_milestone: false,
+        constraint,
+        percent_complete: Percent::default(),
+        leveling_delay: Duration::ZERO,
+        fixed_cost: Money(0),
+        manual_start: None,
+        actual: Actual::default(),
+        notes: String::new(),
+    };
+    let summary = TaskId(new_id());
+    let duration = Duration::minutes(minutes.max(0))?;
+    let mut tasks = vec![blank(summary, parent, SortKey::between(before, next), name.clone(), Duration::minutes(units.minutes_per_day).expect("positive"), Constraint::AsSoonAsPossible)];
+    let mut key: Option<SortKey> = None;
+    for (i, &day) in on.days.iter().enumerate() {
+        let k = SortKey::between(key.as_ref(), None);
+        let start = p.calendar.next_working(Moment::from_day_minute(day, 0));
+        let mut t = blank(TaskId(new_id()), Some(summary), k.clone(), format!("{name} {}", i + 1), duration, Constraint::StartNoEarlierThan(start));
+        t.is_milestone = minutes == 0;
+        tasks.push(t);
+        key = Some(k);
+    }
+    let count = on.days.len();
+    let mut message = format!("{count} occurrence{} of “{name}”.", if count == 1 { "" } else { "s" });
+    if on.moved > 0 {
+        message.push_str(&format!(" {} fell on a non-working day and moved to the next working day.", on.moved));
+    }
+    if on.dropped > 0 {
+        message.push_str(&format!(" {} would have landed on a day that already had one, so {} left out.", on.dropped, if on.dropped == 1 { "it was" } else { "they were" }));
+    }
+    let command = Command::Batch { label: "Insert Recurring Task".into(), commands: vec![Command::InsertTasks { tasks, dependencies: vec![] }] };
+    Ok(Some(Planned { command, created: Some(summary), message: Some(message) }))
+}
+
 fn day_start(date: &str) -> Result<Moment, IpcError> {
     let d: jiff::civil::Date = date.parse().map_err(|_| err(format!("{date:?} is not a date")))?;
     Ok(Moment::from_datetime(d.at(0, 0, 0, 0)))
@@ -1121,6 +1225,53 @@ mod tests {
         assert_eq!(shape(&p), s(&[("A", 0), ("B", 0), ("C", 1), ("D", 0)]));
         run(&mut p, Edit::Outdent { ids: ids(&[id[2]]) });
         assert_eq!(shape(&p), s(&[("A", 0), ("B", 0), ("C", 0), ("D", 0)]));
+    }
+
+    #[test]
+    fn recurring_task_is_a_summary_with_dated_occurrences() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0)]);
+        let edit = Edit::AddRecurringTask {
+            after_id: Some(id[0].0.to_string()),
+            name: " Team meeting ".into(),
+            duration_text: "1h".into(),
+            repeat: RepeatEdit::Weekly { every: 1, weekdays: vec![true, false, true, false, false, false, false] },
+            start_date: "2026-11-02".into(),
+            end_after: Some(3),
+            end_date: None,
+        };
+        let planned = plan(&p, None, &Units::default(), edit).unwrap().unwrap();
+        assert_eq!(planned.message.as_deref(), Some("3 occurrences of “Team meeting”."));
+        apply(&mut p, &planned.command).unwrap();
+        assert_eq!(shape(&p), s(&[("A", 0), ("Team meeting", 0), ("Team meeting 1", 1), ("Team meeting 2", 1), ("Team meeting 3", 1), ("B", 0)]));
+        let sched = pm_core::schedule(&p).unwrap();
+        let starts: Vec<String> = outline(&p)
+            .iter()
+            .filter(|r| r.depth == 1)
+            .map(|r| sched.tasks[&r.id].early_start.to_datetime().to_string())
+            .collect();
+        assert_eq!(starts, ["2026-11-02T08:00:00", "2026-11-04T08:00:00", "2026-11-09T08:00:00"]);
+        assert_eq!(p.tasks.values().find(|t| t.name == "Team meeting 1").unwrap().duration.get(), 60);
+    }
+
+    #[test]
+    fn recurring_task_on_weekends_moves_and_explains() {
+        let (p, _) = project(&[("A", 0)]);
+        let edit = |end_after, end_date: Option<&str>| Edit::AddRecurringTask {
+            after_id: None,
+            name: "Backup".into(),
+            duration_text: "0".into(),
+            repeat: RepeatEdit::Daily { every: 1 },
+            start_date: "2026-11-06".into(),
+            end_after,
+            end_date: end_date.map(Into::into),
+        };
+        // Fri, Sat, Sun, Mon: the weekend's two land on Monday, which already has one.
+        let planned = plan(&p, None, &Units::default(), edit(Some(4), None)).unwrap().unwrap();
+        assert_eq!(planned.message.as_deref(), Some("2 occurrences of “Backup”. 2 would have landed on a day that already had one, so they were left out."));
+        let e = plan(&p, None, &Units::default(), edit(None, None)).err().unwrap();
+        assert_eq!(e.message, "choose how many times it repeats, or the date it ends");
+        let e = plan(&p, None, &Units::default(), edit(None, Some("2026-11-01"))).err().unwrap();
+        assert_eq!(e.message, "the end date is before the start date");
     }
 
     #[test]

@@ -10,7 +10,7 @@ import { Gantt, type GanttHandle } from "./Gantt";
 import { FindBar } from "./FindBar";
 import { HelpSheet } from "./HelpSheet";
 import { ResourceSheet } from "./ResourceSheet";
-import { ConfirmSheet, ProjectInfo, ProjectStatistics, TaskInfo, UpdateProject, WorkingTime } from "./Sheets";
+import { ConfirmSheet, ProjectInfo, ProjectStatistics, RecurringTask, TaskInfo, UpdateProject, WorkingTime } from "./Sheets";
 import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { WbsChart } from "./WbsChart";
@@ -48,7 +48,7 @@ export function App() {
 
   const [recent, setRecent] = useState<RecentFile[]>([]);
   const [report, setReport] = useState<ReportView | null>(null);
-  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | null>(null);
+  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | "recurring" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
   const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload" | "calendar" | "board" | "history" | "chat">("tasks");
@@ -206,6 +206,7 @@ export function App() {
         if (e.payload === "view.history") setView("history");
         if (e.payload === "view.chat") setView("chat");
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
+        if (e.payload === "task.recurring") setOverlay("recurring");
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
         if (e.payload === "project.info") setOverlay("project");
@@ -265,6 +266,7 @@ export function App() {
       { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
+      { name: "Recurring Task… (a meeting or report that repeats)", run: () => setOverlay("recurring") },
       { name: "Project Info…", run: () => setOverlay("project") },
       { name: "Level Resources", run: () => void edit({ kind: "LevelResources" }).catch((e) => setError(errorMessage(e))) },
       { name: "Set Baseline", run: () => void edit({ kind: "SetBaseline" }).catch((e) => setError(errorMessage(e))) },
@@ -365,6 +367,7 @@ export function App() {
       )}
       {overlay === "stats" && snapshot && <ProjectStatistics snapshot={snapshot} onClose={() => setOverlay(null)} />}
       {overlay === "update" && snapshot && <UpdateProject snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {overlay === "recurring" && snapshot && <RecurringTask afterId={gridRef.current?.activeRow()?.id ?? null} send={edit} onClose={() => setOverlay(null)} />}
       {overlay === "working" && snapshot && <WorkingTime snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
       {infoRow && <TaskInfo key={infoRow.id} row={infoRow} send={edit} onClose={() => setInfoRow(null)} />}
     </>

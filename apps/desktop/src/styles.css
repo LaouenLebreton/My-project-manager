@@ -1899,3 +1899,18 @@ label.indent {
 .team-people-actions button {
   white-space: nowrap;
 }
+
+/* Recurring Task sheet. */
+.form.recurring .label {
+  align-self: center;
+}
+.weekday-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.monthly-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

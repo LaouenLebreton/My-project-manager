@@ -27,5 +27,14 @@ Owner (2026-11-02): portfolio first. `.mpp` reading stays last.
 
 ## Automation (after the portfolio)
 
-Rules such as "when a task is 100% done, post in its channel", "every Monday, update progress
-and send a status summary", recurring tasks, reminders before deadlines.
+In slices, each usable on its own:
+
+1. **[Done]** **Recurring tasks** (Task > Recurring Task…, as in Microsoft Project): daily,
+   weekly on chosen days, monthly on a day or on the first…last weekday; every N; ends after N
+   times or by a date (at most 999). It becomes a summary task with one occurrence per date,
+   each "start no earlier than" its date; dates on non-working days move to the next working
+   day, and one that would then share a day is left out (the sheet says so). Dates in
+   `pm_core::recurrence`.
+2. **Next: reminders** before deadlines and for late tasks, as macOS notifications.
+3. **Rules** for team projects: "when a task is 100% done, post in its channel", "every
+   Monday, send a status summary" (run once, by the team server, not by every Mac).
