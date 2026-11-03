@@ -366,24 +366,28 @@ pub fn portfolio_open(app: AppHandle, path: String) -> Result<(), IpcError> {
     crate::actions::open_path(&app, None, Path::new(&path)).map(|_| ())
 }
 
-/// Window > Portfolio: shows the portfolio window, creating it the first time.
+/// Window > Portfolio: shows the portfolio as a tab beside the projects, creating it the first
+/// time. (Projects never load into it: `window_for_new_project` skips it.)
 pub fn show(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(WINDOW) {
-        let _ = w.show();
-        let _ = w.set_focus();
+        crate::actions::show(&w);
         return;
     }
     let builder = tauri::WebviewWindowBuilder::new(app, WINDOW, tauri::WebviewUrl::App("index.html".into()));
-    // Its own tab group, so projects never open as tabs of the portfolio.
     #[cfg(target_os = "macos")]
-    let builder = builder.tabbing_identifier("super-pm-portfolio");
+    let builder = builder.tabbing_identifier(crate::platform::TAB_GROUP);
     let built = builder
         .title("Portfolio")
-        .inner_size(1200.0, 760.0)
+        .inner_size(1200.0, 800.0)
         .min_inner_size(720.0, 480.0)
+        .visible(false)
         .build();
-    if let Err(e) = built {
-        eprintln!("could not open the portfolio: {e}");
+    match built {
+        Ok(w) => {
+            crate::actions::tab_into_front(app, &w);
+            crate::actions::show(&w);
+        }
+        Err(e) => eprintln!("could not open the portfolio: {e}"),
     }
 }
 

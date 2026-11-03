@@ -157,7 +157,8 @@ each new project window added as a tab of the front one through AppKit's
 `addTabbedWindow:ordered:`), so they behave like Safari's or Finder's tabs: drag one out to
 make a window, Window > Merge All Windows, ⌃Tab to switch. File > New Tab (⌘T) and the ⌂
 button in every project's header open the start page as a tab; opening a project there turns
-that tab into the project. The Portfolio keeps its own window. Windows and Linux get separate
+that tab into the project. The Portfolio opens as a tab too (owner, 2026-11-03); projects opened
+from it get their own tab beside it. Windows and Linux get separate
 windows (no native tabs there). The tab bar stays visible even with one tab, with its "+" at the end
 (the owner wants exactly one tab line, macOS's). macOS shows that "+" for windows that answer
 `newWindowForTab:`, decided when a window and its tab bar are made, so the app adds that

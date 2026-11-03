@@ -56,11 +56,9 @@ pub fn set_focused(app: &AppHandle, label: &str) {
     refresh_menus(app);
 }
 
-fn show(window: &WebviewWindow) {
+pub fn show(window: &WebviewWindow) {
     let _ = window.show();
-    if window.label() != crate::portfolio::WINDOW {
-        crate::platform::show_tab_bar(window);
-    }
+    crate::platform::show_tab_bar(window);
     let _ = window.unminimize();
     let _ = window.set_focus();
 }
@@ -103,12 +101,12 @@ fn create_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
 
 /// Makes `window` a tab of the front project or Home window, unless it already is that window
 /// or is already showing (then it stays where it is).
-fn tab_into_front(app: &AppHandle, window: &WebviewWindow) {
+pub fn tab_into_front(app: &AppHandle, window: &WebviewWindow) {
     if window.is_visible().unwrap_or(false) {
         return;
     }
     let front = focused_label(app)
-        .filter(|l| l != window.label() && l != crate::portfolio::WINDOW)
+        .filter(|l| l != window.label())
         .and_then(|l| app.get_webview_window(&l))
         .filter(|w| w.is_visible().unwrap_or(false));
     if let Some(front) = front {
