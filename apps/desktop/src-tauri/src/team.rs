@@ -211,6 +211,11 @@ impl From<CallError> for IpcError {
     }
 }
 
+/// The signed-in person's name (for "your tasks" in team projects).
+pub fn my_name(app: &AppHandle) -> Option<String> {
+    account(app).map(|a| a.user.name)
+}
+
 fn signed_in(app: &AppHandle) -> Result<Account, IpcError> {
     account(app).ok_or_else(|| err("create a team (Team > Create Team Project) or join one (Team > Join a Team) first"))
 }

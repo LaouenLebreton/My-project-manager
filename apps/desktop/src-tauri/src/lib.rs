@@ -7,6 +7,7 @@ mod ipc;
 mod menu;
 mod platform;
 mod portfolio;
+mod reminders;
 mod sample;
 mod team;
 
@@ -61,6 +62,16 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
             portfolio::show(app);
             Ok(())
         }
+        menu::id::REMINDERS => {
+            // macOS has already ticked or unticked the item; keep what it shows.
+            let on = app
+                .menu()
+                .and_then(|m| m.get(menu::id::REMINDERS))
+                .and_then(|i| i.as_check_menuitem().and_then(|c| c.is_checked().ok()))
+                .unwrap_or(!reminders::enabled(app));
+            reminders::set_enabled(app, on);
+            Ok(())
+        }
         menu::id::OPEN_20K => ipc::open_generated(app, label.as_deref(), 20_000).map(|_| ()),
         // While a cell editor is open, Undo and Redo belong to the text being typed.
         menu::id::UNDO | menu::id::REDO if typing => return to_front(MENU_EVENT, id),
@@ -98,6 +109,7 @@ pub fn run() {
             app.set_menu(menu)?;
             app.manage(handles);
             actions::set_focused(app.handle(), actions::START_WINDOW);
+            reminders::start(app.handle());
             team::on_launch(app.handle());
             // Local backups on a schedule (spec 4.7); only projects that changed are copied.
             let handle = app.handle().clone();

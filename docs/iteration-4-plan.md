@@ -35,6 +35,11 @@ In slices, each usable on its own:
    each "start no earlier than" its date; dates on non-working days move to the next working
    day, and one that would then share a day is left out (the sheet says so). Dates in
    `pm_core::recurrence`.
-2. **Next: reminders** before deadlines and for late tasks, as macOS notifications.
-3. **Rules** for team projects: "when a task is 100% done, post in its channel", "every
+2. **[Done]** **Reminders:** a macOS notification when a task in an open project is late
+   (due by now, not 100%) or due within the next working day. Each is sent once (a late one
+   once a day while it stays late); several in one project come as one notification. In a
+   team project, only tasks assigned to you (resource name = your team name). Window > Task
+   Reminders turns them off. Checked every 15 minutes. Rule in `pm_core::reminders`.
+   Later: projects that are not open, and clicking a notification to show the task.
+3. **Next: rules** for team projects: "when a task is 100% done, post in its channel", "every
    Monday, send a status summary" (run once, by the team server, not by every Mac).

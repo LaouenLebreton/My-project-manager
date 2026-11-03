@@ -12,6 +12,7 @@ pub mod model;
 pub mod outline;
 pub mod portfolio;
 pub mod recurrence;
+pub mod reminders;
 pub mod resources;
 pub mod schedule;
 pub mod text;

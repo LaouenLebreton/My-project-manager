@@ -35,6 +35,7 @@ pub mod id {
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
     pub const TASK_INFO: &str = "task.info";
+    pub const REMINDERS: &str = "window.reminders";
     pub const RECURRING: &str = "task.recurring";
     pub const INDENT: &str = "task.indent";
     pub const OUTDENT: &str = "task.outdent";
@@ -246,6 +247,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .maximize()
         .separator()
         .item(&enabled(id::PORTFOLIO, "Portfolio", Some("CmdOrCtrl+0"))?)
+        .item(&tauri::menu::CheckMenuItemBuilder::with_id(id::REMINDERS, "Task Reminders").checked(crate::reminders::enabled(app)).build(app)?)
         .separator()
         .close_window()
         .build()?;
