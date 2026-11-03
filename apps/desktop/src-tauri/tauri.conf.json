@@ -10,17 +10,7 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Super PM",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 720,
-        "minHeight": 480,
-        "label": "main",
-        "tabbingIdentifier": "super-pm-projects"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
     }

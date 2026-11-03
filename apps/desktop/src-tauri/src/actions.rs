@@ -98,9 +98,7 @@ fn create_window(app: &AppHandle, label: &str) -> tauri::Result<WebviewWindow> {
         let p = pos.to_logical::<f64>(scale);
         builder = builder.position(p.x + 28.0, p.y + 28.0);
     }
-    let window = builder.build()?;
-    crate::platform::enable_new_tab_button(app, &window);
-    Ok(window)
+    builder.build()
 }
 
 /// Makes `window` a tab of the front project or Home window, unless it already is that window
@@ -179,7 +177,8 @@ pub fn install(app: &AppHandle, asking: Option<&str>, doc: Document) -> Option<S
 
     let label = window_for_new_project(app, asking);
     files::note_recent(app, &doc.path);
-    let title = files::display_name(&doc.path);
+    // Team projects live in files named by id; their tab shows the project's name.
+    let title = if doc.team.is_some() { doc.project.name.clone() } else { files::display_name(&doc.path) };
     let snap = snapshot(&doc);
     // Registered before the window exists, so a new window finds it when its page loads.
     state.docs.lock().expect("lock").insert(label.clone(), doc);

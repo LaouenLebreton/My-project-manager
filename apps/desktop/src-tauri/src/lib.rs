@@ -91,14 +91,13 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(actions::AppState::default())
         .setup(|app| {
+            // Before any window exists, so every tab bar is made with its "+".
+            platform::install_new_tab_action(app.handle());
+            actions::show_any_window(app.handle());
             let (menu, handles) = menu::build(app.handle())?;
             app.set_menu(menu)?;
             app.manage(handles);
             actions::set_focused(app.handle(), actions::START_WINDOW);
-            if let Some(main) = app.get_webview_window(actions::START_WINDOW) {
-                platform::enable_new_tab_button(app.handle(), &main);
-                platform::show_tab_bar(&main);
-            }
             team::on_launch(app.handle());
             // Local backups on a schedule (spec 4.7); only projects that changed are copied.
             let handle = app.handle().clone();

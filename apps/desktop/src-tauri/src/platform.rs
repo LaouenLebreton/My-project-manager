@@ -72,17 +72,20 @@ pub fn tab_into<R: Runtime>(app: &AppHandle<R>, front: tauri::WebviewWindow<R>, 
 #[cfg(not(target_os = "macos"))]
 pub fn tab_into<R: Runtime>(_app: &AppHandle<R>, _front: tauri::WebviewWindow<R>, _window: tauri::WebviewWindow<R>) {}
 
-/// Answers macOS's "new tab" request (`newWindowForTab:`), for its tab bar "+" where macOS
-/// shows one, by opening the start page in a new tab (File > New Tab). macOS does not reliably
-/// show that "+" for these windows, so the app also has its own (App.tsx).
+/// Answers macOS's "new tab" request (`newWindowForTab:`), which makes it show the "+" at the
+/// end of the tab bar; clicking it opens the start page in a new tab (File > New Tab). macOS
+/// decides on the "+" when a window and its tab bar are made, so this runs at launch, before
+/// any window exists: the method goes on NSWindow (every window inherits it) and on
+/// NSApplication (the end of the responder chain macOS searches).
 #[cfg(target_os = "macos")]
-pub fn enable_new_tab_button(app: &AppHandle<tauri::Wry>, window: &tauri::WebviewWindow<tauri::Wry>) {
-    use objc2::runtime::{AnyObject, Imp, Sel};
+pub fn install_new_tab_action(app: &AppHandle<tauri::Wry>) {
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
     use std::sync::OnceLock;
 
     static APP: OnceLock<AppHandle<tauri::Wry>> = OnceLock::new();
-    static ADDED: std::sync::Once = std::sync::Once::new();
-    let _ = APP.set(app.clone());
+    if APP.set(app.clone()).is_err() {
+        return;
+    }
 
     unsafe extern "C-unwind" fn new_window_for_tab(_this: *mut AnyObject, _cmd: Sel, _sender: *mut AnyObject) {
         if let Some(app) = APP.get() {
@@ -92,35 +95,19 @@ pub fn enable_new_tab_button(app: &AppHandle<tauri::Wry>, window: &tauri::Webvie
         }
     }
 
-    let Ok(ns) = window.ns_window() else { return };
-    ADDED.call_once(|| {
-        // SAFETY: `ns` is the window's live NSWindow; adding a method to its class is what the
-        // Objective-C runtime is for, and the method's types match `v@:@` (void, self, _cmd, id).
+    for name in [c"NSWindow", c"NSApplication"] {
+        let Some(class) = AnyClass::get(name) else { continue };
+        // SAFETY: adding a method to a class is what the Objective-C runtime is for; the
+        // function's signature matches the types `v@:@` (void; self, _cmd, sender).
         unsafe {
-            // macOS may have swapped in a stand-in class for observing the window
-            // ("NSKVONotifying_…"); the method belongs on the real class, shared by every window.
-            let mut class: &objc2::runtime::AnyClass = (*(ns as *const AnyObject)).class();
-            while class.name().to_string_lossy().starts_with("NSKVONotifying_") {
-                match class.superclass() {
-                    Some(sup) => class = sup,
-                    None => break,
-                }
-            }
-            let class = class as *const objc2::runtime::AnyClass as *mut objc2::runtime::AnyClass;
             let imp: Imp = std::mem::transmute::<unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject), Imp>(new_window_for_tab);
-            objc2::ffi::class_addMethod(class, objc2::sel!(newWindowForTab:), imp, c"v@:@".as_ptr());
-            // macOS looks for the action along the responder chain up to the application, so
-            // the application answers too.
-            if let Some(app_class) = objc2::runtime::AnyClass::get(c"NSApplication") {
-                let app_class = app_class as *const objc2::runtime::AnyClass as *mut objc2::runtime::AnyClass;
-                objc2::ffi::class_addMethod(app_class, objc2::sel!(newWindowForTab:), imp, c"v@:@".as_ptr());
-            }
+            objc2::ffi::class_addMethod(class as *const AnyClass as *mut AnyClass, objc2::sel!(newWindowForTab:), imp, c"v@:@".as_ptr());
         }
-    });
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn enable_new_tab_button(_app: &AppHandle<tauri::Wry>, _window: &tauri::WebviewWindow<tauri::Wry>) {}
+pub fn install_new_tab_action(_app: &AppHandle<tauri::Wry>) {}
 
 /// Keeps the tab bar showing even with one tab, as Safari can. AppKit must be called on the
 /// main thread; this hands the work to it.

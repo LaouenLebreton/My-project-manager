@@ -374,9 +374,6 @@ export function App() {
     return (
       <main className="empty">
         {overlays}
-        <button className="new-tab-button start-new-tab" onClick={() => void openNewTab()} title="New tab (⌘T)" aria-label="New tab">
-          +
-        </button>
         <h1>Super PM</h1>
         <p>Plan a project with tasks, links and a calendar. Every change is saved as you go.</p>
         <div className="start-actions">
@@ -475,9 +472,6 @@ export function App() {
             </button>
           )}
         </div>
-        <button className="new-tab-button" onClick={() => void openNewTab()} title="New tab: open or create another project (⌘T)" aria-label="New tab">
-          +
-        </button>
       </header>
       {error && (
         <p role="alert" className="banner error">
