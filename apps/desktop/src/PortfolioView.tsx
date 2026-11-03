@@ -146,10 +146,11 @@ function Projects({ rows: all, groups, grouped, onOpen, onRemove, onGroup }: { r
         {sec.rows.map((r) => (
           <tr key={r.path}>
             <td>
-              <button className="link project-link" onClick={() => onOpen(r.path)} title={r.path}>
+              <button className="link project-link" onClick={() => onOpen(r.path)} title={r.onThisMac ? r.path : "Not on this Mac yet: opening it downloads it from the team"}>
                 {r.name}
               </button>
-              {r.shared && <span className="secondary small"> · team</span>}
+              {r.shared && <span className="secondary small"> · {r.team ?? "team"}</span>}
+              {!r.onThisMac && <div className="secondary small">not opened on this Mac yet</div>}
             </td>
             <td>
               <GroupField row={r} onGroup={onGroup} />
@@ -414,6 +415,11 @@ export function PortfolioView() {
       {problem && (
         <p role="alert" className="banner error">
           {problem}
+        </p>
+      )}
+      {data?.teamNote && (
+        <p role="status" className="banner warning">
+          {data.teamNote}
         </p>
       )}
       {data && data.projects.length > 0 && (

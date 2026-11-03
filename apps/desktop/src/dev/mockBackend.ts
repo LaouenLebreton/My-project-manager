@@ -231,7 +231,7 @@ export function install() {
       switch (cmd) {
         case "portfolio_data": {
           const proj = (name: string, status: string, start: string, finish: string, done: number, slip: number | null, reasons: string[], shared = false) => ({
-            path: `/Users/me/${name}.pmproj`, name, shared, group: portfolioGroups[`/Users/me/${name}.pmproj`] ?? null, status, reasons, start, finish, baselineFinish: slip === null ? null : finish, finishVarianceMinutes: slip,
+            path: `/Users/me/${name}.pmproj`, name, shared, team: shared ? "Office team" : null, onThisMac: true, group: portfolioGroups[`/Users/me/${name}.pmproj`] ?? null, status, reasons, start, finish, baselineFinish: slip === null ? null : finish, finishVarianceMinutes: slip,
             percentComplete: done, costCents: 1_250_000 + done * 1000, baselineCostCents: slip === null ? null : 1_200_000, currency: "€", overallocated: 0, overdue: 0,
             nextMilestone: { name: "Go live", date: finish }, milestones: [{ name: "Design approved", date: start.replace("-05", "-12") }, { name: "Go live", date: finish }],
           });
@@ -244,12 +244,14 @@ export function install() {
               proj("Website relaunch", "atRisk", "2026-10-19T08:00:00", "2027-01-29T17:00:00", 20, 0, ["1 person is over-allocated"]),
               proj("Year-end audit", "onTrack", "2026-11-02T08:00:00", "2026-12-18T17:00:00", 5, null, []),
               proj("Summer event", "done", "2026-06-01T08:00:00", "2026-09-30T17:00:00", 100, 0, []),
+              { ...proj("Warehouse audit", "onTrack", "2026-11-09T08:00:00", "2027-02-26T17:00:00", 0, 0, [], true), path: "team:p-9", onThisMac: false },
             ],
             people: [
               { name: "Alex", projectCount: 2, weeks: [week(2400, [["Office move", 2400]]), week(3360, [["Office move", 1920], ["Website relaunch", 1440]]), week(2880, [["Website relaunch", 2880]]), week(1200, [["Website relaunch", 1200]])] },
               { name: "Sam", projectCount: 1, weeks: [week(0, []), week(1440, [["Year-end audit", 1440]]), week(2400, [["Year-end audit", 2400]]), week(2400, [["Year-end audit", 2400]])] },
             ],
             groups: [...new Set(Object.values(portfolioGroups))].sort(),
+            teamNote: null,
           };
         }
         case "portfolio_add":

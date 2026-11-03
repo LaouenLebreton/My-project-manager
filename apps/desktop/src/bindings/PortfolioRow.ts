@@ -7,6 +7,14 @@ export type PortfolioRow = { path: string, name: string,
  */
 shared: boolean, 
 /**
+ * The team's name, when the team server is reachable.
+ */
+team: string | null, 
+/**
+ * False for a team project that has no copy on this Mac yet (opening it downloads it).
+ */
+onThisMac: boolean, 
+/**
  * The group the owner put it in ("Clients", "Internal"), if any.
  */
 group: string | null, 

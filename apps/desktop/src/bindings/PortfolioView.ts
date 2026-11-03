@@ -10,4 +10,8 @@ weeks: Array<string>, people: Array<PortfolioPerson>, today: string,
 /**
  * Every group name in use, sorted.
  */
-groups: Array<string>, };
+groups: Array<string>, 
+/**
+ * Why the team's other projects could not be listed (offline), if so.
+ */
+teamNote: string | null, };

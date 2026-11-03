@@ -19,8 +19,11 @@ Owner (2026-11-02): portfolio first. `.mpp` reading stays last.
    own total. Totals add cost per currency; "budget" is the baseline cost, compared with the
    current cost of the projects that have one (projects without a baseline are counted apart).
    Groups are kept on this Mac (portfolio.json), not in the project files.
-5. **Next:** the portfolio for a whole team on the team server (projects you have not opened
-   on this Mac), with groups shared by the team.
+5. **[Done]** **The team's projects:** when signed in to a team, the portfolio also lists every
+   project of your teams (with the team's name), including ones never opened on this Mac:
+   those are read from the server, marked "not opened on this Mac yet", and downloaded when
+   opened. Offline, a note says they are missing; the rest still shows.
+6. **Later:** groups shared by the team (today each person's groups are their own).
 
 ## Automation (after the portfolio)
 

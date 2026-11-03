@@ -39,6 +39,10 @@ pub struct PortfolioRow {
     pub name: String,
     /// A team project (shared through a team).
     pub shared: bool,
+    /// The team's name, when the team server is reachable.
+    pub team: Option<String>,
+    /// False for a team project that has no copy on this Mac yet (opening it downloads it).
+    pub on_this_mac: bool,
     /// The group the owner put it in ("Clients", "Internal"), if any.
     pub group: Option<String>,
     /// "onTrack", "atRisk", "late", "done", or "problem" (could not be read or scheduled).
@@ -98,6 +102,8 @@ pub struct PortfolioView {
     pub today: String,
     /// Every group name in use, sorted.
     pub groups: Vec<String>,
+    /// Why the team's other projects could not be listed (offline), if so.
+    pub team_note: Option<String>,
 }
 
 /// Paths added by hand and taken out, and each project's group, kept between launches.
@@ -192,10 +198,58 @@ fn status_code(s: Status) -> &'static str {
     }
 }
 
-/// Window > Portfolio: everything it shows.
+/// A project the portfolio shows: its key (a file path, or `team:<id>` for a team project not
+/// on this Mac), name if it cannot be read, and the project.
+struct Source {
+    key: PathBuf,
+    fallback_name: String,
+    loaded: Result<(Project, bool), String>,
+    team: Option<String>,
+    on_this_mac: bool,
+}
+
+const TEAM_KEY: &str = "team:";
+
+/// Adds the team's projects: one already listed (its copy on this Mac) only gets its team's
+/// name; the others come in from the server unless they were taken out.
+fn add_team(sources: &mut Vec<Source>, entries: Vec<crate::team::TeamEntry>, removed: &[PathBuf]) {
+    for e in entries {
+        if let Some(s) = sources.iter_mut().find(|s| s.key == e.local) {
+            s.team = Some(e.team);
+            continue;
+        }
+        let key = PathBuf::from(format!("{TEAM_KEY}{}", e.id));
+        if removed.contains(&key) || removed.contains(&e.local) {
+            continue;
+        }
+        let Some(project) = e.project else { continue };
+        sources.push(Source { key, fallback_name: project.name.clone(), loaded: Ok((project, true)), team: Some(e.team), on_this_mac: false });
+    }
+}
+
+/// Window > Portfolio: everything it shows. Projects on this Mac, plus (when signed in to a
+/// team) the team's projects not opened here yet.
 #[tauri::command]
-pub fn portfolio_data(app: AppHandle) -> PortfolioView {
+pub async fn portfolio_data(app: AppHandle) -> PortfolioView {
+    let remote = crate::team::portfolio_entries(&app).await;
     let chosen = choices(&app);
+    let mut sources: Vec<Source> = paths(&app)
+        .into_iter()
+        .map(|path| Source {
+            fallback_name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+            loaded: load(&app, &path),
+            key: path,
+            team: None,
+            on_this_mac: true,
+        })
+        .collect();
+    let team_note = match remote {
+        Ok(entries) => {
+            add_team(&mut sources, entries, &chosen.removed);
+            None
+        }
+        Err(note) => Some(note),
+    };
     let today = Moment::from_datetime(jiff::Zoned::now().datetime());
     let mut projects = Vec::new();
     // Per person (lower-case name): display name, capacity source, day → (project → minutes).
@@ -207,12 +261,13 @@ pub fn portfolio_data(app: AppHandle) -> PortfolioView {
     let mut people: BTreeMap<String, Person> = BTreeMap::new();
     let (mut first_day, mut last_day) = (i64::MAX, i64::MIN);
 
-    for path in paths(&app) {
-        let file_name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    for Source { key: path, fallback_name: file_name, loaded, team, on_this_mac } in sources {
         let blank = |name: String, status: &str, reason: String| PortfolioRow {
             path: path.display().to_string(),
             name,
             shared: false,
+            team: team.clone(),
+            on_this_mac,
             group: chosen.groups.get(&path).cloned(),
             status: status.into(),
             reasons: vec![reason],
@@ -229,7 +284,7 @@ pub fn portfolio_data(app: AppHandle) -> PortfolioView {
             next_milestone: None,
             milestones: Vec::new(),
         };
-        let (p, shared) = match load(&app, &path) {
+        let (p, shared) = match loaded {
             Ok(x) => x,
             Err(e) => {
                 projects.push(blank(file_name, "problem", format!("could not be read: {e}")));
@@ -257,6 +312,8 @@ pub fn portfolio_data(app: AppHandle) -> PortfolioView {
             path: path.display().to_string(),
             name: p.name.clone(),
             shared,
+            team: team.clone(),
+            on_this_mac,
             group: chosen.groups.get(&path).cloned(),
             status: status_code(sum.status).into(),
             reasons: sum.reasons,
@@ -322,7 +379,7 @@ pub fn portfolio_data(app: AppHandle) -> PortfolioView {
             PortfolioPerson { name: p.name, weeks: weeks_out, project_count: projects_seen.len() as u32 }
         })
         .collect();
-    PortfolioView { projects, weeks: weeks.into_iter().map(date).collect(), people, today: iso(today), groups: chosen.group_names() }
+    PortfolioView { projects, weeks: weeks.into_iter().map(date).collect(), people, today: iso(today), groups: chosen.group_names(), team_note }
 }
 
 /// Adds a project file chosen in a dialog.
@@ -360,10 +417,15 @@ pub fn portfolio_set_group(app: AppHandle, path: String, group: String) {
     save_choices(&app, &c);
 }
 
-/// Opens a project from the portfolio in its own window.
+/// Opens a project from the portfolio in its own tab; a team project not on this Mac is
+/// downloaded first.
 #[tauri::command]
-pub fn portfolio_open(app: AppHandle, path: String) -> Result<(), IpcError> {
-    crate::actions::open_path(&app, None, Path::new(&path)).map(|_| ())
+pub async fn portfolio_open(app: AppHandle, path: String) -> Result<(), IpcError> {
+    let file = match path.strip_prefix(TEAM_KEY) {
+        Some(id) => crate::team::download(&app, id).await?,
+        None => PathBuf::from(path),
+    };
+    crate::actions::open_path(&app, None, &file).map(|_| ())
 }
 
 /// Window > Portfolio: shows the portfolio as a tab beside the projects, creating it the first
@@ -407,6 +469,32 @@ pub fn open_portfolio(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(id: &str, local: &str, project: Option<Project>) -> crate::team::TeamEntry {
+        crate::team::TeamEntry { id: id.into(), team: "Office".into(), local: local.into(), project }
+    }
+
+    #[test]
+    fn team_projects_join_without_duplicates() {
+        let mut sources = vec![Source { key: "/Shared/a.pmproj".into(), fallback_name: "a".into(), loaded: Err("x".into()), team: None, on_this_mac: true }];
+        let named = |n: &str| {
+            let mut p = crate::files::empty_project(Path::new("/x.pmproj"));
+            p.name = n.into();
+            p
+        };
+        let entries = vec![
+            entry("a", "/Shared/a.pmproj", None),
+            entry("b", "/Shared/b.pmproj", Some(named("Bravo"))),
+            entry("c", "/Shared/c.pmproj", Some(named("Charlie"))),
+        ];
+        add_team(&mut sources, entries, &[PathBuf::from("team:c")]);
+        assert_eq!(sources.len(), 2, "a is not added twice; c was taken out");
+        assert_eq!(sources[0].team.as_deref(), Some("Office"));
+        assert!(sources[0].on_this_mac);
+        assert_eq!(sources[1].key, PathBuf::from("team:b"));
+        assert_eq!(sources[1].fallback_name, "Bravo");
+        assert!(!sources[1].on_this_mac);
+    }
 
     #[test]
     fn choices_saved_before_groups_still_read() {

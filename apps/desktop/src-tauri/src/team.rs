@@ -6,7 +6,7 @@
 //! outbox over HTTP, and reconnects with a growing pause when the network drops. Edits keep
 //! working offline; they wait in the outbox, which is saved inside the project file.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -747,21 +747,68 @@ struct Opened {
     project: Project,
 }
 
-/// Downloads a shared project into the app's Shared folder (or reuses the copy already
-/// there) and opens it.
-#[tauri::command]
-pub async fn team_open(app: AppHandle, window: WebviewWindow, project_id: String) -> Result<Option<Snapshot>, IpcError> {
-    let a = signed_in(&app)?;
+/// Where a shared project's copy on this Mac lives (whether or not it is there yet).
+pub fn shared_path(app: &AppHandle, project_id: &str) -> Result<PathBuf, IpcError> {
     let dir = hosting::profiled(app.path().app_data_dir().map_err(|e| err(e.to_string()))?).join("Shared");
-    std::fs::create_dir_all(&dir).map_err(|e| err(format!("the Shared folder cannot be created: {e}")))?;
-    let path = dir.join(format!("{project_id}.pmproj"));
+    Ok(dir.join(format!("{project_id}.pmproj")))
+}
+
+/// Downloads a shared project into the app's Shared folder, unless its copy is already there.
+pub async fn download(app: &AppHandle, project_id: &str) -> Result<PathBuf, IpcError> {
+    let path = shared_path(app, project_id)?;
     if path.exists() {
-        return crate::actions::open_path(&app, Some(window.label()), &path);
+        return Ok(path);
+    }
+    let a = signed_in(app)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| err(format!("the Shared folder cannot be created: {e}")))?;
     }
     let opened: Opened = call(reqwest::Method::GET, &a.server, &format!("/api/projects/{project_id}"), Some(&a.token), None).await?;
     let mut doc = Document::create(&path, opened.project).map_err(|e| err(format!("the project could not be saved on this Mac: {e}")))?;
     doc.link_team(&a.server, opened.record.version).map_err(|e| err(e.to_string()))?;
-    Ok(crate::actions::install(&app, Some(window.label()), doc))
+    Ok(path)
+}
+
+/// Downloads a shared project into the app's Shared folder (or reuses the copy already
+/// there) and opens it.
+#[tauri::command]
+pub async fn team_open(app: AppHandle, window: WebviewWindow, project_id: String) -> Result<Option<Snapshot>, IpcError> {
+    let path = download(&app, &project_id).await?;
+    crate::actions::open_path(&app, Some(window.label()), &path)
+}
+
+/// A project of one of the user's teams, for the portfolio.
+pub struct TeamEntry {
+    pub id: String,
+    pub team: String,
+    /// Its copy on this Mac (read from there when it exists).
+    pub local: PathBuf,
+    /// The project from the server, when there is no copy on this Mac yet.
+    pub project: Option<Project>,
+}
+
+/// Every project of the user's teams. Not signed in: none. Signed in but the team cannot be
+/// reached: why, in words.
+pub async fn portfolio_entries(app: &AppHandle) -> Result<Vec<TeamEntry>, String> {
+    let Some(a) = account(app) else { return Ok(Vec::new()) };
+    let missing = |e: IpcError| format!("team projects not opened on this Mac are missing: {}", e.message);
+    let teams: HashMap<String, String> = team_teams(app.clone()).await.map_err(missing)?.into_iter().map(|t| (t.id, t.name)).collect();
+    let list: Vec<SharedProject> = call(reqwest::Method::GET, &a.server, "/api/projects", Some(&a.token), None).await.map_err(|e| missing(e.into()))?;
+    let mut out = Vec::new();
+    for p in list {
+        let local = shared_path(app, &p.id).map_err(|e| e.message)?;
+        let project = if local.exists() {
+            None
+        } else {
+            match call::<Opened>(reqwest::Method::GET, &a.server, &format!("/api/projects/{}", p.id), Some(&a.token), None).await {
+                Ok(o) => Some(o.project),
+                // Listed but not readable (access just taken away): leave it out.
+                Err(_) => continue,
+            }
+        };
+        out.push(TeamEntry { team: teams.get(&p.team_id).cloned().unwrap_or_default(), id: p.id, local, project });
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------------------------
