@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { keys } from "./platform";
 import { errorMessage, type Edit, type Snapshot } from "./api";
 import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
@@ -343,16 +344,16 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     const shift = e.shiftKey;
     switch (e.key) {
       case "ArrowUp":
-        moveTo(e.metaKey ? 0 : row - 1, active.col, shift);
+        moveTo(e.metaKey || e.ctrlKey ? 0 : row - 1, active.col, shift);
         break;
       case "ArrowDown":
-        moveTo(e.metaKey ? rowCount - 1 : row + 1, active.col, shift);
+        moveTo(e.metaKey || e.ctrlKey ? rowCount - 1 : row + 1, active.col, shift);
         break;
       case "ArrowLeft":
-        moveTo(row, e.metaKey ? 0 : active.col - 1);
+        moveTo(row, e.metaKey || e.ctrlKey ? 0 : active.col - 1);
         break;
       case "ArrowRight":
-        moveTo(row, e.metaKey ? cols.length - 1 : active.col + 1);
+        moveTo(row, e.metaKey || e.ctrlKey ? cols.length - 1 : active.col + 1);
         break;
       case "PageUp":
         moveTo(row - page, active.col, shift);
@@ -545,7 +546,7 @@ function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDa
             className="overload"
             role="img"
             aria-label="A resource on this task is over-allocated"
-            title="A resource on this task has more work than time while it runs. See the Resource Sheet (⌘2)."
+            title={keys("A resource on this task has more work than time while it runs. See the Resource Sheet (⌘2).")}
           >
             ⚠
           </span>

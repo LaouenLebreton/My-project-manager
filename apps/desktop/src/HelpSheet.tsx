@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { GLOSSARY, SHORTCUTS } from "./help";
+import { keys } from "./platform";
 
 /** Help > Super PM Help: what the terms mean and every shortcut, no manual needed. */
 export function HelpSheet({ onClose, onTour }: { onClose: () => void; onTour: () => void }) {
@@ -23,9 +24,9 @@ export function HelpSheet({ onClose, onTour }: { onClose: () => void; onTour: ()
         <h3>Keyboard</h3>
         <table className="shortcuts">
           <tbody>
-            {SHORTCUTS.map(([keys, what]) => (
-              <tr key={keys}>
-                <th scope="row">{keys}</th>
+            {SHORTCUTS.map(([combo, what]) => (
+              <tr key={combo}>
+                <th scope="row">{keys(combo)}</th>
                 <td>{what}</td>
               </tr>
             ))}

@@ -5,6 +5,16 @@ A desktop project-management app for macOS (Windows later): Microsoft Project's 
 Built with Tauri 2 (Rust) and React. This is iteration 1, a prototype; see the spec's section 3
 for scope and `docs/` for decisions.
 
+## Download
+
+Installers for **Windows** (`.exe` or `.msi`) and **macOS** (`.dmg`, Apple silicon) are on the
+[Releases page](https://github.com/LaouenLebreton/My-project-manager/releases). They are not
+code-signed yet: on Windows choose *More info → Run anyway* if SmartScreen warns; on a Mac,
+right-click the app and choose *Open* the first time.
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) when a version tag such
+as `v0.1.0` is pushed; every push to `main` is also built and tested on Windows.
+
 ## What works
 
 - Projects are single `.pmproj` files (SQLite). Every edit is saved immediately; undo and redo

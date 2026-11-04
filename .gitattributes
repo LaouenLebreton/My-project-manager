@@ -1,0 +1,5 @@
+# Shell scripts and the converter's lists keep LF line endings on every system (Windows
+# checkouts would otherwise turn them into CRLF, which sh cannot run).
+*.sh text eol=lf
+tools/mpp/deps.txt text eol=lf
+tools/mpp/deps.lock text eol=lf

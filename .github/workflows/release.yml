@@ -1,0 +1,62 @@
+# Builds the installers and publishes them as a GitHub Release when a version tag is pushed
+# (git tag v0.1.0 && git push origin v0.1.0), or when started by hand from the Actions tab.
+# Windows: an .exe installer and an .msi; macOS: a .dmg. Each includes the .mpp converter.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis,msi
+          - os: macos-latest
+            bundles: app,dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Build the .mpp converter
+        shell: bash
+        run: tools/mpp/build.sh
+      - name: Install the web interface's packages
+        working-directory: apps/desktop
+        run: npm ci
+      - uses: tauri-apps/tauri-action@action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npm run tauri
+          args: --config src-tauri/tauri.mpp.conf.json --bundles ${{ matrix.bundles }}
+          tagName: v__VERSION__
+          releaseName: Super PM __VERSION__
+          releaseBody: |
+            **Windows:** download `Super.PM_…_x64-setup.exe` and run it (or the `.msi` for managed installs).
+            The installer is not code-signed yet, so Windows SmartScreen may say it is from an unknown
+            publisher: choose **More info → Run anyway**.
+
+            **macOS (Apple silicon):** download the `.dmg`, open it and drag Super PM to Applications.
+            The app is not notarized yet: the first time, right-click it in Applications and choose **Open**.
+
+            Super PM is free software under the GNU AGPL 3.0.
+          releaseDraft: false
+          prerelease: true

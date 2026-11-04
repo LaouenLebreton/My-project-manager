@@ -8,7 +8,7 @@ set -eu
 unset JAVA_TOOL_OPTIONS
 cd "$(dirname "$0")"
 JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}
-[ -x "$JAVA_HOME/bin/jlink" ] || { echo "no JDK 21 at $JAVA_HOME; install one (brew install openjdk@21) or set JAVA_HOME" >&2; exit 1; }
+[ -x "$JAVA_HOME/bin/jlink" ] || [ -x "$JAVA_HOME/bin/jlink.exe" ] || { echo "no JDK 21 at $JAVA_HOME; install one (brew install openjdk@21) or set JAVA_HOME" >&2; exit 1; }
 ./fetch.sh >/dev/null
 rm -rf build out
 mkdir -p build/classes out/lib

@@ -9,6 +9,9 @@ use tauri::{AppHandle, Manager};
 
 use crate::ipc::IpcError;
 
+/// The bundled runtime's `java`, inside the converter's folder.
+const JAVA: &str = if cfg!(windows) { "runtime/bin/java.exe" } else { "runtime/bin/java" };
+
 fn err(message: impl Into<String>) -> IpcError {
     IpcError { message: message.into() }
 }
@@ -18,7 +21,7 @@ fn err(message: impl Into<String>) -> IpcError {
 fn converter(app: &AppHandle) -> Option<PathBuf> {
     let bundled = app.path().resource_dir().ok().map(|d| d.join("mpp"));
     let source_tree = cfg!(debug_assertions).then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tools/mpp/out"));
-    bundled.into_iter().chain(source_tree).find(|d| d.join("runtime/bin/java").is_file())
+    bundled.into_iter().chain(source_tree).find(|d| d.join(JAVA).is_file())
 }
 
 pub fn is_mpp(path: &Path) -> bool {
@@ -38,7 +41,11 @@ pub fn to_xml(app: &AppHandle, source: &Path) -> Result<String, IpcError> {
 /// Runs the converter in `dir` (holding `runtime/` and `lib/`) on one file.
 fn convert(dir: &Path, source: &Path) -> Result<String, IpcError> {
     let out = std::env::temp_dir().join(format!("super-pm-mpp-{}.xml", uuid::Uuid::now_v7()));
-    let result = Command::new(dir.join("runtime/bin/java"))
+    let mut command = Command::new(dir.join(JAVA));
+    // No console window flashing up on Windows.
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+    let result = command
         // Settings meant for other Java programs must not change this one or its messages.
         .env_remove("JAVA_TOOL_OPTIONS")
         .env_remove("JDK_JAVA_OPTIONS")
@@ -69,7 +76,7 @@ mod tests {
     /// The converter built by tools/mpp/build.sh, if it has been built on this machine.
     fn built() -> Option<PathBuf> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tools/mpp/out");
-        dir.join("runtime/bin/java").is_file().then_some(dir)
+        dir.join(JAVA).is_file().then_some(dir)
     }
 
     #[test]

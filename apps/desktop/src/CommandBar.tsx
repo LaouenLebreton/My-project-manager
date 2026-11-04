@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { keys } from "./platform";
 
 export interface CommandItem {
   name: string;
@@ -58,7 +59,7 @@ export function CommandBar({ commands, onClose }: { commands: CommandItem[]; onC
               onClick={() => run(c)}
             >
               <span>{c.name}</span>
-              {c.shortcut && <kbd>{c.shortcut}</kbd>}
+              {c.shortcut && <kbd>{keys(c.shortcut)}</kbd>}
             </li>
           ))}
           {matches.length === 0 && <li className="secondary">No command matches “{query}”</li>}

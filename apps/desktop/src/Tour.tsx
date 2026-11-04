@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { keys } from "./platform";
 
 interface Step {
   /** CSS selector of the thing being explained. */
@@ -31,7 +32,7 @@ const STEPS: Step[] = [
   {
     target: '[data-tour="status"]',
     title: "Nothing to save",
-    text: "Every change is saved as you make it, and ⌘Z undoes anything. Help explains every term whenever you need it.",
+    text: keys("Every change is saved as you make it, and ⌘Z undoes anything. Help explains every term whenever you need it."),
   },
 ];
 
