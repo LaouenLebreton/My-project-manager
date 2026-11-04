@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          # Errors are reported by the step below instead (the first ones, with context).
+          matcher: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -31,4 +34,17 @@ jobs:
           npm ci
           npm run build
       - name: Rust tests
-        run: cargo test --workspace --lib
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --lib 2>&1 | tee cargo-test.log
+      # Job logs are only visible to the repository's owner; annotations are public, so the
+      # first errors are repeated there, with their context.
+      - name: Show the first errors
+        if: failure()
+        shell: bash
+        run: |
+          grep -n -m 10 -B 2 -A 14 -E "^error|panicked at|^failures:" cargo-test.log | head -200 > first-errors.txt || true
+          [ -s first-errors.txt ] || tail -60 cargo-test.log > first-errors.txt
+          split -l 20 first-errors.txt chunk_
+          for f in chunk_*; do echo "::error title=cargo test ($f)::$(sed -e 's/%/%25/g' -e 's/\r//' "$f" | awk '{printf "%s%%0A", $0}')"; done
