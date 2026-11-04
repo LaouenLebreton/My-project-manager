@@ -48,6 +48,7 @@ pub fn register_standard_menus<R: Runtime>(_window: &Submenu<R>, _help: &Submenu
 }
 
 /// Windows with this identifier group as tabs of one window (macOS).
+#[cfg(target_os = "macos")]
 pub const TAB_GROUP: &str = "super-pm-projects";
 
 /// Shows `window` as a tab of the window in front, as Safari and Finder do with new tabs.
