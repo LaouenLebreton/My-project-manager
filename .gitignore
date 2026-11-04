@@ -5,3 +5,8 @@ node_modules
 
 # Team server data from local runs of super-pm-server
 super-pm-data/
+
+# The .mpp converter's downloaded libraries and build output (tools/mpp/fetch.sh, build.sh)
+/tools/mpp/lib/
+/tools/mpp/build/
+/tools/mpp/out/

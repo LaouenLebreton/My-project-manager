@@ -2,6 +2,9 @@
 
 Owner (2026-11-02): portfolio first. `.mpp` reading stays last.
 
+**[Done] `.mpp` files** (owner chose MPXJ, 2026-11-04): File > Open and File > Import Microsoft
+Project File take `.mpp` (Project 98 to today) as well as XML; see decisions.md.
+
 ## Portfolio (Window > Portfolio, ⌘0)
 
 1. **[Done]** **Projects:** every project at a glance: status (On track / At risk / Late / Done,

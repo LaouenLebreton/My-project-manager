@@ -242,7 +242,7 @@ export function App() {
     { name: "New Project…", shortcut: "⌘N", run: () => run(api.newProject) },
     { name: "Open…", shortcut: "⌘O", run: () => run(api.openProject) },
     { name: "Open Sample Project", run: () => run(api.openSample) },
-    { name: "Import Microsoft Project XML…", shortcut: "⇧⌘I", run: () => run(api.importProject) },
+    { name: "Import Microsoft Project File (.mpp or XML)…", shortcut: "⇧⌘I", run: () => run(api.importProject) },
     { name: "Show Help", shortcut: "⌘?", run: () => setOverlay("help") },
     { name: "Show Tour", run: () => setOverlay("tour") },
     { name: "Sign In to Team Server…", run: () => setTeamSheet("signin") },

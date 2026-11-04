@@ -6,6 +6,7 @@ mod hosting;
 mod ipc;
 mod menu;
 mod platform;
+mod mpp;
 mod portfolio;
 mod reminders;
 mod sample;

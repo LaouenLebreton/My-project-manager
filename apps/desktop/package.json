@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "app": "../../tools/mpp/build.sh && tauri build --config src-tauri/tauri.mpp.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

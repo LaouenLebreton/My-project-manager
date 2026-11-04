@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../../../tools/mpp/out/": "mpp/"
+    }
+  }
+}

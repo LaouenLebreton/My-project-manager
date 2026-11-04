@@ -21,7 +21,9 @@ for scope and `docs/` for decisions.
   `Alex, Sam[50%]`; over-allocation shown in words; Project > Level Resources; costs per task,
   summary and project.
 - Work breakdown structure (⌘3): the outline as a tree diagram, built with Return and Tab.
-- Microsoft Project XML import and export, with a report of anything not imported exactly.
+- Microsoft Project import (`.mpp` files from Project 98 to today, and XML) and XML export,
+  with a report of anything not imported exactly. `.mpp` files go through a bundled converter
+  (MPXJ on a small Java runtime, see `tools/mpp`).
 - File > New, Open, Open Recent, Save a Copy, Open Backup; `.pmproj` opens from Finder.
 - First run opens a sample project with a short tour; Help explains every term; ⌘K runs any command.
 
@@ -30,6 +32,8 @@ for scope and `docs/` for decisions.
 - macOS with Xcode Command Line Tools (`xcode-select --install`)
 - Rust (stable) via [rustup](https://rustup.rs)
 - Node.js 20 or later with npm
+- For opening `.mpp` files: a JDK 21 (`brew install openjdk@21`); without it, everything else
+  works and `.mpp` files are refused with a hint to save them as XML
 
 ## Build and run
 
@@ -38,9 +42,15 @@ cd apps/desktop
 npm install
 npm run tauri dev          # run the app with live reload
 npm run tauri build -- --bundles app   # build target/release/bundle/macos/Super PM.app
+npm run app                # the same, with the .mpp converter inside
 ```
 
 Opening `.pmproj` files from Finder works only in the built app.
+
+`.mpp` files: `tools/mpp/build.sh` downloads the converter's libraries (listed in
+`tools/mpp/deps.txt`, checked against `deps.lock`) and builds the converter with a reduced
+Java runtime into `tools/mpp/out`, which development builds use directly. `npm run app` runs
+it and bundles the result into the app. Third-party licenses: `tools/mpp/THIRD-PARTY.md`.
 
 ## Tests
 

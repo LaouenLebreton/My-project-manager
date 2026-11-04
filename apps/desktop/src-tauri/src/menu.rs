@@ -163,7 +163,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&save_copy)
         .item(&enabled(id::OPEN_BACKUP, "Open Backup…", None)?)
         .separator()
-        .item(&enabled(id::IMPORT, "Import Microsoft Project XML…", Some("CmdOrCtrl+Shift+I"))?)
+        .item(&enabled(id::IMPORT, "Import Microsoft Project File…", Some("CmdOrCtrl+Shift+I"))?)
         .item(&export)
         .separator()
         .item(&item(app, id::PRINT, "Print…", Some("CmdOrCtrl+P"))?)

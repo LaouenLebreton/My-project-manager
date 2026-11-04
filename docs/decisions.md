@@ -165,3 +165,17 @@ windows (no native tabs there). The tab bar stays visible even with one tab, wit
 method to NSWindow and NSApplication at launch, before any window exists, and makes the start
 window itself afterwards (none in tauri.conf.json). Team projects' tabs show the project's
 name, not their file's id.
+
+## Reading .mpp files with MPXJ (owner, 2026-11-04)
+
+The owner chose MPXJ (LGPL 2.1+, the library most tools use) over writing an `.mpp` reader
+or leaving `.mpp` out. A small converter (`tools/mpp/src/MppToXml.java`) reads the file with
+MPXJ's `MPPReader` and writes Project XML with `MSPDIWriter`; Super PM then imports that XML
+with its usual checks and report, so there is one import path. It runs on a jlink'd Java 21
+runtime (about 46 MB, five modules) with the libraries as separate jars (12 MB), bundled in
+`Resources/mpp`; keeping MPXJ an unmodified, replaceable jar is what the LGPL asks of a
+program under another license. MPXJ 16.10.0 (a month old) rather than 16.11.0 (one day old).
+Libraries come from Maven Central, checked against its SHA-1 and then a committed SHA-256
+lock; they and the build output stay out of Git. Tested on MPXJ's sample files from Project
+2000/2003, 2007 and 2010+ formats. Settings like `JAVA_TOOL_OPTIONS` are removed when the app
+starts the converter so another Java setup cannot change it.

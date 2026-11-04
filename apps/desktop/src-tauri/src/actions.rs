@@ -305,12 +305,20 @@ pub fn new_with_dialog(app: &AppHandle, asking: Option<&str>) -> Result<Option<S
 }
 
 pub fn open_with_dialog(app: &AppHandle, asking: Option<&str>, directory: Option<PathBuf>, title: &str) -> Result<Option<Snapshot>, IpcError> {
-    let mut d = dialog(app, asking).set_title(title).add_filter("Super PM Project", &[EXTENSION]);
+    let mut d = dialog(app, asking)
+        .set_title(title)
+        .add_filter("Super PM or Microsoft Project", &[EXTENSION, "mpp", "xml"])
+        .add_filter("Super PM Project", &[EXTENSION])
+        .add_filter("Microsoft Project", &["mpp", "xml"]);
     if let Some(dir) = directory.or_else(|| documents_dir(app)) {
         d = d.set_directory(dir);
     }
     let Some(choice) = d.blocking_pick_file() else { return Ok(None) };
     let path = choice.into_path().map_err(|e| err(e.to_string()))?;
+    // A Microsoft Project file opens by importing it into a new Super PM project.
+    if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("mpp") || x.eq_ignore_ascii_case("xml")) {
+        return import_file(app, asking, &path);
+    }
     open_path(app, asking, &path)
 }
 
@@ -336,23 +344,30 @@ pub fn save_copy_with_dialog(app: &AppHandle, label: &str) -> Result<(), IpcErro
     Ok(())
 }
 
-/// Import: pick the XML, convert it, ask where to save the new project, open it, and show
-/// the import report.
+/// Import: pick a Microsoft Project file (.mpp or XML), convert it, ask where to save the new
+/// project, open it, and show the import report.
 pub fn import_with_dialog(app: &AppHandle, asking: Option<&str>) -> Result<Option<Snapshot>, IpcError> {
-    let mut pick = dialog(app, asking).set_title("Import Microsoft Project XML").add_filter("Microsoft Project XML", &["xml"]);
+    let mut pick = dialog(app, asking).set_title("Import Microsoft Project File").add_filter("Microsoft Project (.mpp or XML)", &["mpp", "xml"]);
     if let Some(dir) = documents_dir(app) {
         pick = pick.set_directory(dir);
     }
     let Some(choice) = pick.blocking_pick_file() else { return Ok(None) };
     let source = choice.into_path().map_err(|e| err(e.to_string()))?;
-    let bytes = std::fs::read(&source)?;
-    let text = String::from_utf8_lossy(&bytes);
-    let (project, report) = pm_interop::import_mspdi(&text, &mut new_id)
-        .map_err(|e| err(format!("“{}” could not be imported: {e}", files::display_name(&source))))?;
+    import_file(app, asking, &source)
+}
+
+fn import_file(app: &AppHandle, asking: Option<&str>, source: &Path) -> Result<Option<Snapshot>, IpcError> {
+    let cannot = |why: String| err(format!("“{}” could not be imported: {why}", files::display_name(source)));
+    let text = if crate::mpp::is_mpp(source) {
+        crate::mpp::to_xml(app, source).map_err(|e| cannot(e.message))?
+    } else {
+        String::from_utf8_lossy(&std::fs::read(source)?).into_owned()
+    };
+    let (project, report) = pm_interop::import_mspdi(&text, &mut new_id).map_err(|e| cannot(e.to_string()))?;
 
     let mut save = dialog(app, asking)
         .set_title("Save Imported Project")
-        .set_file_name(format!("{}.{EXTENSION}", files::display_name(&source)))
+        .set_file_name(format!("{}.{EXTENSION}", files::display_name(source)))
         .add_filter("Super PM Project", &[EXTENSION]);
     if let Some(dir) = source.parent() {
         save = save.set_directory(dir);
@@ -361,7 +376,7 @@ pub fn import_with_dialog(app: &AppHandle, asking: Option<&str>) -> Result<Optio
     let path = files::with_extension(choice.into_path().map_err(|e| err(e.to_string()))?);
     let doc = files::create_with(&path, project).map_err(err)?;
     let snapshot = install(app, asking, doc);
-    let view = ReportView::new(&files::display_name(&source), report);
+    let view = ReportView::new(&files::display_name(source), report);
     let state = app.state::<AppState>();
     let label = state.docs.lock().expect("lock").iter().find(|(_, d)| d.path == path).map(|(l, _)| l.clone());
     if let Some(label) = label {
