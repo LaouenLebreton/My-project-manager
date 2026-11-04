@@ -44,8 +44,8 @@ jobs:
         working-directory: apps/desktop
         run: |
           set -o pipefail
-          npm run tauri build -- --debug --config src-tauri/tauri.mpp.conf.json --bundles nsis 2>&1 | tee ../../bundle.log
-          ls -la ../../target/debug/bundle/nsis
+          npm run tauri build -- --debug --config src-tauri/tauri.mpp.conf.json --bundles nsis,msi 2>&1 | tee ../../bundle.log
+          ls -la ../../target/debug/bundle/nsis ../../target/debug/bundle/msi
       # Job logs are only visible to the repository's owner; annotations are public, so the
       # first errors are repeated there, with their context.
       - name: Show the first errors
