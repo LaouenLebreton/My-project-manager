@@ -38,13 +38,22 @@ jobs:
         run: |
           set -o pipefail
           cargo test --workspace --lib 2>&1 | tee cargo-test.log
+      # The installer, as a release would make it (a debug build, which is quicker).
+      - name: Windows installer
+        shell: bash
+        working-directory: apps/desktop
+        run: |
+          set -o pipefail
+          npm run tauri build -- --debug --config src-tauri/tauri.mpp.conf.json --bundles nsis 2>&1 | tee ../../bundle.log
+          ls -la ../../target/debug/bundle/nsis
       # Job logs are only visible to the repository's owner; annotations are public, so the
       # first errors are repeated there, with their context.
       - name: Show the first errors
         if: failure()
         shell: bash
         run: |
-          grep -n -m 10 -B 2 -A 14 -E "^error|panicked at|^failures:" cargo-test.log | head -200 > first-errors.txt || true
-          [ -s first-errors.txt ] || tail -60 cargo-test.log > first-errors.txt
+          touch cargo-test.log bundle.log
+          grep -h -n -m 10 -B 2 -A 14 -E "^error|panicked at|^failures:|Error |failed to" cargo-test.log bundle.log | head -200 > first-errors.txt || true
+          [ -s first-errors.txt ] || tail -n 60 cargo-test.log bundle.log > first-errors.txt
           split -l 20 first-errors.txt chunk_
           for f in chunk_*; do echo "::error title=cargo test ($f)::$(sed -e 's/%/%25/g' -e 's/\r//' "$f" | awk '{printf "%s%%0A", $0}')"; done
