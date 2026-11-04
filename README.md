@@ -88,3 +88,16 @@ fixtures            sample and reference files
 
 See `docs/open-questions.md`. Most important: real Microsoft Project XML files with their
 calculated dates, to check that Super PM's dates match (spec section 8).
+
+## License
+
+Super PM is free software: you can redistribute it and/or modify it under the terms of the
+[GNU Affero General Public License, version 3](LICENSE) (AGPL-3.0-only).
+
+In short: anyone may use, study, change and share it. Anyone who distributes a changed
+version, or runs one as a service others use over a network (for example a modified team
+server), must make their source code available under the same license.
+
+Copyright © 2026 Laouen. The copyright holder may also offer Super PM under other terms. To
+keep that possible, contributions are accepted under the agreement in
+[CONTRIBUTING.md](CONTRIBUTING.md).
