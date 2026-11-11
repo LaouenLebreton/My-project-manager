@@ -188,6 +188,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
         ctx.fillStyle = c.stripe;
         ctx.fillRect(0, rowY(i), width, ROW_HEIGHT);
       }
+      // A faint line under each row, as in the task grid beside it.
+      ctx.fillStyle = c.grid;
+      ctx.globalAlpha = 0.8;
+      ctx.fillRect(0, rowY(i) + ROW_HEIGHT - 1, width, 1);
+      ctx.globalAlpha = 1;
     }
     // Today.
     const today = new Date();

@@ -4,7 +4,7 @@
   --gantt-text: #1d1d1f;
   --gantt-secondary: #6e6e73;
   --gantt-grid: rgba(0, 0, 0, 0.12);
-  --gantt-stripe: rgba(0, 0, 0, 0.035);
+  --gantt-stripe: rgba(0, 0, 0, 0.05);
   --gantt-nonworking: rgba(0, 0, 0, 0.055);
   --gantt-bar: #0a84ff;
   --gantt-critical: #d70015;
@@ -298,7 +298,7 @@ button.primary {
     --gantt-text: #f5f5f7;
     --gantt-secondary: #98989d;
     --gantt-grid: rgba(255, 255, 255, 0.14);
-    --gantt-stripe: rgba(255, 255, 255, 0.04);
+    --gantt-stripe: rgba(255, 255, 255, 0.065);
     --gantt-nonworking: rgba(255, 255, 255, 0.06);
     --gantt-bar: #409cff;
     --gantt-critical: #ff453a;
@@ -1950,4 +1950,107 @@ label.indent {
   color: #fff;
   background: #d70015;
   border-color: #d70015;
+}
+
+/* Tables: rows and columns clearly apart (owner, 2026-11-11). Lines between columns and under
+   every row, a tinted header, stripes matching the chart's (so a row can be followed across),
+   a hover tint, and summary rows set off. Stronger in dark mode, where faint tints vanish. */
+:root {
+  --line: rgba(0, 0, 0, 0.1);
+  --line-strong: rgba(0, 0, 0, 0.2);
+  --row-stripe: var(--gantt-stripe);
+  --row-hover: rgba(0, 0, 0, 0.06);
+  --header-bg: color-mix(in srgb, CanvasText 6%, Canvas);
+  --header-text: color-mix(in srgb, CanvasText 78%, transparent);
+  --summary-bg: rgba(0, 0, 0, 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --line: rgba(255, 255, 255, 0.12);
+    --line-strong: rgba(255, 255, 255, 0.24);
+    --row-hover: rgba(255, 255, 255, 0.09);
+    --header-bg: color-mix(in srgb, CanvasText 10%, Canvas);
+    --summary-bg: rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* Task and resource grids */
+.grid-header-wrap {
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--line-strong);
+}
+.grid-header {
+  color: var(--header-text);
+  font-weight: 600;
+}
+.grid-header > div {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.grid-header > div.right {
+  justify-content: flex-end;
+}
+.grid-header > div + div,
+.grid-row > div + div {
+  border-left: 1px solid var(--line);
+}
+.grid-row {
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.grid-row.odd {
+  background: var(--row-stripe);
+}
+.grid-row.summary {
+  background: var(--summary-bg);
+}
+.grid-row:hover {
+  background: var(--row-hover);
+}
+.grid-row.flagged {
+  background: color-mix(in srgb, #ff9f0a 18%, transparent);
+}
+.grid-row.selected {
+  background: color-mix(in srgb, AccentColor 18%, transparent);
+}
+.grid:focus .grid-row.selected {
+  background: color-mix(in srgb, AccentColor 28%, transparent);
+}
+
+/* Workload, portfolio and other data tables */
+.workload-table thead th,
+.portfolio-table thead th {
+  background: var(--header-bg);
+  color: var(--header-text);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line-strong);
+}
+.workload-table th,
+.workload-table td,
+.portfolio-table th,
+.portfolio-table td {
+  border-bottom: 1px solid var(--line);
+}
+.workload-table th + th,
+.workload-table td + td,
+.workload-table th + td,
+.portfolio-table th + th,
+.portfolio-table td + td {
+  border-left: 1px solid var(--line);
+}
+.portfolio-table tbody tr:nth-child(even) > td,
+.workload-table tbody tr:nth-child(even) > td {
+  background: var(--row-stripe);
+}
+/* Sticky name cells need a solid background to cover what scrolls under them. */
+.workload-table tbody tr:nth-child(even) > th.name {
+  background: color-mix(in srgb, CanvasText 5%, Canvas);
+}
+.portfolio-table tbody tr:hover > td,
+.workload-table tbody tr:hover > td {
+  background: var(--row-hover);
+}
+.workload-table tbody tr > td.over {
+  background: color-mix(in srgb, var(--gantt-critical) 22%, Canvas);
 }
