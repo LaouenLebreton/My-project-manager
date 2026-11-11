@@ -2068,3 +2068,14 @@ label.indent {
   z-index: 4;
   pointer-events: none;
 }
+
+/* The task list's filter, above it. */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+  min-height: 28px;
+}

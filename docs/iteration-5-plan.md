@@ -9,7 +9,7 @@ its own, test-first, in this order.
    rows by their number. Tasks keep their links; summaries move with what is inside them.
 2. **[Done]** **Copy, paste, duplicate tasks** (⌘C / ⌘V / ⌘D): tasks with the links between them and their
    resources; across projects too.
-3. **Filters** in the task list: all, late, critical, milestones, a resource's tasks.
+3. **[Done]** **Filters** in the task list: all, late, critical, milestones, a resource's tasks.
 4. **Undo history** you can see: Edit > History of Changes…, step back to any point.
 5. **First steps:** a short checklist on a new project (add tasks, link them, assign people,
    set a baseline), each step ticked as it is done.

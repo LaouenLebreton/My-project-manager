@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { FILTERS, filterRows, type TaskFilter } from "./filter";
 import { isMac } from "./platform";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, chat, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
 import { AddAccountSheet, ConnectSheet, CreateTeamSheet, InvitePeopleSheet, InvitesSheet, JoinSheet, OpenSharedSheet, SignInSheet, SyncPill } from "./TeamSheets";
@@ -53,6 +54,9 @@ export function App() {
   const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | "recurring" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
+  // The task list's filter; the chart shows the same rows.
+  const [filter, setFilter] = useState<TaskFilter>("all");
+  const shown = useMemo(() => (snapshot && filter !== "all" ? { ...snapshot, rows: filterRows(snapshot.rows, filter) } : snapshot), [snapshot, filter]);
   const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload" | "calendar" | "board" | "history" | "chat">("tasks");
   const [notice, setNotice] = useState<string | null>(null);
   // The team server account, and this window's sync state (shared projects only).
@@ -299,6 +303,7 @@ export function App() {
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },
       { name: "Outdent Selected Tasks", shortcut: "⇧Tab", run: () => gridRef.current?.indent(true) },
       { name: "Duplicate Selected Tasks", shortcut: "⌘D", run: () => gridRef.current?.duplicate() },
+      ...FILTERS.map((f) => ({ name: `Show: ${f.label}`, run: () => setFilter(f.value) })),
       { name: "Move Selected Tasks Up", shortcut: isMac ? "⌃⌘↑" : "⌥⇧↑", run: () => gridRef.current?.moveRows(false) },
       { name: "Move Selected Tasks Down", shortcut: isMac ? "⌃⌘↓" : "⌥⇧↓", run: () => gridRef.current?.moveRows(true) },
       { name: "Delete Selected Tasks", shortcut: "⌫", run: () => gridRef.current?.deleteSelection() },
@@ -537,12 +542,43 @@ export function App() {
       ) : (
         <>
       {finding && <FindBar onFind={(t, fromCurrent) => gridRef.current?.findNext(t, fromCurrent) ?? false} onClose={() => setFinding(false)} />}
+        <div className="filter-bar">
+          <label>
+            Show{" "}
+            <select value={filter} onChange={(e) => setFilter(e.target.value as TaskFilter)} aria-label="Show which tasks">
+              {FILTERS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+              {snapshot.resources.length > 0 && (
+                <optgroup label="Tasks of">
+                  {snapshot.resources.map((r) => (
+                    <option key={r.id} value={`resource:${r.name}`}>
+                      {r.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </label>
+          {filter !== "all" && (
+            <>
+              <span className="secondary small">
+                {shown!.rows.filter((r) => !r.isSummary).length} of {snapshot.rows.filter((r) => !r.isSummary).length} tasks
+              </span>
+              <button className="link small" onClick={() => setFilter("all")}>
+                Show all
+              </button>
+            </>
+          )}
+        </div>
         <div className="workspace">
           <div className="pane" style={{ width: gridWidth }}>
             <Grid
               ref={gridRef}
               onPaste={paste}
-              snapshot={snapshot}
+              snapshot={shown!}
               onEdit={edit}
               onTextEditing={textEditing}
               onScrollTop={setScrollTop}
@@ -559,7 +595,7 @@ export function App() {
           />
           <Gantt
             onConfirm={confirm}
-            snapshot={snapshot}
+            snapshot={shown!}
             scrollTop={scrollTop}
             selectedIds={selectedIds}
             onEdit={edit}
