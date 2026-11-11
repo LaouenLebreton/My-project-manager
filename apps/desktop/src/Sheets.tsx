@@ -110,6 +110,8 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
   const initialFinish = row.actualFinish?.slice(0, 10) ?? "";
   const [actualStart, setActualStart] = useState(initialStart);
   const [actualFinish, setActualFinish] = useState(initialFinish);
+  const initialDeadline = row.deadline?.slice(0, 10) ?? "";
+  const [deadline, setDeadline] = useState(initialDeadline);
   return (
     <Sheet
       title="Task Info"
@@ -130,6 +132,7 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           // Only typed dates are sent, so a changed % complete can fill them in from the schedule.
           actualStart: row.isSummary || actualStart === initialStart ? null : actualStart,
           actualFinish: row.isSummary || actualFinish === initialFinish ? null : actualFinish,
+          deadline: deadline === initialDeadline ? null : deadline,
         })
       }
     >
@@ -229,6 +232,14 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
             <input id="ti-actual-finish" type="date" value={actualFinish} onChange={(e) => setActualFinish(e.target.value)} />
           </>
         )}
+
+        <label htmlFor="ti-deadline">Deadline</label>
+        <div>
+          <input id="ti-deadline" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+          <p className="secondary small">
+            When it should be finished by. Unlike a constraint it does not move the task; if the task is scheduled to finish later, it is flagged ⚑.
+          </p>
+        </div>
 
         <label htmlFor="ti-notes">Notes</label>
         <textarea id="ti-notes" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />

@@ -143,6 +143,10 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE task ADD COLUMN actual_finish_min INTEGER;
     ALTER TABLE project ADD COLUMN status_date_min INTEGER;
     "#,
+    // 8 -> 9: deadlines (iteration 5).
+    r#"
+    ALTER TABLE task ADD COLUMN deadline_min INTEGER;
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

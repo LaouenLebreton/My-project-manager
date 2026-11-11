@@ -125,6 +125,7 @@ fn sample_project(name: &str) -> Value {
         leveling_delay: Duration::ZERO,
         fixed_cost: Money(0),
         manual_start: None,
+        deadline: None,
         actual: Actual::default(),
         notes: String::new(),
     };

@@ -653,6 +653,11 @@ function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDa
             ▲
           </span>
         )}
+        {r.missedDeadline && (
+          <span className="critical" role="img" aria-label={`Finishes after its deadline, ${formatDate(r.deadline)}`} title={`Finishes after its deadline (${formatDate(r.deadline)})`}>
+            ⚑
+          </span>
+        )}
         {constraint && (
           <span className="constraint" role="img" aria-label={constraint} title={constraint}>
             ⌖

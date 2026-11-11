@@ -1,12 +1,13 @@
 import type { Row } from "./bindings/Row";
 
 /** What the task list shows (View > Show, or the Show menu above the list). */
-export type TaskFilter = "all" | "incomplete" | "late" | "critical" | "milestones" | `resource:${string}`;
+export type TaskFilter = "all" | "incomplete" | "late" | "deadline" | "critical" | "milestones" | `resource:${string}`;
 
 export const FILTERS: { value: TaskFilter; label: string }[] = [
   { value: "all", label: "All tasks" },
   { value: "incomplete", label: "Not finished" },
   { value: "late", label: "Late (should have finished)" },
+  { value: "deadline", label: "Past their deadline" },
   { value: "critical", label: "Critical path" },
   { value: "milestones", label: "Milestones" },
 ];
@@ -27,6 +28,8 @@ function matches(r: Row, filter: TaskFilter, now: string): boolean {
       return r.percentComplete < 100;
     case "late":
       return r.percentComplete < 100 && r.finish !== null && r.finish <= now;
+    case "deadline":
+      return r.missedDeadline;
     case "critical":
       return r.critical;
     case "milestones":

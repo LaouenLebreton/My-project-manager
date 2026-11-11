@@ -37,6 +37,7 @@ fn task(n: u128) -> Task {
         leveling_delay: Duration::ZERO,
         fixed_cost: Money(0),
         manual_start: None,
+        deadline: None,
         actual: Actual::default(),
         notes: String::new(),
     }
@@ -165,7 +166,7 @@ fn version_1_files_are_upgraded() {
     drop(Store::create(&path, &p).unwrap());
     // Turn it back into a version 1 file, as an iteration 1 build would have written it.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; ALTER TABLE task DROP COLUMN actual_start_min; ALTER TABLE task DROP COLUMN actual_finish_min; ALTER TABLE project DROP COLUMN status_date_min; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; ALTER TABLE task DROP COLUMN actual_start_min; ALTER TABLE task DROP COLUMN actual_finish_min; ALTER TABLE project DROP COLUMN status_date_min; ALTER TABLE task DROP COLUMN deadline_min; PRAGMA user_version = 1;").unwrap();
     drop(conn);
     let (mut s, mut loaded) = Store::open(&path).unwrap();
     // Version 1 had no leveling delays; they come back as zero.
@@ -175,6 +176,7 @@ fn version_1_files_are_upgraded() {
         t.fixed_cost = Money(0);
         t.manual_start = None;
         t.actual = Actual::NotStarted;
+        t.deadline = None;
     }
     expected.currency = String::new();
     expected.status_date = None;
@@ -461,4 +463,16 @@ fn the_undo_history_lists_steps_newest_first() {
     assert_eq!(steps[1].at, meta(2).at, "each step keeps when it was done");
     assert!(steps.iter().all(|x| !x.label.is_empty()));
     assert_eq!(s.history(1).unwrap().len(), 1);
+}
+
+#[test]
+fn deadlines_are_saved() {
+    let path = temp_dir().join("d.pmproj");
+    drop(Store::create(&path, &rich_project()).unwrap());
+    let (mut s, mut p) = Store::open(&path).unwrap();
+    let id = *p.tasks.keys().next().unwrap();
+    s.apply(&mut p, &Command::SetTask { id, change: pm_core::TaskChange::Deadline(Some(Moment(29_000_000))) }, &meta(1)).unwrap();
+    drop(s);
+    let (_, again) = Store::open(&path).unwrap();
+    assert_eq!(again.tasks[&id].deadline, Some(Moment(29_000_000)));
 }

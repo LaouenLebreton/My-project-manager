@@ -154,6 +154,10 @@ pub struct Task {
     /// `None` means scheduled automatically.
     #[serde(default)]
     pub manual_start: Option<Moment>,
+    /// When it should be finished by (Microsoft Project's Deadline): unlike a constraint it does
+    /// not move the task; a later finish is flagged.
+    #[serde(default)]
+    pub deadline: Option<Moment>,
     /// What really happened (R35): once a task has started, its dates are facts.
     #[serde(default)]
     pub actual: Actual,

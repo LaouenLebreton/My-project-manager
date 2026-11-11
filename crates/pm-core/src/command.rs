@@ -58,6 +58,8 @@ pub enum TaskChange {
     ManualStart(Option<Moment>),
     /// Progress: not started, started, or finished, with the real dates.
     Actual(Actual),
+    /// The date it should be finished by, or none.
+    Deadline(Option<Moment>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +170,8 @@ impl Command {
                 TaskChange::FixedCost(_) => "Change Fixed Cost",
                 TaskChange::ManualStart(Some(_)) => "Schedule Manually",
                 TaskChange::ManualStart(None) => "Schedule Automatically",
+                TaskChange::Deadline(Some(_)) => "Set Deadline",
+                TaskChange::Deadline(None) => "Clear Deadline",
                 TaskChange::Actual(_) => "Update Progress",
             }
             .into(),
@@ -553,6 +557,7 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
         TaskChange::LevelingDelay(v) => TaskChange::LevelingDelay(std::mem::replace(&mut t.leveling_delay, *v)),
         TaskChange::FixedCost(v) => TaskChange::FixedCost(std::mem::replace(&mut t.fixed_cost, *v)),
         TaskChange::ManualStart(v) => TaskChange::ManualStart(std::mem::replace(&mut t.manual_start, *v)),
+        TaskChange::Deadline(v) => TaskChange::Deadline(std::mem::replace(&mut t.deadline, *v)),
         TaskChange::Actual(v) => TaskChange::Actual(std::mem::replace(&mut t.actual, *v)),
         TaskChange::Position { parent, sort_key } => TaskChange::Position {
             parent: std::mem::replace(&mut t.parent, *parent),
@@ -598,6 +603,7 @@ mod tests {
             leveling_delay: Duration::ZERO,
             fixed_cost: Money(0),
             manual_start: None,
+            deadline: None,
             actual: Actual::default(),
             notes: String::new(),
         }
@@ -664,6 +670,8 @@ mod tests {
         roundtrip(Command::SetTask { id: tid(4), change: TaskChange::Position { parent: Some(tid(1)), sort_key: SortKey("9".into()) } });
         roundtrip(Command::SetLink { id: lid(1), change: LinkChange::Lag(-480) });
         roundtrip(Command::SetProject { change: ProjectChange::Start(Moment(99)) });
+        let p = roundtrip(Command::SetTask { id: tid(2), change: TaskChange::Deadline(Some(Moment(5000))) });
+        assert_eq!(p.tasks[&tid(2)].deadline, Some(Moment(5000)));
     }
 
     #[test]

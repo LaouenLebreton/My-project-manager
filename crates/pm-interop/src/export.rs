@@ -197,6 +197,10 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         if let Some(d) = cdate {
             leaf(&mut w, "ConstraintDate", &datetime(d));
         }
+        // Microsoft Project's order: Deadline comes after ConstraintDate.
+        if let Some(d) = t.deadline {
+            leaf(&mut w, "Deadline", &datetime(d));
+        }
         leaf(&mut w, "CalendarUID", "-1");
         if t.fixed_cost.0 != 0 {
             leaf(&mut w, "FixedCost", &cents(t.fixed_cost.0));

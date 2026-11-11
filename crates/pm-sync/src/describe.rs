@@ -151,6 +151,8 @@ fn one(p: &Project, cmd: &Command) -> Vec<String> {
                 TaskChange::FixedCost(m) => format!("changed the fixed cost of {n} to {} (was {})", money(p, m.0), money(p, t.fixed_cost.0)),
                 TaskChange::ManualStart(Some(m)) => format!("scheduled {n} manually, starting {}", date(*m)),
                 TaskChange::ManualStart(None) => format!("scheduled {n} automatically again"),
+                TaskChange::Deadline(Some(m)) => format!("set the deadline of {n} to {}", date(*m)),
+                TaskChange::Deadline(None) => format!("removed the deadline of {n}"),
                 TaskChange::Actual(Actual::NotStarted) => format!("cleared the actual dates of {n}"),
                 TaskChange::Actual(Actual::Started { start }) => format!("recorded that {n} started on {}", date(*start)),
                 TaskChange::Actual(Actual::Finished { finish, .. }) => format!("recorded that {n} finished on {}", date(*finish)),
@@ -258,6 +260,7 @@ mod tests {
             leveling_delay: Duration::ZERO,
             fixed_cost: Money(0),
             manual_start: None,
+            deadline: None,
             actual: Actual::default(),
             notes: String::new(),
         };

@@ -53,6 +53,8 @@ pub enum Edit {
         /// Actual start and finish (`YYYY-MM-DD`; empty clears).
         actual_start: Option<String>,
         actual_finish: Option<String>,
+        /// Deadline (`YYYY-MM-DD`, the end of that working day; empty clears).
+        deadline: Option<String>,
     },
     /// Project Info: the day the project starts (`YYYY-MM-DD`).
     SetProjectStart { date: String },
@@ -250,6 +252,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
                     manual_start: None,
+                    deadline: None,
                     actual: Actual::default(),
                     notes: String::new(),
                 }],
@@ -279,7 +282,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
         Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
-        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost, manual, actual_start, actual_finish } => {
+        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost, manual, actual_start, actual_finish, deadline } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
             let set = |change| Command::SetTask { id, change };
@@ -349,6 +352,12 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 let cents = if text.trim().is_empty() { 0 } else { parse_money(&text)? };
                 if cents != t.fixed_cost.0 {
                     commands.push(set(TaskChange::FixedCost(Money(cents))));
+                }
+            }
+            if let Some(text) = deadline {
+                let d = if text.trim().is_empty() { None } else { Some(end_of_day(p, text.trim())?) };
+                if d != t.deadline {
+                    commands.push(set(TaskChange::Deadline(d)));
                 }
             }
             Ok(batch("Change Task Info", commands).map(|command| Planned { command, created: None, message: None }))
@@ -470,6 +479,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
                     manual_start: None,
+                    deadline: None,
                     actual: Actual::default(),
                 }],
                 dependencies: vec![],
@@ -964,6 +974,7 @@ fn add_recurring(p: &Project, units: &Units, edit: Edit) -> Result<Option<Planne
         leveling_delay: Duration::ZERO,
         fixed_cost: Money(0),
         manual_start: None,
+        deadline: None,
         actual: Actual::default(),
         notes: String::new(),
     };
@@ -1224,6 +1235,7 @@ fn paste_text(p: &Project, units: &Units, after: Option<TaskId>, text: &str) -> 
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
                 manual_start: None,
+                deadline: None,
                 actual: Actual::default(),
                 notes: String::new(),
             }
@@ -1432,6 +1444,7 @@ mod tests {
                     leveling_delay: Duration::ZERO,
                     fixed_cost: Money(0),
                     manual_start: None,
+                    deadline: None,
                     actual: Actual::default(),
                     notes: String::new(),
                 },
@@ -1594,6 +1607,30 @@ mod tests {
     }
 
     #[test]
+    fn a_deadline_is_the_end_of_that_day_and_can_be_cleared() {
+        let (mut p, id) = project(&[("A", 0)]);
+        let info = |d: &str| Edit::UpdateTask {
+            id: id[0].0.to_string(),
+            name: None,
+            duration_text: None,
+            milestone: None,
+            constraint: None,
+            percent_complete: None,
+            notes: None,
+            resources: None,
+            fixed_cost: None,
+            manual: None,
+            actual_start: None,
+            actual_finish: None,
+            deadline: Some(d.into()),
+        };
+        run(&mut p, info("2026-11-20"));
+        assert_eq!(p.tasks[&id[0]].deadline.map(|m| m.to_datetime().to_string()), Some("2026-11-20T17:00:00".into()));
+        run(&mut p, info(""));
+        assert_eq!(p.tasks[&id[0]].deadline, None);
+    }
+
+    #[test]
     fn indent_first_task_does_nothing() {
         let (p, id) = project(&[("A", 0), ("B", 0)]);
         assert!(plan(&p, None, &Units::default(), Edit::Indent { ids: ids(&[id[0]]) }).unwrap().is_none());
@@ -1714,6 +1751,7 @@ mod tests {
             manual: None,
             actual_start: None,
             actual_finish: None,
+            deadline: None,
         };
         let planned = plan(&p, None, &Units::default(), edit).unwrap().unwrap();
         assert_eq!(planned.command.label(), "Change Task Info");
@@ -1726,7 +1764,7 @@ mod tests {
 
         assert_eq!(p.assignments.values().next().map(|a| a.units.0), Some(50), "resources set in the same step");
         assert_eq!(p.tasks[&id[0]].fixed_cost, Money(125_000));
-        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()), manual: None, actual_start: None, actual_finish: None };
+        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()), manual: None, actual_start: None, actual_finish: None, deadline: None };
         assert!(plan(&p, None, &Units::default(), unchanged).unwrap().is_none(), "nothing to undo when nothing changed");
         let no_date = Edit::UpdateTask {
             id: id[0].0.to_string(),
@@ -1741,6 +1779,7 @@ mod tests {
             manual: None,
             actual_start: None,
             actual_finish: None,
+            deadline: None,
         };
         assert_eq!(plan(&p, None, &Units::default(), no_date).err().unwrap().message, "choose a date for “Start no earlier than”");
     }
@@ -1824,7 +1863,7 @@ mod tests {
         let (mut p, id) = project(&[("A", 0)]);
         p.start = Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0));
         let a = id[0].0.to_string();
-        let manual = |on| Edit::UpdateTask { id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: None, fixed_cost: None, manual: Some(on), actual_start: None, actual_finish: None };
+        let manual = |on| Edit::UpdateTask { id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: None, fixed_cost: None, manual: Some(on), actual_start: None, actual_finish: None, deadline: None };
         run(&mut p, manual(true));
         assert_eq!(p.tasks[&id[0]].manual_start, Some(p.start));
         run(&mut p, Edit::MoveTask { id: a.clone(), start_date: "2026-10-08".into() });
@@ -1853,7 +1892,7 @@ mod tests {
         // Typed in Task Info: a finish makes it 100%; clearing the start makes it 0%.
         let info = |start: Option<&str>, finish: Option<&str>| Edit::UpdateTask {
             id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None,
-            resources: None, fixed_cost: None, manual: None, actual_start: start.map(Into::into), actual_finish: finish.map(Into::into),
+            resources: None, fixed_cost: None, manual: None, actual_start: start.map(Into::into), actual_finish: finish.map(Into::into), deadline: None,
         };
         run(&mut p, info(Some("2026-10-06"), Some("2026-10-07")));
         assert_eq!(p.tasks[&id[0]].actual, Actual::Finished { start: at(6, 8), finish: at(7, 17) });

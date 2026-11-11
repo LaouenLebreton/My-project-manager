@@ -54,6 +54,8 @@ function row(name: string, depth = 0): Row {
     actualStart: null,
     actualFinish: null,
     earnedValue: null,
+    deadline: null,
+    missedDeadline: false,
   };
 }
 
@@ -103,6 +105,9 @@ function generate(n: number): { rows: Row[]; links: Link[] } {
     counters[r.depth] = (counters[r.depth] ?? 0) + 1;
     r.wbs = counters.join(".");
   }
+  // One deadline met and one missed, to show both markers.
+  if (rows[2]) Object.assign(rows[2], { deadline: "2026-10-16T17:00:00", missedDeadline: false });
+  if (rows[3]) Object.assign(rows[3], { deadline: "2026-10-08T17:00:00", missedDeadline: true });
   return { rows, links };
 }
 

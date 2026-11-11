@@ -282,6 +282,18 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
       ctx.fillRect(bx1, cy + BAR_HEIGHT / 2 + 1, bx2 - bx1, 3);
       ctx.globalAlpha = 1;
     }
+    // The deadline: a small downward arrow above the row, green, or red when the task finishes later.
+    if (r.deadline) {
+      const dx = x(r.deadline);
+      const top = cy - BAR_HEIGHT / 2 - 3;
+      ctx.fillStyle = r.missedDeadline ? c.critical : "#2e9e4f";
+      ctx.beginPath();
+      ctx.moveTo(dx - 4, top - 5);
+      ctx.lineTo(dx + 4, top - 5);
+      ctx.lineTo(dx, top);
+      ctx.closePath();
+      ctx.fill();
+    }
     if (r.isMilestone) {
       const s = 6;
       ctx.beginPath();

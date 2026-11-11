@@ -21,7 +21,11 @@ manual: boolean | null,
 /**
  * Actual start and finish (`YYYY-MM-DD`; empty clears).
  */
-actualStart: string | null, actualFinish: string | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
+actualStart: string | null, actualFinish: string | null, 
+/**
+ * Deadline (`YYYY-MM-DD`, the end of that working day; empty clears).
+ */
+deadline: string | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
 /**
  * Typed maximum: `100%`, `300%` or `3` (people).
  */

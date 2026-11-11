@@ -270,6 +270,10 @@ pub struct Row {
     pub actual_finish: Option<String>,
     /// Earned value for this task (summaries add up theirs); None without a baseline.
     pub earned_value: Option<EarnedView>,
+    /// When it should be finished by, if set.
+    pub deadline: Option<String>,
+    /// Not finished, and scheduled to finish after its deadline.
+    pub missed_deadline: bool,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -508,6 +512,8 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 fixed_cost_cents: t.fixed_cost.0,
                 actual_start: t.actual.start().map(iso),
                 actual_finish: t.actual.finish().map(iso),
+                deadline: t.deadline.map(iso),
+                missed_deadline: t.percent_complete.get() < 100 && t.deadline.zip(s).is_some_and(|(d, s)| s.early_finish > d),
                 earned_value: earned.as_ref().and_then(|e| e.tasks.get(&r.id)).map(|ev| EarnedView::new(as_of, *ev)),
                 leveled_from: s
                     .filter(|_| t.leveling_delay.get() > 0)

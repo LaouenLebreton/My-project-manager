@@ -169,7 +169,6 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
         "Links to tasks in other projects",
         "Blank rows",
         "Custom fields",
-        "Deadlines",
         "Task calendars",
         "Task priorities",
         "Cost resources",
@@ -278,6 +277,7 @@ fn random_project() -> impl Strategy<Value = Project> {
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(0),
                 manual_start: None,
+                deadline: (k % 4 == 1).then_some(date),
                 actual: Actual::default(),
                 notes: if k % 3 == 0 { format!("Note {k}: <b>&amp;</b>\nline two") } else { String::new() },
             };

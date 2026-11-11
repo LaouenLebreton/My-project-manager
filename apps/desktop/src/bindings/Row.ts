@@ -55,4 +55,12 @@ actualStart: string | null, actualFinish: string | null,
 /**
  * Earned value for this task (summaries add up theirs); None without a baseline.
  */
-earnedValue: EarnedView | null, };
+earnedValue: EarnedView | null, 
+/**
+ * When it should be finished by, if set.
+ */
+deadline: string | null, 
+/**
+ * Not finished, and scheduled to finish after its deadline.
+ */
+missedDeadline: boolean, };

@@ -92,8 +92,8 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
     let cdate = t.constraint.date().map(|m| m.0);
     conn.execute(
         "INSERT OR REPLACE INTO task
-         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             t.id.0.to_string(),
             t.parent.map(|p| p.0.to_string()),
@@ -110,6 +110,7 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
             t.manual_start.map(|m| m.0),
             t.actual.start().map(|m| m.0),
             t.actual.finish().map(|m| m.0),
+            t.deadline.map(|m| m.0),
         ],
     )?;
     Ok(())
@@ -189,6 +190,7 @@ fn task_from_row(r: &Row) -> Result<Task, StoreError> {
         leveling_delay: Duration::minutes(r.get(10)?).map_err(|e| StoreError::Damaged(e.to_string()))?,
         fixed_cost: Money(r.get(11)?),
         manual_start: r.get::<_, Option<i64>>(12)?.map(Moment),
+        deadline: r.get::<_, Option<i64>>(15)?.map(Moment),
         actual: match (r.get::<_, Option<i64>>(13)?, r.get::<_, Option<i64>>(14)?) {
             (None, None) => Actual::NotStarted,
             (Some(s), None) => Actual::Started { start: Moment(s) },
@@ -212,7 +214,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
 
     let mut tasks = BTreeMap::new();
     let mut stmt = conn.prepare(
-        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min FROM task",
+        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min FROM task",
     )?;
     let mut q = stmt.query([])?;
     while let Some(r) = q.next()? {

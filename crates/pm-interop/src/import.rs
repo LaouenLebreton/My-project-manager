@@ -171,6 +171,7 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
                 leveling_delay: Duration::ZERO,
                 fixed_cost: Money(money(t.text_of("FixedCost"))),
                 manual_start,
+                deadline: t.text_of("Deadline").and_then(parse_datetime),
                 actual,
                 notes: t.raw_of("Notes").unwrap_or("").to_owned(),
             },
@@ -287,7 +288,6 @@ fn import_constraint(t: &Element, label: &str, r: &mut ReportBuilder) -> Constra
 /// Task data Super PM does not hold yet, named in plain words.
 fn report_task_extras(t: &Element, label: &str, r: &mut ReportBuilder) {
     let named: &[(&str, &str)] = &[
-        ("Deadline", "Deadlines"),
         ("ExtendedAttribute", "Custom fields"),
         ("Hyperlink", "Hyperlinks"),
         ("HyperlinkAddress", "Hyperlinks"),
