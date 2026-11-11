@@ -2,7 +2,7 @@
 // (progressive disclosure, spec 5.1.8). Each saves as one undoable edit.
 
 import { useEffect, useRef, useState } from "react";
-import { errorMessage, type Edit } from "./api";
+import { api, errorMessage, type Edit } from "./api";
 import type { ConstraintKind } from "./bindings/ConstraintKind";
 import type { Row } from "./bindings/Row";
 import type { Snapshot } from "./bindings/Snapshot";
@@ -660,6 +660,57 @@ export function RecurringTask({ afterId, send, onClose }: { afterId: string | nu
       <p className="secondary small">
         It becomes a summary task with one task per date, each starting no earlier than its date. Dates on non-working days move to the next working day.
       </p>
+    </Sheet>
+  );
+}
+
+/** "14:05", or "Mon 3 Nov 14:05" for an earlier day. */
+function stepTime(at: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} ${time}`;
+}
+
+/**
+ * Edit > Undo History: every change that can be undone (and the undone ones Redo would bring
+ * back), newest first. Choosing one goes back to just before it, or forward to just after it.
+ */
+export function UndoHistory({ onStep, onClose }: { onStep: (undo: number, redo: number) => Promise<void>; onClose: () => void }) {
+  const [steps, setSteps] = useState<import("./bindings/UndoStep").UndoStep[] | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const load = () => void api.undoHistory().then(setSteps, (e) => setProblem(errorMessage(e)));
+  useEffect(load, []);
+  const undone = (steps ?? []).filter((s) => s.undone); // nearest first
+  const done = (steps ?? []).filter((s) => !s.undone); // newest first
+  const go = (undo: number, redo: number) =>
+    void onStep(undo, redo).then(load, (e) => setProblem(errorMessage(e)));
+  return (
+    <Sheet title="Undo History" onClose={onClose}>
+      <p className="secondary small">Choose a change to go back to just before it. Undone changes (greyed) can be brought back the same way.</p>
+      {problem && <p className="error">{problem}</p>}
+      {steps && steps.length === 0 && <p className="secondary">Nothing to undo yet.</p>}
+      <ol className="undo-history">
+        {[...undone].reverse().map((s, k) => (
+          <li key={`r${k}`} className="undone">
+            <button className="link" onClick={() => go(0, undone.length - k)} title="Redo up to and including this change">
+              {s.label}
+            </button>
+            <span className="secondary small">{stepTime(s.at)}</span>
+          </li>
+        ))}
+        <li className="now" aria-label="The project as it is now">
+          Now
+        </li>
+        {done.map((s, k) => (
+          <li key={`d${k}`}>
+            <button className="link" onClick={() => go(k + 1, 0)} title="Undo this change and everything after it">
+              {s.label}
+            </button>
+            <span className="secondary small">{stepTime(s.at)}</span>
+          </li>
+        ))}
+      </ol>
     </Sheet>
   );
 }

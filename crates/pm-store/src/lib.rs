@@ -211,6 +211,17 @@ impl Store {
         Ok(self.top(true)?.map(|(_, _, label)| label))
     }
 
+    /// The undo history, newest first: edits that were undone (Redo brings them back, nearest
+    /// first) and then those that can be undone. At most `limit`.
+    pub fn history(&self, limit: u32) -> Result<Vec<HistoryStep>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.label, c.at, h.undone FROM undo_history h JOIN change_log c ON c.seq = h.log_seq
+             ORDER BY h.undone DESC, CASE WHEN h.undone = 1 THEN -h.pos ELSE h.pos END DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |r| Ok(HistoryStep { label: r.get(0)?, at: r.get(1)?, undone: r.get(2)? }))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Highest change-log sequence number, or 0 for a new file.
     pub fn last_seq(&self) -> Result<i64, StoreError> {
         Ok(self.conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM change_log", [], |r| r.get(0))?)
@@ -386,3 +397,13 @@ fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
 
 #[cfg(test)]
 mod tests;
+
+/// One step of the undo history (Edit > History of Changes).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryStep {
+    pub label: String,
+    /// When it was done.
+    pub at: String,
+    /// Undone: Redo would bring it back.
+    pub undone: bool,
+}

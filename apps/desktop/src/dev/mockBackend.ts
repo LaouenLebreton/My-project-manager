@@ -421,6 +421,14 @@ export function install() {
           return null;
         case "copy_tasks":
           return null;
+        case "undo_history":
+          return [
+            { label: "Rename Task", at: new Date().toISOString(), undone: true },
+            { label: "Change Duration", at: new Date().toISOString(), undone: false },
+            { label: "Insert Task", at: new Date(Date.now() - 86_400_000).toISOString(), undone: false },
+          ];
+        case "step_history":
+          return snapshot();
         case "paste_tasks": {
           const names = String(args.text).split(/\r?\n/).map((l) => l.split("\t").filter(Boolean)[0]?.trim()).filter(Boolean) as string[];
           const pos = args.afterId ? at(String(args.afterId)) + 1 : state.rows.length;

@@ -2079,3 +2079,28 @@ label.indent {
   border-bottom: 1px solid var(--line);
   min-height: 28px;
 }
+
+/* Edit > Undo History */
+.undo-history {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow: auto;
+  min-width: 360px;
+}
+.undo-history li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.undo-history li.undone button {
+  color: var(--text-secondary);
+}
+.undo-history li.now {
+  font-weight: 600;
+  color: AccentColor;
+  border-bottom: 2px solid AccentColor;
+}

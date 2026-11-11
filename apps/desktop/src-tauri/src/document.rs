@@ -206,6 +206,11 @@ impl Document {
         (true, dropped.into_iter().map(|(p, _)| p.command.label()).collect())
     }
 
+    /// Edit > Undo History: the steps, newest first (undone ones, which Redo brings back, first).
+    pub fn history(&self, limit: u32) -> Vec<pm_store::HistoryStep> {
+        self.store.history(limit).unwrap_or_default()
+    }
+
     pub fn undo_label(&self) -> Option<String> {
         self.store.undo_label().ok().flatten()
     }

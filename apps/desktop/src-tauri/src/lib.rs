@@ -145,6 +145,8 @@ pub fn run() {
             ipc::open_sample,
             ipc::apply_edit,
             ipc::copy_tasks,
+            ipc::undo_history,
+            ipc::step_history,
             ipc::paste_tasks,
             ipc::undo,
             ipc::redo,

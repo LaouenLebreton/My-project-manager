@@ -821,6 +821,42 @@ pub fn redo_in(app: &AppHandle, label: &str) -> Result<Snapshot, IpcError> {
     })
 }
 
+/// One step in Edit > Undo History.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoStep {
+    pub label: String,
+    /// When it was done.
+    pub at: String,
+    /// Undone: Redo would bring it back.
+    pub undone: bool,
+}
+
+#[tauri::command]
+pub fn undo_history(window: WebviewWindow, app: AppHandle) -> Result<Vec<UndoStep>, IpcError> {
+    with_doc(&app, window.label(), |doc| Ok(doc.history(200).into_iter().map(|s| UndoStep { label: s.label, at: s.at, undone: s.undone }).collect()))
+}
+
+/// Edit > Undo History: undo (or redo) several steps at once.
+#[tauri::command]
+pub fn step_history(undo: u32, redo: u32, window: WebviewWindow, app: AppHandle) -> Result<Snapshot, IpcError> {
+    let label = window.label();
+    with_doc(&app, label, |doc| {
+        for _ in 0..undo {
+            if doc.undo()?.is_none() {
+                break;
+            }
+        }
+        for _ in 0..redo {
+            if doc.redo()?.is_none() {
+                break;
+            }
+        }
+        Ok(changed(&app, label, doc))
+    })
+}
+
 #[tauri::command]
 pub fn undo(window: WebviewWindow, app: AppHandle) -> Result<Snapshot, IpcError> {
     undo_in(&app, window.label())

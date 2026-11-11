@@ -446,3 +446,19 @@ fn team_changes_are_kept_out_of_undo_and_the_outbox_saved_with_edits() {
     s.set_meta(TEAM_SERVER, None).unwrap();
     assert_eq!(s.meta(TEAM_SERVER).unwrap(), None);
 }
+
+#[test]
+fn the_undo_history_lists_steps_newest_first() {
+    let path = temp_dir().join("h.pmproj");
+    drop(Store::create(&path, &rich_project()).unwrap());
+    let (mut s, mut p) = Store::open(&path).unwrap();
+    for n in 1..=3 {
+        s.apply(&mut p, &add(200 + n), &meta(n)).unwrap();
+    }
+    s.undo(&mut p, &meta(4)).unwrap();
+    let steps = s.history(50).unwrap();
+    assert_eq!(steps.iter().map(|x| x.undone).collect::<Vec<_>>(), [true, false, false], "the undone step (redo) first, then what can be undone");
+    assert_eq!(steps[1].at, meta(2).at, "each step keeps when it was done");
+    assert!(steps.iter().all(|x| !x.label.is_empty()));
+    assert_eq!(s.history(1).unwrap().len(), 1);
+}

@@ -12,7 +12,7 @@ import { Gantt, type GanttHandle } from "./Gantt";
 import { FindBar } from "./FindBar";
 import { HelpSheet } from "./HelpSheet";
 import { ResourceSheet } from "./ResourceSheet";
-import { ConfirmSheet, ProjectInfo, ProjectStatistics, RecurringTask, TaskInfo, UpdateProject, WorkingTime } from "./Sheets";
+import { ConfirmSheet, ProjectInfo, ProjectStatistics, RecurringTask, TaskInfo, UndoHistory, UpdateProject, WorkingTime } from "./Sheets";
 import type { Row } from "./bindings/Row";
 import { Tour } from "./Tour";
 import { WbsChart } from "./WbsChart";
@@ -51,7 +51,7 @@ export function App() {
 
   const [recent, setRecent] = useState<RecentFile[]>([]);
   const [report, setReport] = useState<ReportView | null>(null);
-  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | "recurring" | null>(null);
+  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | "recurring" | "undo" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
   // The task list's filter; the chart shows the same rows.
@@ -221,6 +221,7 @@ export function App() {
         if (e.payload === "view.chat") setView("chat");
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.recurring") setOverlay("recurring");
+        if (e.payload === "edit.undo_history") setOverlay("undo");
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
         if (e.payload === "task.move_up") gridRef.current?.moveRows(false);
@@ -302,6 +303,7 @@ export function App() {
       { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },
       { name: "Outdent Selected Tasks", shortcut: "⇧Tab", run: () => gridRef.current?.indent(true) },
+      { name: "Undo History… (go back to any earlier point)", run: () => setOverlay("undo") },
       { name: "Duplicate Selected Tasks", shortcut: "⌘D", run: () => gridRef.current?.duplicate() },
       ...FILTERS.map((f) => ({ name: `Show: ${f.label}`, run: () => setFilter(f.value) })),
       { name: "Move Selected Tasks Up", shortcut: isMac ? "⌃⌘↑" : "⌥⇧↑", run: () => gridRef.current?.moveRows(false) },
@@ -391,6 +393,14 @@ export function App() {
       )}
       {overlay === "stats" && snapshot && <ProjectStatistics snapshot={snapshot} onClose={() => setOverlay(null)} />}
       {overlay === "update" && snapshot && <UpdateProject snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {overlay === "undo" && snapshot && (
+        <UndoHistory
+          onStep={async (undo, redo) => {
+            setSnapshot(await api.stepHistory(undo, redo));
+          }}
+          onClose={() => setOverlay(null)}
+        />
+      )}
       {overlay === "recurring" && snapshot && <RecurringTask afterId={gridRef.current?.activeRow()?.id ?? null} send={edit} onClose={() => setOverlay(null)} />}
       {overlay === "working" && snapshot && <WorkingTime snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
       {infoRow && <TaskInfo key={infoRow.id} row={infoRow} send={edit} onClose={() => setInfoRow(null)} />}

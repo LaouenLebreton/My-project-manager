@@ -35,6 +35,7 @@ pub mod id {
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
     pub const TASK_INFO: &str = "task.info";
+    pub const UNDO_HISTORY: &str = "edit.undo_history";
     pub const REMINDERS: &str = "window.reminders";
     pub const RECURRING: &str = "task.recurring";
     pub const INDENT: &str = "task.indent";
@@ -178,9 +179,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let undo = item(app, id::UNDO, "Undo", Some("CmdOrCtrl+Z"))?;
     let redo = item(app, id::REDO, "Redo", Some("CmdOrCtrl+Shift+Z"))?;
     let find = item(app, id::FIND, "Find…", Some("CmdOrCtrl+F"))?;
+    let undo_history = item(app, id::UNDO_HISTORY, "Undo History…", None)?;
     let edit = SubmenuBuilder::new(app, "Edit")
         .item(&undo)
         .item(&redo)
+        .item(&undo_history)
         .separator()
         .cut()
         .copy()
@@ -307,7 +310,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, recurring, indent, outdent, move_up, move_down, duplicate, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
+    let document_items = vec![find, undo_history.clone(), task_info, recurring, indent, outdent, move_up, move_down, duplicate, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

@@ -1,6 +1,7 @@
 // Typed wrappers for the Tauri commands in src-tauri/src/ipc.rs.
 // The types in ./bindings are generated from Rust: run `cargo test -p super-pm` after changing them.
 import { invoke } from "@tauri-apps/api/core";
+import type { UndoStep } from "./bindings/UndoStep";
 import type { ProjectRules } from "./bindings/ProjectRules";
 import type { Edit } from "./bindings/Edit";
 import type { EditResult } from "./bindings/EditResult";
@@ -33,6 +34,10 @@ export const api = {
   /** Opening a project resolves with null if it opened in another window (or was cancelled). */
   openSample: () => invoke<Snapshot | null>("open_sample"),
   applyEdit: (edit: Edit) => invoke<EditResult>("apply_edit", { edit }),
+  /** Edit > Undo History: the steps, newest first (undone ones first). */
+  undoHistory: () => invoke<UndoStep[]>("undo_history"),
+  /** Undo `undo` steps, or redo `redo` steps. */
+  stepHistory: (undo: number, redo: number) => invoke<Snapshot>("step_history", { undo, redo }),
   /** Edit > Copy: the app keeps the tasks; `text` is what went on the system clipboard. */
   copyTasks: (ids: string[], text: string) => invoke<void>("copy_tasks", { ids, text }),
   /** Edit > Paste: the copied tasks if `text` is still theirs, otherwise one task per line. */
