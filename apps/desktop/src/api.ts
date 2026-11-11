@@ -34,6 +34,8 @@ export const api = {
   /** Opening a project resolves with null if it opened in another window (or was cancelled). */
   openSample: () => invoke<Snapshot | null>("open_sample"),
   applyEdit: (edit: Edit) => invoke<EditResult>("apply_edit", { edit }),
+  /** File > Print: the system print panel (the page prints only the status report). */
+  printWindow: () => invoke<void>("print_window"),
   /** Edit > Undo History: the steps, newest first (undone ones first). */
   undoHistory: () => invoke<UndoStep[]>("undo_history"),
   /** Undo `undo` steps, or redo `redo` steps. */

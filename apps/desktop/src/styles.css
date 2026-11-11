@@ -2158,3 +2158,78 @@ label.indent {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* Project > Status Report, and what File > Print prints. */
+dialog.status-report {
+  max-width: 760px;
+  width: 92vw;
+}
+.status-report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.status-report h2 {
+  margin: 0;
+}
+.status-report h3 {
+  margin: 18px 0 6px;
+  font-size: 14px;
+}
+.status-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 12px 0 0;
+}
+.status-facts dt {
+  color: var(--text-secondary);
+}
+.status-facts dd {
+  margin: 0;
+}
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.report-table th,
+.report-table td {
+  text-align: left;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.report-table th {
+  background: var(--header-bg);
+  color: var(--header-text);
+}
+.report-table .right {
+  text-align: right;
+}
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  dialog.status-report,
+  dialog.status-report * {
+    visibility: visible;
+  }
+  dialog.status-report {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    border: none;
+    box-shadow: none;
+    overflow: visible;
+  }
+  dialog.status-report::backdrop {
+    display: none;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

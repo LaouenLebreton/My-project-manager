@@ -863,6 +863,13 @@ pub fn step_history(undo: u32, redo: u32, window: WebviewWindow, app: AppHandle)
     })
 }
 
+/// File > Print: the system's print panel for this window (the page shows only the status
+/// report when printed; see styles.css).
+#[tauri::command]
+pub fn print_window(window: WebviewWindow) -> Result<(), IpcError> {
+    window.print().map_err(|e| IpcError { message: format!("printing could not start: {e}") })
+}
+
 #[tauri::command]
 pub fn undo(window: WebviewWindow, app: AppHandle) -> Result<Snapshot, IpcError> {
     undo_in(&app, window.label())

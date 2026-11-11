@@ -19,6 +19,8 @@ pub mod id {
     pub const SAVE_COPY: &str = "file.save_copy";
     pub const IMPORT: &str = "file.import";
     pub const EXPORT: &str = "file.export";
+    pub const EXPORT_CSV: &str = "file.export_csv";
+    pub const STATUS_REPORT: &str = "project.status_report";
     pub const PRINT: &str = "file.print";
     pub const UNDO: &str = "edit.undo";
     pub const REDO: &str = "edit.redo";
@@ -157,6 +159,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     };
     let save_copy = item(app, id::SAVE_COPY, "Save a Copy…", Some("CmdOrCtrl+Shift+S"))?;
     let export = item(app, id::EXPORT, "Export as Microsoft Project XML…", Some("CmdOrCtrl+Shift+E"))?;
+    let export_csv = item(app, id::EXPORT_CSV, "Export Task List as CSV…", None)?;
     let file = SubmenuBuilder::new(app, "File")
         .item(&enabled(id::NEW, "New Project…", Some("CmdOrCtrl+N"))?)
         .item(&enabled(id::NEW_TAB, "New Tab", Some("CmdOrCtrl+T"))?)
@@ -169,6 +172,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .separator()
         .item(&enabled(id::IMPORT, "Import Microsoft Project File…", Some("CmdOrCtrl+Shift+I"))?)
         .item(&export)
+        .item(&export_csv)
         .separator()
         .item(&item(app, id::PRINT, "Print…", Some("CmdOrCtrl+P"))?)
         .build()?;
@@ -234,6 +238,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     }
     let task = task.build()?;
     let project_info = item(app, id::PROJECT_INFO, "Project Info…", None)?;
+    let status_report = item(app, id::STATUS_REPORT, "Status Report…", None)?;
     let working_time = item(app, id::WORKING_TIME, "Working Time…", None)?;
     let level = item(app, id::LEVEL, "Level Resources", None)?;
     let clear_leveling = item(app, id::CLEAR_LEVELING, "Clear Leveling", None)?;
@@ -252,6 +257,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&set_baseline)
         .item(&clear_baseline)
         .item(&update_project)
+        .separator()
+        .item(&status_report)
         .build()?;
 
     let window = SubmenuBuilder::new(app, "Window")
@@ -310,7 +317,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, undo_history.clone(), task_info, recurring, indent, outdent, move_up, move_down, duplicate, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
+    let document_items = vec![export_csv, status_report.clone(), find, undo_history.clone(), task_info, recurring, indent, outdent, move_up, move_down, duplicate, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

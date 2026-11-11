@@ -425,6 +425,7 @@ export function install() {
           state.textEditing.push(args.editing as boolean);
           return null;
         case "copy_tasks":
+        case "print_window":
           return null;
         case "undo_history":
           return [

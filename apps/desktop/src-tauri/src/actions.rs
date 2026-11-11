@@ -414,6 +414,30 @@ pub fn export_with_dialog(app: &AppHandle, label: &str) -> Result<(), IpcError> 
     Ok(())
 }
 
+/// File > Export Task List as CSV.
+pub fn export_csv_with_dialog(app: &AppHandle, label: &str) -> Result<(), IpcError> {
+    let state = app.state::<AppState>();
+    let Some((name, folder)) = state.docs.lock().expect("lock").get(label).map(|d| (files::display_name(&d.path), d.path.parent().map(Path::to_owned)))
+    else {
+        return Ok(());
+    };
+    let mut d = dialog(app, Some(label)).set_title("Export Task List as CSV").set_file_name(format!("{name}.csv")).add_filter("CSV (Excel, Numbers)", &["csv"]);
+    if let Some(dir) = folder {
+        d = d.set_directory(dir);
+    }
+    let Some(choice) = d.blocking_save_file() else { return Ok(()) };
+    let mut path = choice.into_path().map_err(|e| err(e.to_string()))?;
+    if path.extension().is_none() {
+        path.set_extension("csv");
+    }
+    let csv = match state.docs.lock().expect("lock").get(label) {
+        Some(d) => crate::csv::task_list(&crate::ipc::snapshot(d)),
+        None => return Ok(()),
+    };
+    std::fs::write(&path, csv)?;
+    Ok(())
+}
+
 /// Runs a dialog action off the main thread; errors are shown in `label`'s window.
 pub fn spawn_dialog(app: &AppHandle, label: Option<String>, action: impl FnOnce(&AppHandle, Option<&str>) -> Result<(), IpcError> + Send + 'static) {
     let app = app.clone();

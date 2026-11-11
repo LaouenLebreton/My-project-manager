@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { StatusReport } from "./StatusReport";
 import { FirstSteps } from "./FirstSteps";
 import { FILTERS, filterRows, type TaskFilter } from "./filter";
 import { isMac } from "./platform";
@@ -52,7 +53,7 @@ export function App() {
 
   const [recent, setRecent] = useState<RecentFile[]>([]);
   const [report, setReport] = useState<ReportView | null>(null);
-  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | "recurring" | "undo" | null>(null);
+  const [overlay, setOverlay] = useState<"help" | "tour" | "commands" | "project" | "working" | "update" | "stats" | "recurring" | "undo" | "report" | "print" | null>(null);
   const [infoRow, setInfoRow] = useState<Row | null>(null);
   const [finding, setFinding] = useState(false);
   // The task list's filter; the chart shows the same rows.
@@ -223,6 +224,8 @@ export function App() {
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.recurring") setOverlay("recurring");
         if (e.payload === "edit.undo_history") setOverlay("undo");
+        if (e.payload === "project.status_report") setOverlay("report");
+        if (e.payload === "file.print") setOverlay("print");
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
         if (e.payload === "task.move_up") gridRef.current?.moveRows(false);
@@ -304,6 +307,7 @@ export function App() {
       { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },
       { name: "Outdent Selected Tasks", shortcut: "⇧Tab", run: () => gridRef.current?.indent(true) },
+      { name: "Status Report… (where the project stands, printable)", run: () => setOverlay("report") },
       { name: "Undo History… (go back to any earlier point)", run: () => setOverlay("undo") },
       { name: "Duplicate Selected Tasks", shortcut: "⌘D", run: () => gridRef.current?.duplicate() },
       ...FILTERS.map((f) => ({ name: `Show: ${f.label}`, run: () => setFilter(f.value) })),
@@ -394,6 +398,7 @@ export function App() {
       )}
       {overlay === "stats" && snapshot && <ProjectStatistics snapshot={snapshot} onClose={() => setOverlay(null)} />}
       {overlay === "update" && snapshot && <UpdateProject snapshot={snapshot} send={edit} onClose={() => setOverlay(null)} />}
+      {(overlay === "report" || overlay === "print") && snapshot && <StatusReport snapshot={snapshot} printNow={overlay === "print"} onClose={() => setOverlay(null)} />}
       {overlay === "undo" && snapshot && (
         <UndoHistory
           onStep={async (undo, redo) => {

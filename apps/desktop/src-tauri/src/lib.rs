@@ -6,6 +6,7 @@ mod hosting;
 mod ipc;
 mod menu;
 mod platform;
+mod csv;
 mod mpp;
 mod portfolio;
 mod reminders;
@@ -42,6 +43,9 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
         menu::id::IMPORT => return actions::spawn_dialog(app, label, |a, l| actions::import_with_dialog(a, l).map(|_| ())),
         menu::id::EXPORT => {
             return actions::spawn_dialog(app, label, |a, l| l.map_or(Ok(()), |l| actions::export_with_dialog(a, l)));
+        }
+        menu::id::EXPORT_CSV => {
+            return actions::spawn_dialog(app, label, |a, l| l.map_or(Ok(()), |l| actions::export_csv_with_dialog(a, l)));
         }
         menu::id::SAVE_COPY => {
             return actions::spawn_dialog(app, label, |a, l| l.map_or(Ok(()), |l| actions::save_copy_with_dialog(a, l)));
@@ -145,6 +149,7 @@ pub fn run() {
             ipc::open_sample,
             ipc::apply_edit,
             ipc::copy_tasks,
+            ipc::print_window,
             ipc::undo_history,
             ipc::step_history,
             ipc::paste_tasks,
