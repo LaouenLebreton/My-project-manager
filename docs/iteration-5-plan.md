@@ -7,7 +7,7 @@ its own, test-first, in this order.
 
 1. **[Done]** **Reorder tasks:** Task > Move Up / Move Down (⌃⌘↑ / ⌃⌘↓) for the selection, and dragging
    rows by their number. Tasks keep their links; summaries move with what is inside them.
-2. **Copy, paste, duplicate tasks** (⌘C / ⌘V / ⌘D): tasks with the links between them and their
+2. **[Done]** **Copy, paste, duplicate tasks** (⌘C / ⌘V / ⌘D): tasks with the links between them and their
    resources; across projects too.
 3. **Filters** in the task list: all, late, critical, milestones, a resource's tasks.
 4. **Undo history** you can see: Edit > History of Changes…, step back to any point.

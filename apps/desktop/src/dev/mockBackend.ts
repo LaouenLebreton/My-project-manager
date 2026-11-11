@@ -419,6 +419,15 @@ export function install() {
         case "set_text_editing":
           state.textEditing.push(args.editing as boolean);
           return null;
+        case "copy_tasks":
+          return null;
+        case "paste_tasks": {
+          const names = String(args.text).split(/\r?\n/).map((l) => l.split("\t").filter(Boolean)[0]?.trim()).filter(Boolean) as string[];
+          const pos = args.afterId ? at(String(args.afterId)) + 1 : state.rows.length;
+          const added = names.map((n) => ({ ...row(n, 0), wbs: "new" }));
+          state.rows.splice(pos, 0, ...added);
+          return { snapshot: snapshot(), createdId: added[0]?.id ?? null, message: null };
+        }
         case "apply_edit": {
           const e = args.edit as Edit;
           state.edits.push(e);

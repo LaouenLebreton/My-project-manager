@@ -33,6 +33,8 @@ pub struct AppState {
     pub focused: Mutex<Option<String>>,
     /// Import reports for windows that had not loaded yet when the import finished.
     pub pending_reports: Mutex<HashMap<String, ReportView>>,
+    /// Tasks copied with Edit > Copy, to paste in any project window.
+    pub clipboard: Mutex<Option<crate::edits::TaskClip>>,
 }
 
 fn err(message: impl Into<String>) -> IpcError {

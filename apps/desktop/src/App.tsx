@@ -87,6 +87,14 @@ export function App() {
   }, []);
 
   /** For the grid: errors are shown next to the cell, so they are passed back, not shown here. */
+  const paste = useCallback(async (afterId: string | null, text: string) => {
+    const result = await api.pasteTasks(afterId, text);
+    setSnapshot(result.snapshot);
+    setError(null);
+    if (result.message) setNotice(result.message);
+    return result;
+  }, []);
+
   const edit = useCallback(async (e: Edit) => {
     const t0 = performance.now();
     const result = await api.applyEdit(e);
@@ -212,6 +220,7 @@ export function App() {
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
         if (e.payload === "task.move_up") gridRef.current?.moveRows(false);
+        if (e.payload === "task.duplicate") gridRef.current?.duplicate();
         if (e.payload === "task.move_down") gridRef.current?.moveRows(true);
         if (e.payload === "project.info") setOverlay("project");
         if (e.payload === "project.working_time") setOverlay("working");
@@ -289,6 +298,7 @@ export function App() {
       { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },
       { name: "Outdent Selected Tasks", shortcut: "⇧Tab", run: () => gridRef.current?.indent(true) },
+      { name: "Duplicate Selected Tasks", shortcut: "⌘D", run: () => gridRef.current?.duplicate() },
       { name: "Move Selected Tasks Up", shortcut: isMac ? "⌃⌘↑" : "⌥⇧↑", run: () => gridRef.current?.moveRows(false) },
       { name: "Move Selected Tasks Down", shortcut: isMac ? "⌃⌘↓" : "⌥⇧↓", run: () => gridRef.current?.moveRows(true) },
       { name: "Delete Selected Tasks", shortcut: "⌫", run: () => gridRef.current?.deleteSelection() },
@@ -531,6 +541,7 @@ export function App() {
           <div className="pane" style={{ width: gridWidth }}>
             <Grid
               ref={gridRef}
+              onPaste={paste}
               snapshot={snapshot}
               onEdit={edit}
               onTextEditing={textEditing}

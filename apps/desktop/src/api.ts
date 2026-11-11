@@ -33,6 +33,10 @@ export const api = {
   /** Opening a project resolves with null if it opened in another window (or was cancelled). */
   openSample: () => invoke<Snapshot | null>("open_sample"),
   applyEdit: (edit: Edit) => invoke<EditResult>("apply_edit", { edit }),
+  /** Edit > Copy: the app keeps the tasks; `text` is what went on the system clipboard. */
+  copyTasks: (ids: string[], text: string) => invoke<void>("copy_tasks", { ids, text }),
+  /** Edit > Paste: the copied tasks if `text` is still theirs, otherwise one task per line. */
+  pasteTasks: (afterId: string | null, text: string) => invoke<EditResult>("paste_tasks", { afterId, text }),
   undo: () => invoke<Snapshot>("undo"),
   redo: () => invoke<Snapshot>("redo"),
   /** Resolve with null when the user cancels the dialog. */

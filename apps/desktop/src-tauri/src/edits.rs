@@ -88,6 +88,12 @@ pub enum Edit {
     MoveTasks { ids: Vec<String>, down: bool },
     /// Dragged rows: the selected tasks go just before (or after) `targetId`, at its level.
     MoveTo { ids: Vec<String>, target_id: String, after: bool },
+    /// Task > Duplicate: copies of the selected tasks (with their subtasks, the links between
+    /// them and their resources) right after them.
+    DuplicateTasks { ids: Vec<String> },
+    /// Text pasted from elsewhere (a list of names, a spreadsheet column): one task per line,
+    /// named by the line's first column, after `afterId` (or at the end).
+    PasteText { after_id: Option<String>, text: String },
     /// WBS chart: drag a box onto another (or onto the project) to move it underneath, at the end.
     MoveUnder { id: String, parent_id: Option<String> },
     /// Project > Level Resources: delay tasks so nobody is over-allocated.
@@ -474,6 +480,13 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
         Edit::MoveTo { ids, target_id, after } => {
             move_to(p, &parse_ids(&ids)?, task_id(&target_id)?, after).map(|c| c.map(|command| Planned { command, created: None, message: None }))
         }
+        Edit::DuplicateTasks { ids } => {
+            let selected = parse_ids(&ids)?;
+            let Some(clip) = copy_tasks(p, &selected) else { return Ok(None) };
+            let tops = top_level_of_selection(p, &selected);
+            paste_with_label(p, &clip, tops.last().copied(), "Duplicate")
+        }
+        Edit::PasteText { after_id, text } => paste_text(p, units, after_id.as_deref().map(task_id).transpose()?, &text),
         Edit::MoveUnder { id, parent_id } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
@@ -1072,6 +1085,154 @@ fn top_level_of_selection(p: &Project, selected: &HashSet<TaskId>) -> Vec<TaskId
         .collect()
 }
 
+/// Tasks copied (Edit > Copy) with what goes with them, to paste in this or another project.
+#[derive(Clone, Debug)]
+pub struct TaskClip {
+    /// The copied tasks and everything inside them, in outline order.
+    pub tasks: Vec<Task>,
+    /// Links between copied tasks.
+    pub links: Vec<Dependency>,
+    /// Who works on them: the resource as it was (matched by name in another project), and how much.
+    pub assignments: Vec<(TaskId, Resource, ResourceUnits)>,
+    /// The names put on the system clipboard with them, so a paste of this copy is recognised.
+    pub text: String,
+}
+
+/// Edit > Copy: the selected tasks with their subtasks, links among them and resources.
+pub fn copy_tasks(p: &Project, selected: &HashSet<TaskId>) -> Option<TaskClip> {
+    let tops: HashSet<TaskId> = top_level_of_selection(p, selected).into_iter().collect();
+    if tops.is_empty() {
+        return None;
+    }
+    let within = |id: TaskId| {
+        let mut cur = Some(id);
+        while let Some(c) = cur {
+            if tops.contains(&c) {
+                return true;
+            }
+            cur = p.tasks.get(&c).and_then(|t| t.parent);
+        }
+        false
+    };
+    let rows: Vec<_> = outline(p).into_iter().filter(|r| within(r.id)).collect();
+    let ids: HashSet<TaskId> = rows.iter().map(|r| r.id).collect();
+    let base = rows.iter().map(|r| r.depth).min().unwrap_or(0);
+    Some(TaskClip {
+        tasks: rows.iter().map(|r| p.tasks[&r.id].clone()).collect(),
+        links: p.dependencies.values().filter(|d| ids.contains(&d.predecessor) && ids.contains(&d.successor)).cloned().collect(),
+        assignments: p.assignments.values().filter(|a| ids.contains(&a.task)).filter_map(|a| p.resources.get(&a.resource).map(|r| (a.task, r.clone(), a.units))).collect(),
+        text: rows.iter().map(|r| format!("{}{}", "\t".repeat(r.depth - base), p.tasks[&r.id].name)).collect::<Vec<_>>().join("\n"),
+    })
+}
+
+/// Edit > Paste of copied tasks: new copies after `after` (at its level), or at the end.
+pub fn paste_tasks(p: &Project, clip: &TaskClip, after: Option<TaskId>) -> Result<Option<Planned>, IpcError> {
+    paste_with_label(p, clip, after, "Paste")
+}
+
+fn paste_with_label(p: &Project, clip: &TaskClip, after: Option<TaskId>, label: &str) -> Result<Option<Planned>, IpcError> {
+    if clip.tasks.is_empty() {
+        return Ok(None);
+    }
+    let after = after.map(|a| task(p, a)).transpose()?;
+    let parent = after.and_then(|t| t.parent);
+    let keys = child_keys(p, parent);
+    let (mut prev, next) = match after {
+        Some(a) => (Some(a.sort_key.clone()), keys.iter().copied().find(|k| **k > a.sort_key).cloned()),
+        None => (keys.last().copied().cloned(), None),
+    };
+    let new_ids: HashMap<TaskId, TaskId> = clip.tasks.iter().map(|t| (t.id, TaskId(new_id()))).collect();
+    let mut tasks = Vec::new();
+    for t in &clip.tasks {
+        let mut copy = t.clone();
+        copy.id = new_ids[&t.id];
+        match t.parent.and_then(|q| new_ids.get(&q)) {
+            Some(q) => copy.parent = Some(*q),
+            None => {
+                copy.parent = parent;
+                copy.sort_key = SortKey::between(prev.as_ref(), next.as_ref());
+                prev = Some(copy.sort_key.clone());
+            }
+        }
+        tasks.push(copy);
+    }
+    let dependencies = clip
+        .links
+        .iter()
+        .map(|d| Dependency { id: DependencyId(new_id()), predecessor: new_ids[&d.predecessor], successor: new_ids[&d.successor], kind: d.kind, lag: d.lag })
+        .collect();
+    // People: the same resource in the same project; elsewhere one with the same name, or a
+    // copy of theirs added to the pool.
+    let mut resource_for: HashMap<ResourceId, ResourceId> = HashMap::new();
+    let mut new_resources = Vec::new();
+    let mut last_key = { let mut k: Vec<&SortKey> = p.resources.values().map(|r| &r.sort_key).collect(); k.sort(); k.last().copied().cloned() };
+    let mut assignments = Vec::new();
+    for (task, res, units) in &clip.assignments {
+        let id = match resource_for.get(&res.id) {
+            Some(id) => *id,
+            None => {
+                let found = p.resources.get(&res.id).map(|r| r.id).or_else(|| p.resources.values().find(|r| r.name.trim().eq_ignore_ascii_case(res.name.trim())).map(|r| r.id));
+                let id = found.unwrap_or_else(|| {
+                    let key = SortKey::between(last_key.as_ref(), None);
+                    last_key = Some(key.clone());
+                    let copy = Resource { id: ResourceId(new_id()), sort_key: key, ..res.clone() };
+                    let id = copy.id;
+                    new_resources.push(copy);
+                    id
+                });
+                resource_for.insert(res.id, id);
+                id
+            }
+        };
+        assignments.push(Assignment { id: AssignmentId(new_id()), task: new_ids[task], resource: id, units: *units });
+    }
+    let first = tasks.first().map(|t| t.id);
+    let mut commands = vec![Command::InsertTasks { tasks, dependencies }];
+    if !assignments.is_empty() {
+        commands.push(Command::InsertResources { resources: new_resources, assignments });
+    }
+    Ok(Some(Planned { command: Command::Batch { label: label.into(), commands }, created: first, message: None }))
+}
+
+/// Pasted text: one new task per non-empty line, named by its first column.
+fn paste_text(p: &Project, units: &Units, after: Option<TaskId>, text: &str) -> Result<Option<Planned>, IpcError> {
+    let names: Vec<String> = text.lines().filter_map(|l| l.split('\t').next()).map(|n| n.trim().to_owned()).filter(|n| !n.is_empty()).take(1000).collect();
+    if names.is_empty() {
+        return Ok(None);
+    }
+    let after_task = after.map(|a| task(p, a)).transpose()?;
+    let parent = after_task.and_then(|t| t.parent);
+    let keys = child_keys(p, parent);
+    let (mut prev, next) = match after_task {
+        Some(a) => (Some(a.sort_key.clone()), keys.iter().copied().find(|k| **k > a.sort_key).cloned()),
+        None => (keys.last().copied().cloned(), None),
+    };
+    let tasks: Vec<Task> = names
+        .into_iter()
+        .map(|name| {
+            let key = SortKey::between(prev.as_ref(), next.as_ref());
+            prev = Some(key.clone());
+            Task {
+                id: TaskId(new_id()),
+                parent,
+                sort_key: key,
+                name,
+                duration: Duration::minutes(units.minutes_per_day).expect("positive"),
+                is_milestone: false,
+                constraint: Constraint::AsSoonAsPossible,
+                percent_complete: Percent::default(),
+                leveling_delay: Duration::ZERO,
+                fixed_cost: Money(0),
+                manual_start: None,
+                actual: Actual::default(),
+                notes: String::new(),
+            }
+        })
+        .collect();
+    let first = tasks.first().map(|t| t.id);
+    Ok(Some(Planned { command: Command::Batch { label: "Paste".into(), commands: vec![Command::InsertTasks { tasks, dependencies: vec![] }] }, created: first, message: None }))
+}
+
 /// Children of `parent` in order.
 fn siblings(p: &Project, parent: Option<TaskId>) -> Vec<TaskId> {
     let mut list: Vec<&Task> = p.tasks.values().filter(|t| t.parent == parent).collect();
@@ -1388,6 +1549,48 @@ mod tests {
         // A summary cannot go inside itself.
         let e = plan(&p, None, &Units::default(), Edit::MoveTo { ids: ids(&[id[1]]), target_id: id[2].0.to_string(), after: true }).err().unwrap();
         assert_eq!(e.message, "a task cannot move inside itself");
+    }
+
+    /// A, then B with B1 → B2 (linked, Alex on B1), then C.
+    fn copy_source() -> (Project, Vec<TaskId>) {
+        let (mut p, id) = project(&[("A", 0), ("B", 0), ("B1", 1), ("B2", 1), ("C", 0)]);
+        run(&mut p, Edit::AddLink { predecessor_id: id[2].0.to_string(), successor_id: id[3].0.to_string() });
+        run(&mut p, Edit::SetTaskResources { id: id[2].0.to_string(), text: "Alex".into() });
+        (p, id)
+    }
+
+    #[test]
+    fn duplicate_copies_subtasks_links_and_people() {
+        let (mut p, id) = copy_source();
+        run(&mut p, Edit::DuplicateTasks { ids: ids(&[id[1]]) });
+        assert_eq!(shape(&p), s(&[("A", 0), ("B", 0), ("B1", 1), ("B2", 1), ("B", 0), ("B1", 1), ("B2", 1), ("C", 0)]));
+        assert_eq!(p.dependencies.len(), 2, "the copy's B1 → B2 link is copied too");
+        assert_eq!(p.assignments.len(), 2, "Alex is on both B1s");
+        assert_eq!(p.resources.len(), 1, "same project: same Alex");
+    }
+
+    #[test]
+    fn paste_into_another_project_brings_the_people_by_name() {
+        let (src, id) = copy_source();
+        let clip = copy_tasks(&src, &[id[1]].into_iter().collect()).unwrap();
+        let (mut dst, did) = project(&[("Z", 0)]);
+        let planned = paste_tasks(&dst, &clip, Some(did[0])).unwrap().unwrap();
+        apply(&mut dst, &planned.command).unwrap();
+        assert_eq!(shape(&dst), s(&[("Z", 0), ("B", 0), ("B1", 1), ("B2", 1)]));
+        assert_eq!((dst.dependencies.len(), dst.assignments.len()), (1, 1));
+        assert_eq!(dst.resources.values().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Alex"]);
+        // Pasting again reuses that Alex.
+        let again = paste_tasks(&dst, &clip, None).unwrap().unwrap();
+        apply(&mut dst, &again.command).unwrap();
+        assert_eq!(dst.resources.len(), 1);
+    }
+
+    #[test]
+    fn pasted_text_becomes_one_task_per_line() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0)]);
+        run(&mut p, Edit::PasteText { after_id: Some(id[0].0.to_string()), text: "One\t3d\r\nTwo\n\n  \n".into() });
+        assert_eq!(shape(&p), s(&[("A", 0), ("One", 0), ("Two", 0), ("B", 0)]));
+        assert!(plan(&p, None, &Units::default(), Edit::PasteText { after_id: None, text: " \n".into() }).unwrap().is_none());
     }
 
     #[test]

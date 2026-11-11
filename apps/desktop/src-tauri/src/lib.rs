@@ -144,6 +144,8 @@ pub fn run() {
             ipc::take_import_report,
             ipc::open_sample,
             ipc::apply_edit,
+            ipc::copy_tasks,
+            ipc::paste_tasks,
             ipc::undo,
             ipc::redo,
             ipc::set_text_editing,

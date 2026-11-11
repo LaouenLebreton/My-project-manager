@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { keys } from "./platform";
-import { errorMessage, type Edit, type Snapshot } from "./api";
+import { api, errorMessage, type Edit, type Snapshot } from "./api";
 import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
 import { formatDate, formatDateTime, formatDays, formatMoney } from "./format";
@@ -118,6 +118,8 @@ export interface GridProps {
   /** Vertical scroll position, shared with the Gantt chart. */
   onScrollTop: (scrollTop: number) => void;
   onSelectionChange: (ids: Set<string>) => void;
+  /** Edit > Paste: `text` from the clipboard, pasted after `afterId`. */
+  onPaste: (afterId: string | null, text: string) => Promise<EditResult>;
   /** An edit the person may not make in this team project: why, for a notice. */
   onBlocked?: (reason: string) => void;
 }
@@ -130,6 +132,8 @@ export interface GridHandle {
   indent: (outdent: boolean) => void;
   /** Task > Move Up / Move Down. */
   moveRows: (down: boolean) => void;
+  /** Task > Duplicate. */
+  duplicate: () => void;
   addTaskBelow: () => void;
   deleteSelection: () => void;
   /** The task under the cursor, for Task Info. */
@@ -152,7 +156,7 @@ interface Editing {
  * Only visible rows are rendered, so thousands of tasks scroll smoothly.
  */
 export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
-  { snapshot, onEdit, onTextEditing, onScrollTop, onSelectionChange, onBlocked },
+  { snapshot, onEdit, onPaste, onTextEditing, onScrollTop, onSelectionChange, onBlocked },
   handle,
 ) {
   const rows = snapshot.rows;
@@ -234,6 +238,10 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       if (bodyRef.current) bodyRef.current.scrollTop += dy;
     },
     indent: (outdent: boolean) => indent(outdent),
+    duplicate: () => {
+      const ids = selection.length ? selection.map((r) => r.id) : current ? [current.id] : [];
+      if (ids.length) void send({ kind: "DuplicateTasks", ids });
+    },
     moveRows: (down: boolean) => {
       const ids = selection.length ? selection.map((r) => r.id) : current ? [current.id] : [];
       if (ids.length) void reorder({ kind: "MoveTasks", ids, down }, ids);
@@ -348,6 +356,52 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       busy.current = false;
     }
   };
+
+  // Edit > Copy / Cut / Paste while the list (not a cell editor) has focus. The names go on the
+  // system clipboard (one per line, indented by level), so they paste into other apps; the app
+  // keeps the full tasks for pasting in any project.
+  const clipRef = useRef({ selection, current, rows });
+  clipRef.current = { selection, current, rows };
+  useEffect(() => {
+    const inList = () => document.activeElement === gridRef.current && !editingRef.current;
+    const copy = (e: ClipboardEvent, cut: boolean) => {
+      const { selection: sel } = clipRef.current;
+      if (!inList() || !sel.length || !e.clipboardData) return;
+      e.preventDefault();
+      const base = Math.min(...sel.map((r) => r.depth));
+      const text = sel.map((r) => "\t".repeat(r.depth - base) + r.name).join("\n");
+      e.clipboardData.setData("text/plain", text);
+      const ids = sel.map((r) => r.id);
+      void api.copyTasks(ids, text).then(() => (cut ? send({ kind: "DeleteTasks", ids }) : null), (err) => onBlocked?.(errorMessage(err)));
+    };
+    const onCopy = (e: ClipboardEvent) => copy(e, false);
+    const onCut = (e: ClipboardEvent) => copy(e, true);
+    const onPasteEvent = (e: ClipboardEvent) => {
+      if (!inList() || !e.clipboardData) return;
+      const text = e.clipboardData.getData("text/plain");
+      if (!text.trim()) return;
+      e.preventDefault();
+      const { current: cur, rows: all } = clipRef.current;
+      const afterId = cur?.id ?? all.at(-1)?.id ?? null;
+      void onPaste(afterId, text).then(
+        (result) => {
+          if (result.createdId) {
+            const at = result.snapshot.rows.findIndex((r) => r.id === result.createdId);
+            if (at >= 0) moveTo(at, active.col);
+          }
+        },
+        (err) => onBlocked?.(errorMessage(err)),
+      );
+    };
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCut);
+    document.addEventListener("paste", onPasteEvent);
+    return () => {
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("cut", onCut);
+      document.removeEventListener("paste", onPasteEvent);
+    };
+  });
 
   // Dragging rows by their number: where they would land (`index` rows from the top, before or
   // after it), shown as a line, applied on release.

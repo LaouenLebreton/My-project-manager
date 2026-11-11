@@ -747,7 +747,42 @@ pub fn recent_files(app: AppHandle) -> Vec<RecentFile> {
 pub fn apply_edit(edit: Edit, window: WebviewWindow, app: AppHandle) -> Result<EditResult, IpcError> {
     let label = window.label();
     with_doc(&app, label, |doc| {
-        let (created_id, message) = match plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, edit)? {
+        let planned = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, edit)?;
+        apply_planned(&app, label, doc, planned)
+    })
+}
+
+/// Edit > Copy in the task list: keeps the tasks for pasting (in any project). `text` is what
+/// the list put on the system clipboard; a later paste of the same text pastes these tasks.
+#[tauri::command]
+pub fn copy_tasks(ids: Vec<String>, text: String, window: WebviewWindow, app: AppHandle) -> Result<(), IpcError> {
+    let selected = ids.iter().map(|i| uuid::Uuid::parse_str(i).map(pm_core::TaskId)).collect::<Result<_, _>>().map_err(|e| IpcError { message: e.to_string() })?;
+    let clip = with_doc(&app, window.label(), |doc| Ok(crate::edits::copy_tasks(&doc.project, &selected)))?.map(|c| crate::edits::TaskClip { text, ..c });
+    *app.state::<crate::actions::AppState>().clipboard.lock().expect("lock") = clip;
+    Ok(())
+}
+
+/// Edit > Paste in the task list: the copied tasks if `text` (the system clipboard) is still
+/// what was copied, otherwise one task per line of the text.
+#[tauri::command]
+pub fn paste_tasks(after_id: Option<String>, text: String, window: WebviewWindow, app: AppHandle) -> Result<EditResult, IpcError> {
+    let clip = app.state::<crate::actions::AppState>().clipboard.lock().expect("lock").clone().filter(|c| c.text.trim() == text.trim());
+    let label = window.label();
+    with_doc(&app, label, |doc| {
+        let planned = match &clip {
+            Some(c) => {
+                let after = after_id.as_deref().map(uuid::Uuid::parse_str).transpose().map_err(|e| IpcError { message: e.to_string() })?.map(pm_core::TaskId);
+                crate::edits::paste_tasks(&doc.project, c, after)?
+            }
+            None => plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::PasteText { after_id, text })?,
+        };
+        apply_planned(&app, label, doc, planned)
+    })
+}
+
+fn apply_planned(app: &AppHandle, label: &str, doc: &mut crate::document::Document, planned: Option<crate::edits::Planned>) -> Result<EditResult, IpcError> {
+    {
+        let (created_id, message) = match planned {
             Some(planned) => {
                 // An empty batch (leveling with nothing to change) only carries its message.
                 if !matches!(&planned.command, pm_core::Command::Batch { commands, .. } if commands.is_empty()) {
@@ -757,8 +792,8 @@ pub fn apply_edit(edit: Edit, window: WebviewWindow, app: AppHandle) -> Result<E
             }
             None => (None, None),
         };
-        Ok(EditResult { snapshot: changed(&app, label, doc), created_id, message })
-    })
+        Ok(EditResult { snapshot: changed(app, label, doc), created_id, message })
+    }
 }
 
 /// The grid reports when a cell editor opens and closes (see [`AppState::editing_text`]).
