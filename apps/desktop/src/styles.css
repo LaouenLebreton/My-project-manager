@@ -2104,3 +2104,57 @@ label.indent {
   color: AccentColor;
   border-bottom: 2px solid AccentColor;
 }
+
+/* First steps on a project (bottom right of the task view). */
+.workspace {
+  position: relative;
+}
+.first-steps {
+  position: absolute;
+  right: 16px;
+  bottom: 48px;
+  z-index: 5;
+  width: 300px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+}
+.first-steps header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.first-steps header .link {
+  margin-left: auto;
+  font-size: 16px;
+  line-height: 1;
+}
+.first-steps ol {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.first-steps li {
+  display: flex;
+  gap: 8px;
+}
+.first-steps li.done {
+  color: var(--text-secondary);
+}
+.first-steps li.done > span {
+  color: #34c759;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

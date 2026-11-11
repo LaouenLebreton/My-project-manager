@@ -11,7 +11,7 @@ its own, test-first, in this order.
    resources; across projects too.
 3. **[Done]** **Filters** in the task list: all, late, critical, milestones, a resource's tasks.
 4. **[Done]** **Undo history** you can see: Edit > History of Changes…, step back to any point.
-5. **First steps:** a short checklist on a new project (add tasks, link them, assign people,
+5. **[Done]** **First steps:** a short checklist on a new project (add tasks, link them, assign people,
    set a baseline), each step ticked as it is done.
 6. **Accessibility pass** against `accessibility-checklist.md`.
 

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { FirstSteps } from "./FirstSteps";
 import { FILTERS, filterRows, type TaskFilter } from "./filter";
 import { isMac } from "./platform";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -613,6 +614,12 @@ export function App() {
             onScrollBy={(dy) => gridRef.current?.scrollBy(dy)}
             onMessage={setMessage}
             ref={ganttRef}
+          />
+          <FirstSteps
+            snapshot={snapshot}
+            onAddTask={() => gridRef.current?.addTaskBelow()}
+            onSetBaseline={() => void edit({ kind: "SetBaseline" }).catch((err) => setError(errorMessage(err)))}
+            onShowResources={() => setView("resources")}
           />
         </div>
         </>
