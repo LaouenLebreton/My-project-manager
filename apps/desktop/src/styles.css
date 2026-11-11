@@ -2054,3 +2054,17 @@ label.indent {
 .workload-table tbody tr > td.over {
   background: color-mix(in srgb, var(--gantt-critical) 22%, Canvas);
 }
+
+/* Dragging rows: the row number is the handle; a line shows where they will land. */
+.grid-row > .cell:first-child {
+  cursor: grab;
+}
+.drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: AccentColor;
+  z-index: 4;
+  pointer-events: none;
+}

@@ -128,6 +128,8 @@ export interface GridHandle {
   scrollBy: (dy: number) => void;
   /** For the command bar: act on the selection. */
   indent: (outdent: boolean) => void;
+  /** Task > Move Up / Move Down. */
+  moveRows: (down: boolean) => void;
   addTaskBelow: () => void;
   deleteSelection: () => void;
   /** The task under the cursor, for Task Info. */
@@ -232,6 +234,10 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       if (bodyRef.current) bodyRef.current.scrollTop += dy;
     },
     indent: (outdent: boolean) => indent(outdent),
+    moveRows: (down: boolean) => {
+      const ids = selection.length ? selection.map((r) => r.id) : current ? [current.id] : [];
+      if (ids.length) void reorder({ kind: "MoveTasks", ids, down }, ids);
+    },
     addTaskBelow: () => void send({ kind: "AddTask", afterId: current?.id ?? rows.at(-1)?.id ?? null, name: "New task" }),
     deleteSelection: () => {
       if (selection.length) void send({ kind: "DeleteTasks", ids: selection.map((r) => r.id) });
@@ -321,6 +327,54 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
   const cancel = () => {
     setEditing(null);
     focusGrid();
+  };
+
+  /** A reorder: the selection follows the moved tasks to their new rows. */
+  const reorder = async (edit: Edit, ids: string[]) => {
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      const result = await onEdit(edit);
+      rowCountRef.current = result.snapshot.rows.length + 1;
+      const wanted = new Set(ids);
+      const at = result.snapshot.rows.flatMap((r, i) => (wanted.has(r.id) ? [i] : []));
+      if (at.length) {
+        setAnchor(at[0]);
+        setActive((a) => ({ row: at[at.length - 1], col: a.col }));
+      }
+    } catch (e) {
+      onBlocked?.(errorMessage(e));
+    } finally {
+      busy.current = false;
+    }
+  };
+
+  // Dragging rows by their number: where they would land (`index` rows from the top, before or
+  // after it), shown as a line, applied on release.
+  const [drop, setDrop] = useState<{ index: number; after: boolean } | null>(null);
+  const startRowDrag = (startY: number, ids: string[]) => {
+    const body = bodyRef.current;
+    if (!body) return;
+    let target: { index: number; after: boolean } | null = null;
+    const where = (clientY: number) => {
+      const y = clientY - body.getBoundingClientRect().top + body.scrollTop;
+      const index = Math.max(0, Math.min(rows.length - 1, Math.floor(y / ROW_HEIGHT)));
+      return { index, after: y - index * ROW_HEIGHT > ROW_HEIGHT / 2 };
+    };
+    const move = (e: MouseEvent) => {
+      if (Math.abs(e.clientY - startY) < 4 && !target) return;
+      target = where(e.clientY);
+      setDrop(target);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      setDrop(null);
+      const t = target && rows[target.index];
+      if (t && !ids.includes(t.id)) void reorder({ kind: "MoveTo", ids, targetId: t.id, after: target!.after }, ids);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
   };
 
   const indent = (outdent: boolean) => {
@@ -456,6 +510,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
         }}
       >
         <div style={{ height: rowCount * ROW_HEIGHT, position: "relative", minWidth: minWidth }}>
+          {drop && <div className="drop-line" style={{ top: (drop.index + (drop.after ? 1 : 0)) * ROW_HEIGHT - 1 }} aria-hidden />}
           {visible.map((i) => {
             const r = rows[i];
             const selected = r ? selectedIds.has(r.id) : false;
@@ -482,6 +537,14 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                       title={r && c.title ? c.title(r) : undefined}
                       onMouseDown={(e) => {
                         if (editing && !isEditing) void commit();
+                        // The row number is the handle for dragging rows (the whole selection
+                        // when this row is part of it).
+                        if (ci === 0 && r && !e.shiftKey) {
+                          const ids = selectedIds.has(r.id) && selection.length > 1 ? selection.map((x) => x.id) : [r.id];
+                          if (ids.length === 1) moveTo(i, ci);
+                          startRowDrag(e.clientY, ids);
+                          return;
+                        }
                         moveTo(i, ci, e.shiftKey);
                       }}
                       onDoubleClick={() => startEditing()}

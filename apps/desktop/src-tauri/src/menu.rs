@@ -39,6 +39,8 @@ pub mod id {
     pub const RECURRING: &str = "task.recurring";
     pub const INDENT: &str = "task.indent";
     pub const OUTDENT: &str = "task.outdent";
+    pub const MOVE_UP: &str = "task.move_up";
+    pub const MOVE_DOWN: &str = "task.move_down";
     pub const PROJECT_INFO: &str = "project.info";
     pub const WORKING_TIME: &str = "project.working_time";
     pub const LEVEL: &str = "project.level";
@@ -216,8 +218,12 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let recurring = item(app, id::RECURRING, "Recurring Task…", None)?;
     let indent = item(app, id::INDENT, "Indent", None)?;
     let outdent = item(app, id::OUTDENT, "Outdent", None)?;
+    // Microsoft Project's keys on Windows (Alt+Shift+arrow); ⌃⌘arrow on a Mac.
+    let (up_key, down_key) = if cfg!(target_os = "macos") { ("Ctrl+Cmd+Up", "Ctrl+Cmd+Down") } else { ("Alt+Shift+Up", "Alt+Shift+Down") };
+    let move_up = item(app, id::MOVE_UP, "Move Up", Some(up_key))?;
+    let move_down = item(app, id::MOVE_DOWN, "Move Down", Some(down_key))?;
     let percent = id::PERCENT.iter().map(|(i, label)| item(app, i, label, None)).collect::<Result<Vec<_>, _>>()?;
-    let mut task = SubmenuBuilder::new(app, "Task").item(&task_info).item(&recurring).separator().item(&indent).item(&outdent).separator();
+    let mut task = SubmenuBuilder::new(app, "Task").item(&task_info).item(&recurring).separator().item(&indent).item(&outdent).item(&move_up).item(&move_down).separator();
     for p in &percent {
         task = task.item(p);
     }
@@ -299,7 +305,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![find, task_info, recurring, indent, outdent, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
+    let document_items = vec![find, task_info, recurring, indent, outdent, move_up, move_down, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

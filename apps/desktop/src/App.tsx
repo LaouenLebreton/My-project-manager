@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isMac } from "./platform";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, chat, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
@@ -210,6 +211,8 @@ export function App() {
         if (e.payload === "task.recurring") setOverlay("recurring");
         if (e.payload === "task.indent") gridRef.current?.indent(false);
         if (e.payload === "task.outdent") gridRef.current?.indent(true);
+        if (e.payload === "task.move_up") gridRef.current?.moveRows(false);
+        if (e.payload === "task.move_down") gridRef.current?.moveRows(true);
         if (e.payload === "project.info") setOverlay("project");
         if (e.payload === "project.working_time") setOverlay("working");
         if (e.payload === "project.level") void editRef.current({ kind: "LevelResources" }).catch((err) => setError(errorMessage(err)));
@@ -286,6 +289,8 @@ export function App() {
       { name: "Working Time… (calendar and holidays)", run: () => setOverlay("working") },
       { name: "Indent Selected Tasks", shortcut: "Tab", run: () => gridRef.current?.indent(false) },
       { name: "Outdent Selected Tasks", shortcut: "⇧Tab", run: () => gridRef.current?.indent(true) },
+      { name: "Move Selected Tasks Up", shortcut: isMac ? "⌃⌘↑" : "⌥⇧↑", run: () => gridRef.current?.moveRows(false) },
+      { name: "Move Selected Tasks Down", shortcut: isMac ? "⌃⌘↓" : "⌥⇧↓", run: () => gridRef.current?.moveRows(true) },
       { name: "Delete Selected Tasks", shortcut: "⌫", run: () => gridRef.current?.deleteSelection() },
       { name: snapshot.undoLabel ? `Undo ${snapshot.undoLabel}` : "Undo", shortcut: "⌘Z", run: () => run(api.undo) },
       { name: snapshot.redoLabel ? `Redo ${snapshot.redoLabel}` : "Redo", shortcut: "⇧⌘Z", run: () => run(api.redo) },

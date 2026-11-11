@@ -83,6 +83,11 @@ pub enum Edit {
     SetCurrency { symbol: String },
     /// WBS chart: a new task as the last subtask of `parentId` (Tab in the chart).
     AddSubtask { parent_id: String, name: String },
+    /// Task > Move Up / Move Down: the selected tasks swap with the neighbour above (or below)
+    /// at their level; summaries take what is inside them along.
+    MoveTasks { ids: Vec<String>, down: bool },
+    /// Dragged rows: the selected tasks go just before (or after) `targetId`, at its level.
+    MoveTo { ids: Vec<String>, target_id: String, after: bool },
     /// WBS chart: drag a box onto another (or onto the project) to move it underneath, at the end.
     MoveUnder { id: String, parent_id: Option<String> },
     /// Project > Level Resources: delay tasks so nobody is over-allocated.
@@ -464,6 +469,10 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 dependencies: vec![],
             };
             Ok(Some(Planned { command, created: Some(id), message: None }))
+        }
+        Edit::MoveTasks { ids, down } => Ok(move_among_siblings(p, &parse_ids(&ids)?, down).map(|command| Planned { command, created: None, message: None })),
+        Edit::MoveTo { ids, target_id, after } => {
+            move_to(p, &parse_ids(&ids)?, task_id(&target_id)?, after).map(|c| c.map(|command| Planned { command, created: None, message: None }))
         }
         Edit::MoveUnder { id, parent_id } => {
             let id = task_id(&id)?;
@@ -1063,6 +1072,84 @@ fn top_level_of_selection(p: &Project, selected: &HashSet<TaskId>) -> Vec<TaskId
         .collect()
 }
 
+/// Children of `parent` in order.
+fn siblings(p: &Project, parent: Option<TaskId>) -> Vec<TaskId> {
+    let mut list: Vec<&Task> = p.tasks.values().filter(|t| t.parent == parent).collect();
+    list.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    list.into_iter().map(|t| t.id).collect()
+}
+
+/// Gives each task in `moving` (already in their new order within `order`) a sort key between
+/// its new neighbours; the others keep theirs.
+fn reposition(p: &Project, parent: Option<TaskId>, order: &[TaskId], moving: &HashSet<TaskId>) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let mut prev: Option<SortKey> = None;
+    for (i, id) in order.iter().enumerate() {
+        if moving.contains(id) {
+            let next = order[i + 1..].iter().find(|n| !moving.contains(n)).map(|n| p.tasks[n].sort_key.clone());
+            let key = SortKey::between(prev.as_ref(), next.as_ref());
+            commands.push(Command::SetTask { id: *id, change: TaskChange::Position { parent, sort_key: key.clone() } });
+            prev = Some(key);
+        } else {
+            prev = Some(p.tasks[id].sort_key.clone());
+        }
+    }
+    commands
+}
+
+/// Move Up / Move Down: each selected task passes the unselected neighbour on that side.
+fn move_among_siblings(p: &Project, selected: &HashSet<TaskId>, down: bool) -> Option<Command> {
+    let tops = top_level_of_selection(p, selected);
+    let mut parents: Vec<Option<TaskId>> = tops.iter().map(|id| p.tasks[id].parent).collect();
+    parents.dedup();
+    let chosen: HashSet<TaskId> = tops.iter().copied().collect();
+    let mut commands = Vec::new();
+    for parent in parents {
+        let mut order = siblings(p, parent);
+        let before = order.clone();
+        if down {
+            for i in (0..order.len().saturating_sub(1)).rev() {
+                if chosen.contains(&order[i]) && !chosen.contains(&order[i + 1]) {
+                    order.swap(i, i + 1);
+                }
+            }
+        } else {
+            for i in 1..order.len() {
+                if chosen.contains(&order[i]) && !chosen.contains(&order[i - 1]) {
+                    order.swap(i, i - 1);
+                }
+            }
+        }
+        if order != before {
+            let moved: HashSet<TaskId> = order.iter().enumerate().filter(|(i, id)| chosen.contains(id) && before[*i] != **id).map(|(_, id)| *id).collect();
+            commands.extend(reposition(p, parent, &order, &moved));
+        }
+    }
+    batch(if down { "Move Down" } else { "Move Up" }, commands)
+}
+
+/// Dragged rows: the selected tasks, in outline order, just before or after `target`, at its level.
+fn move_to(p: &Project, selected: &HashSet<TaskId>, target: TaskId, after: bool) -> Result<Option<Command>, IpcError> {
+    let t = task(p, target)?;
+    let tops = top_level_of_selection(p, selected);
+    if tops.is_empty() || tops.contains(&target) {
+        return Ok(None);
+    }
+    // The target inside a moving summary: that would put the summary inside itself.
+    let mut up = t.parent;
+    while let Some(a) = up {
+        if tops.contains(&a) {
+            return Err(err("a task cannot move inside itself"));
+        }
+        up = p.tasks.get(&a).and_then(|x| x.parent);
+    }
+    let moving: HashSet<TaskId> = tops.iter().copied().collect();
+    let mut order: Vec<TaskId> = siblings(p, t.parent).into_iter().filter(|id| !moving.contains(id)).collect();
+    let at = order.iter().position(|id| *id == target).expect("target is a sibling of itself") + usize::from(after);
+    order.splice(at..at, tops.iter().copied());
+    Ok(batch("Move Tasks", reposition(p, t.parent, &order, &moving)))
+}
+
 fn batch(label: &str, commands: Vec<Command>) -> Option<Command> {
     (!commands.is_empty()).then(|| Command::Batch { label: label.into(), commands })
 }
@@ -1272,6 +1359,35 @@ mod tests {
         assert_eq!(e.message, "choose how many times it repeats, or the date it ends");
         let e = plan(&p, None, &Units::default(), edit(None, Some("2026-11-01"))).err().unwrap();
         assert_eq!(e.message, "the end date is before the start date");
+    }
+
+    #[test]
+    fn move_up_and_down_among_siblings() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0), ("B1", 1), ("B2", 1), ("C", 0), ("D", 0)]);
+        // C and D up together: past B (with its subtasks).
+        run(&mut p, Edit::MoveTasks { ids: ids(&[id[4], id[5]]), down: false });
+        assert_eq!(shape(&p), s(&[("A", 0), ("C", 0), ("D", 0), ("B", 0), ("B1", 1), ("B2", 1)]));
+        // B2 up inside B; then B1 down; A down past C.
+        run(&mut p, Edit::MoveTasks { ids: ids(&[id[3]]), down: false });
+        assert_eq!(shape(&p), s(&[("A", 0), ("C", 0), ("D", 0), ("B", 0), ("B2", 1), ("B1", 1)]));
+        run(&mut p, Edit::MoveTasks { ids: ids(&[id[0]]), down: true });
+        assert_eq!(shape(&p), s(&[("C", 0), ("A", 0), ("D", 0), ("B", 0), ("B2", 1), ("B1", 1)]));
+        // Already first: nothing to undo.
+        assert!(plan(&p, None, &Units::default(), Edit::MoveTasks { ids: ids(&[id[4]]), down: false }).unwrap().is_none());
+    }
+
+    #[test]
+    fn drag_rows_before_or_after_another() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0), ("B1", 1), ("C", 0)]);
+        // C dropped after B1: it becomes B1's sibling, inside B.
+        run(&mut p, Edit::MoveTo { ids: ids(&[id[3]]), target_id: id[2].0.to_string(), after: true });
+        assert_eq!(shape(&p), s(&[("A", 0), ("B", 0), ("B1", 1), ("C", 1)]));
+        // A and C dropped before B (top level), in their outline order.
+        run(&mut p, Edit::MoveTo { ids: ids(&[id[3], id[0]]), target_id: id[1].0.to_string(), after: false });
+        assert_eq!(shape(&p), s(&[("A", 0), ("C", 0), ("B", 0), ("B1", 1)]));
+        // A summary cannot go inside itself.
+        let e = plan(&p, None, &Units::default(), Edit::MoveTo { ids: ids(&[id[1]]), target_id: id[2].0.to_string(), after: true }).err().unwrap();
+        assert_eq!(e.message, "a task cannot move inside itself");
     }
 
     #[test]

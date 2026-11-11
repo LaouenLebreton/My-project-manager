@@ -546,6 +546,23 @@ export function install() {
             case "DeleteTasks":
               state.rows = state.rows.filter((r) => !e.ids.includes(r.id));
               break;
+            case "MoveTasks": {
+              const picked = state.rows.filter((r) => e.ids.includes(r.id));
+              const rest = state.rows.filter((r) => !e.ids.includes(r.id));
+              const first = state.rows.findIndex((r) => e.ids.includes(r.id));
+              const at = Math.max(0, Math.min(rest.length, first + (e.down ? 1 : -1)));
+              rest.splice(at, 0, ...picked);
+              state.rows = rest;
+              break;
+            }
+            case "MoveTo": {
+              const picked = state.rows.filter((r) => e.ids.includes(r.id));
+              const rest = state.rows.filter((r) => !e.ids.includes(r.id));
+              const at = rest.findIndex((r) => r.id === e.targetId) + (e.after ? 1 : 0);
+              rest.splice(at, 0, ...picked);
+              state.rows = rest;
+              break;
+            }
             case "AddRecurringTask": {
               if (!e.name.trim()) fail("give the recurring task a name");
               const n = e.endAfter ?? 4;
