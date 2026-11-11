@@ -66,33 +66,93 @@ pub fn hosts_teams(app: &AppHandle) -> bool {
     app.path().app_data_dir().is_ok_and(|d| profiled(d).join("TeamServer").join("server.sqlite").exists())
 }
 
-/// Starts the built-in team server if it is not running yet.
+/// The running server, kept so it can also be offered on the local network.
+fn state_cell() -> &'static Mutex<Option<pm_server::AppState>> {
+    static STATE: OnceLock<Mutex<Option<pm_server::AppState>>> = OnceLock::new();
+    STATE.get_or_init(Default::default)
+}
+
+/// The local-network address the server is also offered on, once it is.
+fn shared_on() -> &'static Mutex<Option<String>> {
+    static SHARED: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    SHARED.get_or_init(Default::default)
+}
+
+fn server_dir(app: &AppHandle) -> Option<PathBuf> {
+    Some(profiled(app.path().app_data_dir().ok()?).join("TeamServer"))
+}
+
+/// Present once this Mac's team has been opened to the local network (people were invited).
+fn share_file(app: &AppHandle) -> Option<PathBuf> {
+    server_dir(app).map(|d| d.join("share-on-network"))
+}
+
+/// Starts the built-in team server if it is not running yet. It listens on this Mac only
+/// (127.0.0.1); it is offered on the local network only once people are invited
+/// (`share_on_network`), and then on every launch.
 pub async fn ensure(app: &AppHandle) -> Result<(), IpcError> {
     if port_cell().lock().expect("lock").is_some() {
         return Ok(());
     }
     let fail = |what: &str, e: &dyn std::fmt::Display| IpcError { message: format!("the team could not be started on this Mac ({what}: {e})") };
-    let dir = profiled(app.path().app_data_dir().map_err(|e| fail("data folder", &e))?).join("TeamServer");
+    let dir = server_dir(app).ok_or_else(|| fail("data folder", &"unknown"))?;
     std::fs::create_dir_all(&dir).map_err(|e| fail("data folder", &e))?;
-    let storage = pm_server::storage::SqliteStorage::open(&dir.join("server.sqlite")).map_err(|e| fail("database", &e))?;
+    let db_file = dir.join("server.sqlite");
+    // Teams hosted before this rule existed already had their people on the network: keep it so.
+    if db_file.exists() && !dir.join("share-decided").exists() {
+        let _ = std::fs::write(dir.join("share-on-network"), b"");
+    }
+    let _ = std::fs::write(dir.join("share-decided"), b"");
+    let storage = pm_server::storage::SqliteStorage::open(&db_file).map_err(|e| fail("database", &e))?;
     // The usual port if it is free, otherwise any free one.
-    let listener = match tokio::net::TcpListener::bind(("0.0.0.0", PREFERRED_PORT)).await {
+    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", PREFERRED_PORT)).await {
         Ok(l) => l,
-        Err(_) => tokio::net::TcpListener::bind(("0.0.0.0", 0)).await.map_err(|e| fail("network", &e))?,
+        Err(_) => tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.map_err(|e| fail("network", &e))?,
     };
     let port = listener.local_addr().map_err(|e| fail("network", &e))?.port();
+    let state = pm_server::AppState::new(storage);
     {
         let mut cell = port_cell().lock().expect("lock");
         if cell.is_some() {
             return Ok(()); // another call started it meanwhile
         }
         *cell = Some(port);
+        *state_cell().lock().expect("lock") = Some(state.clone());
     }
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = pm_server::serve(listener, pm_server::AppState::new(storage)).await {
+        if let Err(e) = pm_server::serve(listener, state).await {
             eprintln!("the built-in team server stopped: {e}");
             *port_cell().lock().expect("lock") = None;
+            *state_cell().lock().expect("lock") = None;
         }
     });
+    if share_file(app).is_some_and(|f| f.exists()) {
+        share_on_network(app).await;
+    }
     Ok(())
+}
+
+/// Offers the team hosted here to people on the same network (they join with an invite). Done
+/// when people are invited; remembered for later launches.
+pub async fn share_on_network(app: &AppHandle) {
+    if let Some(f) = share_file(app) {
+        let _ = std::fs::write(f, b"");
+    }
+    let (Some(port), Some(state)) = (*port_cell().lock().expect("lock"), state_cell().lock().expect("lock").clone()) else { return };
+    let Some(ip) = lan_ip() else { return };
+    if shared_on().lock().expect("lock").as_deref() == Some(ip.as_str()) {
+        return;
+    }
+    match tokio::net::TcpListener::bind((ip.as_str(), port)).await {
+        Ok(listener) => {
+            *shared_on().lock().expect("lock") = Some(ip);
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = pm_server::serve_also(listener, state).await {
+                    eprintln!("the team stopped being offered on the network: {e}");
+                    *shared_on().lock().expect("lock") = None;
+                }
+            });
+        }
+        Err(e) => eprintln!("the team could not be offered on the network ({ip}:{port}): {e}"),
+    }
 }

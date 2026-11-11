@@ -78,6 +78,8 @@ export const team = {
   rules: () => invoke<ProjectRules>("team_rules"),
   setRules: (rules: ProjectRules) => invoke<ProjectRules>("team_set_rules", { rules }),
   setMember: (userId: string, role: string, limits: MemberLimits) => invoke<void>("team_set_member", { userId, role, limits }),
+  /** Takes someone out of the project's team (team owners only). */
+  removeMember: (userId: string) => invoke<void>("team_remove_member", { userId }),
   open: (projectId: string) => invoke<Snapshot | null>("team_open", { projectId }),
 };
 

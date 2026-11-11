@@ -126,7 +126,11 @@ pub struct Imported {
 }
 
 /// A team from another server; the caller becomes one of its owners.
-async fn import(State(state): State<AppState>, Auth(me): Auth, Json(bundle): Json<TeamExport>) -> ApiResult<Imported> {
+async fn import(State(state): State<AppState>, Auth(me): Auth, Json(mut bundle): Json<TeamExport>) -> ApiResult<Imported> {
+    // Importing creates accounts, which on a closed server only the administrator may do.
+    if !me.is_admin && !state.config.open_signup {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "only the server's administrator can bring in a team from another server"));
+    }
     if bundle.name.trim().is_empty() {
         return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "the team has no name"));
     }
@@ -141,13 +145,37 @@ async fn import(State(state): State<AppState>, Auth(me): Auth, Json(bundle): Jso
     emails.dedup();
     let check = emails.clone();
     let unknown: Vec<String> = db(&state, move |s| Ok(check.into_iter().filter(|e| !matches!(s.user_by_email(e), Ok(Some(_)))).collect::<Vec<_>>())).await?;
-    let names: std::collections::HashMap<&str, &str> = bundle.members.iter().map(|m| (m.email.as_str(), m.name.as_str())).collect();
-    let mut new_users = Vec::new();
+    // People who already have an account here are not put in the team by someone else's
+    // import: the importer invites them (which they see), as with any team.
     let mut invites = Vec::new();
-    for email in unknown {
-        let code = crate::invite_code();
-        let name = names.get(email.as_str()).map_or_else(|| crate::name_from_email(&email), |n| (*n).to_owned());
-        new_users.push((User { id: Uuid::now_v7(), name, email: email.clone(), is_admin: false, created_at: now() }, crate::auth::hash_password(&code)));
+    bundle.members.retain(|m| {
+        let keep = m.email == me.email || unknown.contains(&m.email);
+        if !keep {
+            invites.push(crate::sharing::InviteResult {
+                email: m.email.clone(),
+                code: None,
+                note: Some("already has an account here; invite them to add them to the team".into()),
+                server: state.config.public_url.clone(),
+            });
+        }
+        keep
+    });
+    let names: std::collections::HashMap<String, String> = bundle.members.iter().map(|m| (m.email.clone(), m.name.clone())).collect();
+    let mut new_users = Vec::new();
+    let coded: Vec<(String, String, String)> = crate::password_work(move || {
+        unknown
+            .into_iter()
+            .map(|e| {
+                let code = crate::invite_code();
+                let hash = crate::auth::hash_password(&code);
+                (e, code, hash)
+            })
+            .collect()
+    })
+    .await?;
+    for (email, code, hash) in coded {
+        let name = names.get(email.as_str()).map_or_else(|| crate::name_from_email(&email), |n| n.clone());
+        new_users.push((User { id: Uuid::now_v7(), name, email: email.clone(), is_admin: false, created_at: now() }, hash));
         let member = bundle.members.iter().any(|m| m.email == email);
         if member {
             invites.push(crate::sharing::InviteResult { email, code: Some(code), note: None, server: state.config.public_url.clone() });

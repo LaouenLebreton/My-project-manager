@@ -101,7 +101,7 @@ impl FromRequestParts<AppState> for Auth {
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
         let token = bearer(parts).ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "sign in first"))?;
         let hash = auth::token_hash(&token);
-        db(state, move |s| s.session_user(&hash))
+        db(state, move |s| s.session_user(&hash, jiff::Timestamp::now()))
             .await?
             .map(Auth)
             .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "your session has ended; sign in again"))
@@ -109,14 +109,81 @@ impl FromRequestParts<AppState> for Auth {
 }
 
 fn bearer(parts: &Parts) -> Option<String> {
-    let value = parts.headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+    bearer_of(&parts.headers)
+}
+
+pub(crate) fn bearer_of(headers: &axum::http::HeaderMap) -> Option<String> {
+    let value = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
     value.strip_prefix("Bearer ").map(|t| t.trim().to_owned())
+}
+
+/// Whether a session (by its token's hash) is still valid; live streams ask again from time to
+/// time, so signing out or being removed ends them.
+pub(crate) async fn session_still(state: &AppState, hash: &str, user: Uuid) -> bool {
+    let hash = hash.to_owned();
+    matches!(db(state, move |s| s.session_user(&hash, jiff::Timestamp::now())).await, Ok(Some(u)) if u.id == user)
+}
+
+/// Runs password hashing or checking (Argon2: slow and memory-hungry on purpose) off the async
+/// threads, a few at a time, so a flood of sign-ins cannot exhaust the server.
+pub(crate) async fn password_work<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, ApiError> {
+    static SLOTS: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    let slots = SLOTS.get_or_init(|| tokio::sync::Semaphore::new(std::thread::available_parallelism().map_or(2, |n| n.get())));
+    let _slot = slots.acquire().await.map_err(|_| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "the server is shutting down"))?;
+    tokio::task::spawn_blocking(f).await.map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the server stopped while handling the request"))
+}
+
+/// Wrong passwords per account: after `MAX_FAILURES` within `LOCKOUT`, sign-in for that email
+/// waits until the window has passed.
+#[derive(Default)]
+pub struct SignInGuard {
+    failures: std::sync::Mutex<std::collections::HashMap<String, (u32, std::time::Instant)>>,
+}
+
+const MAX_FAILURES: u32 = 5;
+const LOCKOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+impl SignInGuard {
+    fn locked(&self, email: &str) -> bool {
+        let mut map = self.failures.lock().expect("lock");
+        match map.get(email) {
+            Some((n, since)) if since.elapsed() < LOCKOUT => *n >= MAX_FAILURES,
+            Some(_) => {
+                map.remove(email);
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn failed(&self, email: &str) {
+        let mut map = self.failures.lock().expect("lock");
+        // Forget stale entries now and then, so the map cannot grow without end.
+        if map.len() > 10_000 {
+            map.retain(|_, (_, since)| since.elapsed() < LOCKOUT);
+        }
+        let entry = map.entry(email.to_owned()).or_insert((0, std::time::Instant::now()));
+        if entry.1.elapsed() >= LOCKOUT {
+            *entry = (0, std::time::Instant::now());
+        }
+        entry.0 += 1;
+    }
+
+    fn succeeded(&self, email: &str) {
+        self.failures.lock().expect("lock").remove(email);
+    }
 }
 
 /// Serves the API on `listener` until the task is dropped or the listener fails. Used by the
 /// `super-pm-server` binary and by the app when it hosts a team itself.
 pub async fn serve(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
     rules::start(state.clone());
+    axum::serve(listener, router(state)).await
+}
+
+/// Serves the same server on one more address (for example the local network as well as this
+/// computer). Timed rules already run from the first `serve`, so they are not started again.
+pub async fn serve_also(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
     axum::serve(listener, router(state)).await
 }
 
@@ -186,8 +253,8 @@ pub(crate) fn normalized_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
-/// Checks a new account's fields and makes the user record.
-fn account(a: &NewAccount, is_admin: bool) -> Result<(User, String), ApiError> {
+/// Checks a new account's fields and makes the user record and the password's hash.
+async fn account(a: &NewAccount, is_admin: bool) -> Result<(User, String), ApiError> {
     let bad = |m: &str| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, m);
     let name = a.name.trim();
     let email = normalized_email(&a.email);
@@ -201,7 +268,8 @@ fn account(a: &NewAccount, is_admin: bool) -> Result<(User, String), ApiError> {
         return Err(bad("choose a password of at least 10 characters"));
     }
     let user = User { id: Uuid::now_v7(), name: name.to_owned(), email, is_admin, created_at: now() };
-    Ok((user, auth::hash_password(&a.password)))
+    let password = a.password.clone();
+    Ok((user, password_work(move || auth::hash_password(&password)).await?))
 }
 
 async fn start_session(state: &AppState, user: User) -> Result<Session, ApiError> {
@@ -213,7 +281,7 @@ async fn start_session(state: &AppState, user: User) -> Result<Session, ApiError
 
 /// The very first account: only while the server has none. It becomes the administrator.
 async fn setup(State(state): State<AppState>, Json(a): Json<NewAccount>) -> ApiResult<Session> {
-    let (user, hash) = account(&a, true)?;
+    let (user, hash) = account(&a, true).await?;
     let created = user.clone();
     let made = db(&state, move |s| s.create_first_user(&created, &hash)).await?;
     if !made {
@@ -226,7 +294,7 @@ async fn create_user(State(state): State<AppState>, Auth(me): Auth, Json(a): Jso
     if !me.is_admin {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "only the server administrator can create accounts"));
     }
-    let (user, hash) = account(&a, false)?;
+    let (user, hash) = account(&a, false).await?;
     let created = user.clone();
     db(&state, move |s| s.create_user(&created, &hash)).await?;
     Ok(Json(user))
@@ -242,7 +310,7 @@ async fn signup(State(state): State<AppState>, Json(a): Json<NewAccount>) -> Api
     if !state.config.open_signup {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "this server does not take sign-ups; ask someone in your team for an invite"));
     }
-    let (user, hash) = account(&a, false)?;
+    let (user, hash) = account(&a, false).await?;
     let created = user.clone();
     db(&state, move |s| s.create_user(&created, &hash)).await?;
     Ok(Json(start_session(&state, user).await?))
@@ -250,15 +318,24 @@ async fn signup(State(state): State<AppState>, Json(a): Json<NewAccount>) -> Api
 
 async fn sign_in(State(state): State<AppState>, Json(c): Json<Credentials>) -> ApiResult<Session> {
     let email = normalized_email(&c.email);
-    let found = db(&state, move |s| s.user_by_email(&email)).await?;
-    // Same answer whether the email or the password is wrong, so accounts cannot be probed.
-    let wrong = || ApiError::new(StatusCode::UNAUTHORIZED, "the email or password is not right");
-    let (user, stored) = found.ok_or_else(wrong)?;
-    let password = c.password;
-    let ok = tokio::task::spawn_blocking(move || auth::verify_password(&password, &stored)).await.unwrap_or(false);
-    if !ok {
-        return Err(wrong());
+    if state.hub.sign_in.locked(&email) {
+        return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "too many wrong passwords for this account; try again in 15 minutes"));
     }
+    let lookup = email.clone();
+    let found = db(&state, move |s| s.user_by_email(&lookup)).await?;
+    // Same answer, and about the same time, whether the email or the password is wrong, so
+    // accounts cannot be probed: an unknown email is checked against a stand-in hash.
+    let (user, stored) = match found {
+        Some((u, h)) => (Some(u), h),
+        None => (None, auth::stand_in_hash().to_owned()),
+    };
+    let password = c.password;
+    let ok = password_work(move || auth::verify_password(&password, &stored)).await?;
+    let Some(user) = user.filter(|_| ok) else {
+        state.hub.sign_in.failed(&email);
+        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "the email or password is not right"));
+    };
+    state.hub.sign_in.succeeded(&email);
     Ok(Json(start_session(&state, user).await?))
 }
 

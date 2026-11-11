@@ -294,12 +294,15 @@ async fn mark_read(State(state): State<AppState>, Auth(me): Auth, Path(channel):
 }
 
 /// A WebSocket with every new post and channel in the caller's teams.
-async fn live(State(state): State<AppState>, Auth(me): Auth, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| stream(state, me.id, socket))
+async fn live(State(state): State<AppState>, Auth(me): Auth, headers: axum::http::HeaderMap, ws: WebSocketUpgrade) -> Response {
+    let hash = crate::bearer_of(&headers).map(|t| crate::auth::token_hash(&t)).unwrap_or_default();
+    ws.on_upgrade(move |socket| stream(state, me.id, hash, socket))
 }
 
-async fn stream(state: AppState, user: Uuid, mut socket: WebSocket) {
+async fn stream(state: AppState, user: Uuid, session: String, mut socket: WebSocket) {
     let mut rx = state.hub.chat.subscribe();
+    let mut recheck = tokio::time::interval(crate::live::RECHECK);
+    recheck.tick().await;
     let teams = |state: AppState| async move { db(&state, move |s| s.teams_of(user)).await.map(|t| t.into_iter().map(|(t, _)| t.id).collect::<HashSet<_>>()).unwrap_or_default() };
     let mut mine = teams(state.clone()).await;
     loop {
@@ -324,6 +327,14 @@ async fn stream(state: AppState, user: Uuid, mut socket: WebSocket) {
                 }
                 Err(_) => return,
             },
+            // Teams the person left or was removed from stop here; signing out ends the stream.
+            _ = recheck.tick() => {
+                if !crate::session_still(&state, &session, user).await {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                }
+                mine = teams(state.clone()).await;
+            }
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
                 Some(Ok(_)) => {}

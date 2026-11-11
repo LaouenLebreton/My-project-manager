@@ -35,6 +35,13 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
     hash.len() == actual.len() && hash.iter().zip(actual).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
 }
 
+/// A hash of a password nobody knows, to check against when an email has no account, so
+/// that takes as long as a real check.
+pub fn stand_in_hash() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| hash_password(&hex::encode(random::<16>())))
+}
+
 /// A new session token (for the client) and its hash (for storage).
 pub fn new_token() -> (String, String) {
     let token = hex::encode(random::<32>());

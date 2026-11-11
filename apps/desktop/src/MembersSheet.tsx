@@ -15,6 +15,8 @@ export function MembersSheet({ snapshot, onClose }: { snapshot: Snapshot; onClos
   const [members, setMembers] = useState<Member[] | null>(null);
   const [original, setOriginal] = useState<string>("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const shared = !!snapshot.project.team;
   useEffect(() => {
     if (!shared) return;
@@ -31,6 +33,18 @@ export function MembersSheet({ snapshot, onClose }: { snapshot: Snapshot; onClos
 
   const update = (userId: string, f: (m: Member) => Member) => setMembers((list) => list && list.map((m) => (m.userId === userId ? f(m) : m)));
   const setLimit = (m: Member, key: keyof Omit<MemberLimits, "tasks">, on: boolean) => update(m.userId, (x) => ({ ...x, limits: { ...x.limits, [key]: on } }));
+
+  const remove = async (m: Member) => {
+    try {
+      await team.removeMember(m.userId);
+      setMembers((list) => list && list.filter((x) => x.userId !== m.userId));
+      setOriginal((o) => JSON.stringify((JSON.parse(o) as Member[]).filter((x) => x.userId !== m.userId)));
+      setRemoveError(null);
+    } catch (e) {
+      setRemoveError(errorMessage(e));
+    }
+    setRemoving(null);
+  };
 
   const save = async () => {
     if (!members) return null;
@@ -67,6 +81,11 @@ export function MembersSheet({ snapshot, onClose }: { snapshot: Snapshot; onClos
           ? "Everyone in the project's team can open it. Choose what each person may change; the team server holds everyone to it."
           : "Only the project's owner can change what people may do."}
       </p>
+      {removeError && (
+        <p role="alert" className="error">
+          {removeError}
+        </p>
+      )}
       <div className="members">
         {members.map((m) => (
           <fieldset key={m.userId} className="member" disabled={!iOwn || m.role === "owner"}>
@@ -74,6 +93,27 @@ export function MembersSheet({ snapshot, onClose }: { snapshot: Snapshot; onClos
               <strong>{m.name}</strong> <span className="secondary small">{m.email}</span>
               {m.isMe && <span className="secondary small"> (you)</span>}
             </legend>
+            {iOwn && m.role !== "owner" && (
+              <div className="member-remove">
+                {removing === m.userId ? (
+                  <>
+                    <span className="small">
+                      Remove {m.name} from the team? They lose access to all of its projects and chat.
+                    </span>{" "}
+                    <button type="button" className="destructive" onClick={() => void remove(m)}>
+                      Remove
+                    </button>{" "}
+                    <button type="button" onClick={() => setRemoving(null)}>
+                      Keep
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="link small" onClick={() => setRemoving(m.userId)}>
+                    Remove from team…
+                  </button>
+                )}
+              </div>
+            )}
             {m.role === "owner" ? (
               <p className="secondary small">Owner: can change everything, revert changes and decide what others may do.</p>
             ) : (

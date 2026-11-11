@@ -324,6 +324,7 @@ export function install() {
           ];
         }
         case "team_set_member":
+        case "team_remove_member":
           return null;
         case "team_rules":
           return mockRules;

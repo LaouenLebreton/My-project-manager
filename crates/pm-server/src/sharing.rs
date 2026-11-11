@@ -18,6 +18,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/teams", get(my_teams).post(create_team))
         .route("/api/teams/{id}/members", get(team_members).post(add_team_member))
+        .route("/api/teams/{id}/members/{user}", axum::routing::delete(remove_team_member))
         .route("/api/teams/{id}/invites", axum::routing::post(invite))
         .route("/api/projects", get(my_projects).post(share_project))
         .route("/api/projects/{id}", get(open_project))
@@ -136,6 +137,48 @@ async fn add_team_member(State(state): State<AppState>, Auth(me): Auth, Path(tea
     }
 }
 
+/// Owners take someone out of the team (and its projects); anyone may leave. The owner of a
+/// project stays until someone else owns it, and a team keeps at least one owner.
+async fn remove_team_member(State(state): State<AppState>, Auth(me): Auth, Path((team, user)): Path<(Uuid, Uuid)>) -> Result<StatusCode, ApiError> {
+    enum Outcome {
+        NotMember,
+        NotOwner,
+        NotThere,
+        OwnsProjects,
+        LastOwner,
+        Removed,
+    }
+    let outcome = db(&state, move |s| {
+        let my_role = s.team_role(team, me.id)?;
+        match my_role {
+            None => return Ok(Outcome::NotMember),
+            Some(TeamRole::Member) if user != me.id => return Ok(Outcome::NotOwner),
+            _ => {}
+        }
+        let Some(their_role) = s.team_role(team, user)? else { return Ok(Outcome::NotThere) };
+        if s.owns_projects_in(team, user)? {
+            return Ok(Outcome::OwnsProjects);
+        }
+        if their_role == TeamRole::Owner && s.team_members(team)?.iter().filter(|(_, r)| *r == TeamRole::Owner).count() <= 1 {
+            return Ok(Outcome::LastOwner);
+        }
+        s.remove_team_member(team, user)?;
+        Ok(Outcome::Removed)
+    })
+    .await?;
+    match outcome {
+        Outcome::NotMember => Err(not_found("team")),
+        Outcome::NotOwner => Err(forbidden("only the team's owners can remove people")),
+        Outcome::NotThere => Err(ApiError::new(StatusCode::NOT_FOUND, "that person is not in the team")),
+        Outcome::OwnsProjects => Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "this person owns projects in the team; they stay until someone else owns them")),
+        Outcome::LastOwner => Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "a team needs at least one owner")),
+        Outcome::Removed => Ok(StatusCode::NO_CONTENT),
+    }
+}
+
+/// Most people in one invite request.
+const MAX_INVITES: usize = 100;
+
 #[derive(Deserialize)]
 pub struct InviteRequest {
     pub emails: Vec<String>,
@@ -159,17 +202,29 @@ pub struct InviteResult {
 /// everyone is added to the team.
 async fn invite(State(state): State<AppState>, Auth(me): Auth, Path(team): Path<Uuid>, Json(req): Json<InviteRequest>) -> ApiResult<Vec<InviteResult>> {
     let emails: Vec<String> = req.emails.iter().map(|e| crate::normalized_email(e)).filter(|e| !e.is_empty()).collect();
+    if emails.len() > MAX_INVITES {
+        return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invite at most 100 people at a time"));
+    }
+    // Who may invite is checked before any work (codes are hashed like passwords: slow).
+    match db(&state, move |s| s.team_role(team, me.id)).await? {
+        Some(TeamRole::Owner) => {}
+        Some(TeamRole::Member) => return Err(forbidden("only the team's owners can invite people")),
+        None => return Err(not_found("team")),
+    }
     let server = state.config.public_url.clone();
-    // Codes are hashed like passwords, before taking the storage lock.
-    let prepared: Vec<(String, String, String)> = emails
-        .into_iter()
-        .map(|e| {
-            let code = crate::invite_code();
-            let hash = crate::auth::hash_password(&code);
-            (e, code, hash)
-        })
-        .collect();
+    let prepared: Vec<(String, String, String)> = crate::password_work(move || {
+        emails
+            .into_iter()
+            .map(|e| {
+                let code = crate::invite_code();
+                let hash = crate::auth::hash_password(&code);
+                (e, code, hash)
+            })
+            .collect()
+    })
+    .await?;
     let results = db(&state, move |s| {
+        // Checked again, in case the role changed meanwhile.
         match s.team_role(team, me.id)? {
             Some(TeamRole::Owner) => {}
             Some(TeamRole::Member) => return Ok(Err("only the team's owners can invite people")),

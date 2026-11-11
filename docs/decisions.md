@@ -179,3 +179,30 @@ Libraries come from Maven Central, checked against its SHA-1 and then a committe
 lock; they and the build output stay out of Git. Tested on MPXJ's sample files from Project
 2000/2003, 2007 and 2010+ formats. Settings like `JAVA_TOOL_OPTIONS` are removed when the app
 starts the converter so another Java setup cannot change it.
+
+## Security review (2026-11-11)
+
+A review of the team server and the app found ten problems; the four most serious are fixed:
+
+- **Team import** (moving a team between servers) created accounts for any email and returned
+  their one-time codes, and put existing accounts in the team. On a closed server only the
+  administrator may import now; people who already have an account are listed to invite, not
+  added. (On an open-signup server anyone can create an account anyway; without email
+  verification, a server cannot prove who owns an email address. Invite emails sent by the
+  server would close this.)
+- **The built-in server** listened on every network over plain HTTP. It now listens on this
+  Mac only (127.0.0.1) and is offered on the local network, at the Mac's own address, only once
+  people are invited; teams hosted before keep being offered. Traffic on the local network is
+  still unencrypted: TLS needs a certificate the invite carries (later).
+- **Revoking access:** team owners remove people (`DELETE /api/teams/{id}/members/{user}`,
+  Members & Permissions > Remove from team); anyone may leave; a project's owner stays until
+  someone else owns it; a team keeps an owner. Sessions end after 90 days unused. Live streams
+  (project changes, chat) check every 20 s that the session and access still hold, and close
+  otherwise.
+- **Sign-in:** an unknown email is checked against a stand-in hash, so it takes as long as a
+  wrong password; after 5 wrong passwords an account waits 15 minutes; Argon2 work runs a few at
+  a time. Invites check the caller's role before any hashing and take at most 100 emails.
+
+Still open, lower: the person who set a project's rules can edit its automatic posts; the .mpp
+converter has no time limit; the setup moment of the built-in server (now only reachable from
+this Mac).

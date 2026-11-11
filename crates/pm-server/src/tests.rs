@@ -541,3 +541,98 @@ async fn rules_post_when_tasks_are_done_and_send_a_weekly_summary() {
     rules::tick(&state, at(9, 9)).await;
     assert_eq!(posts().len(), before + 3, "and again the next Monday");
 }
+
+// ---------------------------------------------------------------------------------------------
+// Security review (2026-11-11)
+
+#[tokio::test]
+async fn only_the_administrator_brings_in_a_team_on_a_closed_server() {
+    let source = server();
+    let p = people(&source).await;
+    shared(&source, &p).await;
+    let (_, teams) = call(&source, "GET", "/api/teams", Some(&p[0].0), None).await;
+    let team_id = teams[0]["team"]["id"].as_str().unwrap().to_owned();
+    let (_, bundle) = call(&source, "GET", &format!("/api/teams/{team_id}/export"), Some(&p[0].0), None).await;
+
+    // A closed server: Alex (not the administrator) cannot create accounts by importing.
+    let target = server();
+    let t = people(&target).await;
+    let (status, body) = call(&target, "POST", "/api/teams/import", Some(&t[1].0), Some(bundle.clone())).await;
+    assert_eq!((status, body["message"].as_str()), (StatusCode::FORBIDDEN, Some("only the server's administrator can bring in a team from another server")));
+
+    // The administrator can; people who already have accounts are not added without an invite.
+    let (status, imported) = call(&target, "POST", "/api/teams/import", Some(&t[0].0), Some(bundle)).await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let (_, alex_teams) = call(&target, "GET", "/api/teams", Some(&t[1].0), None).await;
+    assert_eq!(alex_teams, json!([]), "Alex already had an account here: invited, not added");
+    let note = imported["invites"].as_array().unwrap().iter().find(|i| i["email"] == "alex@example.com").unwrap();
+    assert!(note["code"].is_null());
+}
+
+#[tokio::test]
+async fn owners_remove_people_from_a_team() {
+    let app = server();
+    let p = people(&app).await;
+    let (id, _) = shared(&app, &p).await;
+    let (_, opened) = call(&app, "GET", &format!("/api/projects/{id}"), Some(&p[0].0), None).await;
+    let team = opened["record"]["teamId"].as_str().unwrap().to_owned();
+    let (alex, sam) = (&p[1].1, &p[2].1);
+
+    let (status, _) = call(&app, "DELETE", &format!("/api/teams/{team}/members/{sam}"), Some(&p[1].0), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "members cannot remove others");
+    let (status, body) = call(&app, "DELETE", &format!("/api/teams/{team}/members/{}", p[0].1), Some(&p[0].0), None).await;
+    assert_eq!((status, body["message"].as_str()), (StatusCode::UNPROCESSABLE_ENTITY, Some("this person owns projects in the team; they stay until someone else owns them")));
+
+    let (status, _) = call(&app, "DELETE", &format!("/api/teams/{team}/members/{alex}"), Some(&p[0].0), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(&app, "GET", &format!("/api/projects/{id}"), Some(&p[1].0), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "Alex no longer sees the project");
+    let (_, teams) = call(&app, "GET", "/api/teams", Some(&p[1].0), None).await;
+    assert_eq!(teams, json!([]));
+    // Members may leave on their own.
+    let (status, _) = call(&app, "DELETE", &format!("/api/teams/{team}/members/{sam}"), Some(&p[2].0), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn unused_sessions_end() {
+    let storage = SqliteStorage::in_memory().unwrap();
+    let user = User { id: uuid::Uuid::now_v7(), name: "A".into(), email: "a@example.com".into(), is_admin: false, created_at: now() };
+    storage.create_user(&user, "x").unwrap();
+    let old = (jiff::Timestamp::now() - jiff::SignedDuration::from_hours(24 * 91)).to_string();
+    let recent = (jiff::Timestamp::now() - jiff::SignedDuration::from_hours(24 * 30)).to_string();
+    storage.create_session("old", user.id, &old).unwrap();
+    storage.create_session("recent", user.id, &recent).unwrap();
+    assert!(storage.session_user("old", jiff::Timestamp::now()).unwrap().is_none(), "unused for 91 days");
+    assert!(storage.session_user("recent", jiff::Timestamp::now()).unwrap().is_some());
+}
+
+#[tokio::test]
+async fn repeated_wrong_passwords_are_slowed_down() {
+    let app = server();
+    people(&app).await;
+    let wrong = json!({ "email": "alex@example.com", "password": "not the password" });
+    for _ in 0..5 {
+        let (status, _) = call(&app, "POST", "/api/sessions", None, Some(wrong.clone())).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let right = json!({ "email": "alex@example.com", "password": "a long enough password" });
+    let (status, body) = call(&app, "POST", "/api/sessions", None, Some(right)).await;
+    assert_eq!((status, body["message"].as_str()), (StatusCode::TOO_MANY_REQUESTS, Some("too many wrong passwords for this account; try again in 15 minutes")));
+    // Unknown emails answer like wrong passwords.
+    let (status, _) = call(&app, "POST", "/api/sessions", None, Some(json!({ "email": "nobody@example.com", "password": "whatever it is" }))).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn invites_are_checked_before_any_work_and_capped() {
+    let app = server();
+    let p = people(&app).await;
+    let (_, team) = call(&app, "POST", "/api/teams", Some(&p[0].0), Some(json!({ "name": "T" }))).await;
+    let team = team["team"]["id"].as_str().unwrap().to_owned();
+    let many: Vec<String> = (0..101).map(|i| format!("p{i}@example.com")).collect();
+    let (status, body) = call(&app, "POST", &format!("/api/teams/{team}/invites"), Some(&p[0].0), Some(json!({ "emails": many }))).await;
+    assert_eq!((status, body["message"].as_str()), (StatusCode::UNPROCESSABLE_ENTITY, Some("invite at most 100 people at a time")));
+    let (status, _) = call(&app, "POST", &format!("/api/teams/{team}/invites"), Some(&p[1].0), Some(json!({ "emails": ["x@example.com"] }))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "not in the team");
+}

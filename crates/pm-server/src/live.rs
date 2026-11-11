@@ -32,11 +32,16 @@ pub struct Hub {
     rooms: Mutex<HashMap<Uuid, Arc<Room>>>,
     /// Chat events for everyone connected; each stream keeps those of its user's teams.
     pub chat: broadcast::Sender<Arc<crate::chat::ChatEvent>>,
+    /// Wrong passwords per account, to slow down guessing.
+    pub sign_in: crate::SignInGuard,
 }
+
+/// How often a live stream checks that its session and access still hold.
+pub(crate) const RECHECK: std::time::Duration = std::time::Duration::from_secs(20);
 
 impl Default for Hub {
     fn default() -> Self {
-        Hub { rooms: Mutex::default(), chat: broadcast::channel(1024).0 }
+        Hub { rooms: Mutex::default(), chat: broadcast::channel(1024).0, sign_in: crate::SignInGuard::default() }
     }
 }
 
@@ -243,12 +248,22 @@ async fn changes(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<U
 }
 
 /// A WebSocket that sends every change after `since`, then each new one as it happens.
-async fn live(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>, Query(q): Query<Since>, ws: WebSocketUpgrade) -> Result<Response, ApiError> {
+async fn live(
+    State(state): State<AppState>,
+    Auth(me): Auth,
+    headers: axum::http::HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(q): Query<Since>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
     access(&state, id, me.id).await?;
-    Ok(ws.on_upgrade(move |socket| stream(state, id, q.since, socket)))
+    let hash = crate::bearer_of(&headers).map(|t| crate::auth::token_hash(&t)).unwrap_or_default();
+    Ok(ws.on_upgrade(move |socket| stream(state, id, me.id, hash, q.since, socket)))
 }
 
-async fn stream(state: AppState, id: Uuid, mut since: i64, mut socket: WebSocket) {
+async fn stream(state: AppState, id: Uuid, user: Uuid, session: String, mut since: i64, mut socket: WebSocket) {
+    let mut recheck = tokio::time::interval(RECHECK);
+    recheck.tick().await;
     // Subscribe before catching up, so nothing falls between the two.
     let mut rx = state.hub.room(id).tx.subscribe();
     loop {
@@ -280,6 +295,13 @@ async fn stream(state: AppState, id: Uuid, mut since: i64, mut socket: WebSocket
                     return;
                 }
             },
+            // Signed out, or no longer allowed in the project: the stream ends.
+            _ = recheck.tick() => {
+                if !crate::session_still(&state, &session, user).await || access(&state, id, user).await.is_err() {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                }
+            }
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
                 Some(Ok(_)) => {}

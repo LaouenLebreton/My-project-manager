@@ -397,6 +397,9 @@ pub async fn team_create_project(
             v["team"]["id"].as_str().unwrap_or_default().to_owned()
         }
     };
+    if a.server == LOCAL && !emails.is_empty() {
+        hosting::share_on_network(&app).await;
+    }
     let invites = invite_people(&a, &team_id, &emails).await;
     let snapshot = share(&app, window.label(), &a, &team_id).await?;
     Ok(TeamProject { snapshot, invites })
@@ -629,6 +632,17 @@ pub async fn team_set_rules(app: AppHandle, window: WebviewWindow, rules: Projec
     Ok(call(reqwest::Method::PUT, &a.server, &format!("/api/projects/{project}/rules"), Some(&a.token), Some(body)).await?)
 }
 
+/// Takes someone out of the project's team (and so every project of the team). The server
+/// allows it for the team's owners.
+#[tauri::command]
+pub async fn team_remove_member(app: AppHandle, window: WebviewWindow, user_id: String) -> Result<(), IpcError> {
+    let (a, project) = shared_in(&app, window.label())?;
+    let list: Vec<SharedProject> = call(reqwest::Method::GET, &a.server, "/api/projects", Some(&a.token), None).await?;
+    let team = list.into_iter().find(|p| p.id == project.to_string()).map(|p| p.team_id).ok_or_else(|| err("this project is no longer on the team server"))?;
+    let _: serde_json::Value = call(reqwest::Method::DELETE, &a.server, &format!("/api/teams/{team}/members/{user_id}"), Some(&a.token), None).await?;
+    Ok(())
+}
+
 /// The owner reverts a change; the result arrives like any other change.
 #[tauri::command]
 pub async fn team_revert(app: AppHandle, window: WebviewWindow, version: i64) -> Result<(), IpcError> {
@@ -715,6 +729,8 @@ pub async fn team_invite(app: AppHandle, team_id: String, emails: Vec<String>) -
     let a = signed_in(&app)?;
     if a.server == LOCAL {
         hosting::ensure(&app).await?;
+        // People are invited: the team hosted here is offered on the local network from now on.
+        hosting::share_on_network(&app).await;
     }
     Ok(invite_people(&a, &team_id, &emails).await)
 }

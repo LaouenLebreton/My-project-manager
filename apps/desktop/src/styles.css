@@ -1941,3 +1941,13 @@ label.indent {
   background: color-mix(in srgb, CanvasText 12%, Canvas);
   color: var(--text-secondary);
 }
+
+/* Members & Permissions: removing someone from the team. */
+.member-remove {
+  margin: 4px 0 6px;
+}
+.member-remove .destructive {
+  color: #fff;
+  background: #d70015;
+  border-color: #d70015;
+}

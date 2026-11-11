@@ -122,7 +122,9 @@ pub trait Storage: Send + Sync + 'static {
     /// The user and their stored password hash.
     fn user_by_email(&self, email: &str) -> Result<Option<(User, String)>>;
     fn create_session(&self, token_hash: &str, user: Uuid, created_at: &str) -> Result<()>;
-    fn session_user(&self, token_hash: &str) -> Result<Option<User>>;
+    /// The session's user, unless it has gone unused for `SESSION_IDLE_DAYS`. Use keeps it
+    /// alive (recorded at most once a day).
+    fn session_user(&self, token_hash: &str, now: jiff::Timestamp) -> Result<Option<User>>;
     fn delete_session(&self, token_hash: &str) -> Result<()>;
     fn user(&self, id: Uuid) -> Result<Option<User>>;
 
@@ -134,6 +136,10 @@ pub trait Storage: Send + Sync + 'static {
     /// Adds or changes a member.
     fn set_team_member(&self, team: Uuid, user: Uuid, role: TeamRole) -> Result<()>;
     fn team_members(&self, team: Uuid) -> Result<Vec<(User, TeamRole)>>;
+    /// Takes someone out of a team and all its projects.
+    fn remove_team_member(&self, team: Uuid, user: Uuid) -> Result<()>;
+    /// Whether the user owns a project of the team.
+    fn owns_projects_in(&self, team: Uuid, user: Uuid) -> Result<bool>;
 
     /// Stores a newly shared project (`project` is `pm_core::Project` as JSON). Its owner gets
     /// the Owner role. Fails with `ProjectExists` if the id is taken.
@@ -323,7 +329,7 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE team ADD COLUMN moved_to TEXT;
     "#,
-    // 7 -> 8: automation rules (iteration 4). Posts written by a rule are marked.
+    // 8 -> 9 below. 7 -> 8: automation rules (iteration 4). Posts written by a rule are marked.
     r#"
     ALTER TABLE post ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE project_rules (
@@ -333,7 +339,15 @@ const MIGRATIONS: &[&str] = &[
         last_summary TEXT
     );
     "#,
+    // 8 -> 9: sessions end after a long time unused (security review, 2026-11-11).
+    r#"
+    ALTER TABLE session ADD COLUMN last_used TEXT;
+    UPDATE session SET last_used = created_at;
+    "#,
 ];
+
+/// A session nobody has used for this long ends; the person signs in again.
+pub const SESSION_IDLE_DAYS: i64 = 90;
 
 /// A team server's storage: one SQLite file.
 pub struct SqliteStorage {
@@ -490,19 +504,32 @@ impl Storage for SqliteStorage {
     }
 
     fn create_session(&self, token_hash: &str, user: Uuid, created_at: &str) -> Result<()> {
-        self.conn().execute("INSERT INTO session (token_hash, user_id, created_at) VALUES (?1, ?2, ?3)", params![token_hash, user.to_string(), created_at])?;
+        self.conn().execute(
+            "INSERT INTO session (token_hash, user_id, created_at, last_used) VALUES (?1, ?2, ?3, ?3)",
+            params![token_hash, user.to_string(), created_at],
+        )?;
         Ok(())
     }
 
-    fn session_user(&self, token_hash: &str) -> Result<Option<User>> {
-        Ok(self
-            .conn()
+    fn session_user(&self, token_hash: &str, now: jiff::Timestamp) -> Result<Option<User>> {
+        let day = jiff::SignedDuration::from_hours(24);
+        let idle_since = (now - day * SESSION_IDLE_DAYS as i32).to_string();
+        let conn = self.conn();
+        let user = conn
             .query_row(
-                "SELECT u.id, u.name, u.email, u.is_admin, u.created_at FROM session s JOIN user u ON u.id = s.user_id WHERE s.token_hash = ?1",
-                [token_hash],
+                "SELECT u.id, u.name, u.email, u.is_admin, u.created_at FROM session s JOIN user u ON u.id = s.user_id
+                 WHERE s.token_hash = ?1 AND s.last_used >= ?2",
+                params![token_hash, idle_since],
                 user_from_row,
             )
-            .optional()?)
+            .optional()?;
+        if user.is_some() {
+            conn.execute(
+                "UPDATE session SET last_used = ?2 WHERE token_hash = ?1 AND last_used < ?3",
+                params![token_hash, now.to_string(), (now - day).to_string()],
+            )?;
+        }
+        Ok(user)
     }
 
     fn delete_session(&self, token_hash: &str) -> Result<()> {
@@ -550,6 +577,26 @@ impl Storage for SqliteStorage {
             params![team.to_string(), user.to_string(), team_role_code(role)],
         )?;
         Ok(())
+    }
+
+    fn remove_team_member(&self, team: Uuid, user: Uuid) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM project_member WHERE user_id = ?2 AND project_id IN (SELECT id FROM project WHERE team_id = ?1)",
+            params![team.to_string(), user.to_string()],
+        )?;
+        tx.execute("DELETE FROM team_member WHERE team_id = ?1 AND user_id = ?2", params![team.to_string(), user.to_string()])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn owns_projects_in(&self, team: Uuid, user: Uuid) -> Result<bool> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS (SELECT 1 FROM project WHERE team_id = ?1 AND owner_id = ?2)",
+            params![team.to_string(), user.to_string()],
+            |r| r.get(0),
+        )?)
     }
 
     fn team_members(&self, team: Uuid) -> Result<Vec<(User, TeamRole)>> {
