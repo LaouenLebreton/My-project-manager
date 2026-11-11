@@ -22,6 +22,12 @@ Run before each release (spec sections 5.1.9 and 6). Turn on VoiceOver (⌘F5) f
 - [ ] Over-allocation is announced in words (the ⚠ markers have labels; the details under the Resource Sheet are read out).
 - [ ] Task Info (⌘I), Project Info and Working Time: every field has a label, Tab moves through them in order, Return saves, Escape cancels, errors are announced.
 - [ ] Tour: Escape skips; buttons reachable with Tab.
+- [ ] Task > Move Up / Move Down (⌃⌘↑ / ⌃⌘↓; Alt+Shift+↑/↓ on Windows) move the selected rows; dragging rows by their number is never the only way.
+- [ ] ⌘C / ⌘X / ⌘V in the task list copy, cut and paste tasks; ⌘D duplicates.
+- [ ] The Show menu above the list is reached with Tab and named "Show which tasks"; "Show all" follows it when a filter is on.
+- [ ] Edit > Undo History: Tab moves through the changes, Return goes back to the chosen one, Escape closes.
+- [ ] First steps: its buttons and its × (named "Close first steps") are reachable with Tab.
+- [ ] Members & Permissions: Remove from team… asks again (Remove / Keep) before removing.
 
 ## VoiceOver
 
@@ -41,4 +47,6 @@ Run before each release (spec sections 5.1.9 and 6). Turn on VoiceOver (⌘F5) f
 ## Known gaps (iteration 1)
 
 - The chart is mouse-only; everything it does is available in the grid except moving a task to a date, which arrives with a constraint editor.
-- Contrast of the hatched critical bars and the dark-mode secondary text has not been measured yet.
+- Contrast of the hatched critical bars has not been measured yet. Secondary text (60% of the
+  text colour) was worked out on 2026-11-11: about 5.7:1 on white and 7:1 on the dark
+  background, above 4.5:1.

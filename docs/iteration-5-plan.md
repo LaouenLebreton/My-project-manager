@@ -13,7 +13,7 @@ its own, test-first, in this order.
 4. **[Done]** **Undo history** you can see: Edit > History of Changes…, step back to any point.
 5. **[Done]** **First steps:** a short checklist on a new project (add tasks, link them, assign people,
    set a baseline), each step ticked as it is done.
-6. **Accessibility pass** against `accessibility-checklist.md`.
+6. **[Done]** **Accessibility pass** against `accessibility-checklist.md`.
 
 ## B. Closer to Microsoft Project
 
