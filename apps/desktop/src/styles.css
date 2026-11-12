@@ -2233,3 +2233,137 @@ dialog.status-report {
     display: none !important;
   }
 }
+
+/* Dashboard (the project at a glance) and the progress bar in the header. */
+.dashboard {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+.dash-card {
+  background: color-mix(in srgb, CanvasText 3%, Canvas);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.dash-card.wide {
+  grid-column: 1 / -1;
+}
+.dash-card h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+.dash-big {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 4px 0 2px;
+  font-variant-numeric: tabular-nums;
+}
+.dash-health {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.status-chip.big {
+  font-size: 16px;
+  padding: 6px 14px;
+}
+.dash-reasons {
+  margin: 0;
+  padding-left: 18px;
+}
+.dash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dash-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.dash-list li > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.dash-list li > .small {
+  flex-shrink: 0;
+}
+.dash-progress .track,
+.project-progress .track {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, CanvasText 12%, transparent);
+  overflow: visible;
+}
+.dash-progress .track {
+  height: 12px;
+  border-radius: 6px;
+}
+.dash-progress .done,
+.project-progress .done {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #30d158;
+}
+.project-progress.atRisk .done,
+.dashboard .dash-progress .done {
+  background: #30d158;
+}
+.project-progress.atRisk .done {
+  background: var(--gantt-warning);
+}
+.project-progress.late .done {
+  background: var(--gantt-critical);
+}
+.dash-progress .planned,
+.project-progress .planned {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: CanvasText;
+  opacity: 0.6;
+}
+.project-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+  flex-shrink: 0;
+}
+.project-progress .track {
+  width: 90px;
+}
+/* A long detail wraps under the name rather than squeezing it out. */
+.dash-list li {
+  flex-wrap: wrap;
+  column-gap: 8px;
+  row-gap: 0;
+}
+.dash-list li > :first-child {
+  flex: 1 1 auto;
+  min-width: 35%;
+}
+.dash-list li > .small {
+  flex: 0 1 auto;
+  margin-left: auto;
+  text-align: right;
+}

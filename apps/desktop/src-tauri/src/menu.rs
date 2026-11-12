@@ -34,6 +34,7 @@ pub mod id {
     pub const VIEW_BOARD: &str = "view.board";
     pub const VIEW_HISTORY: &str = "view.history";
     pub const VIEW_CHAT: &str = "view.chat";
+    pub const VIEW_DASHBOARD: &str = "view.dashboard";
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
     pub const TASK_INFO: &str = "task.info";
@@ -204,8 +205,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let view_calendar = item(app, id::VIEW_CALENDAR, "Calendar", Some("CmdOrCtrl+5"))?;
     let view_board = item(app, id::VIEW_BOARD, "Board", Some("CmdOrCtrl+6"))?;
     let view_history = item(app, id::VIEW_HISTORY, "History", Some("CmdOrCtrl+7"))?;
+    let view_dashboard = item(app, id::VIEW_DASHBOARD, "Dashboard", Some("CmdOrCtrl+9"))?;
     let view_chat = item(app, id::VIEW_CHAT, "Chat", Some("CmdOrCtrl+8"))?;
     let view = SubmenuBuilder::new(app, "View")
+        .item(&view_dashboard)
         .item(&view_tasks)
         .item(&view_resources)
         .item(&view_wbs)
@@ -317,7 +320,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         menu.append(sub)?;
     }
     platform::register_standard_menus(&window, &help)?;
-    let document_items = vec![export_csv, status_report.clone(), find, undo_history.clone(), task_info, recurring, indent, outdent, move_up, move_down, duplicate, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
+    let document_items = vec![export_csv, status_report.clone(), find, undo_history.clone(), task_info, recurring, indent, outdent, move_up, move_down, duplicate, project_info, working_time, view_tasks, view_resources, view_wbs, view_workload, view_calendar, view_board, view_history, view_chat, view_dashboard, level, clear_leveling, set_baseline, clear_baseline, update_project, statistics, team_share, team_members, team_rules];
     let document_items = document_items.into_iter().chain(percent).collect::<Vec<_>>();
     Ok((menu, MenuHandles { undo, redo, save_copy, export, recent, document_items }))
 }

@@ -31,3 +31,23 @@ its own, test-first, in this order.
 14. **Invitations by email:** the server sends them when it has a mail account (SMTP settings);
     without one, invites are copied and sent by hand as now.
 15. **Hosting the team server online:** needs the owner's hosting account (`docs/deploy.md`).
+
+## D. Dashboard and progress (owner, 2026-11-12)
+
+16. **[Done]** **Progress bar** in the header of every view: work done against work planned
+    by now (baseline dates if any, else the schedule), coloured by status, with the reasons on
+    hover.
+17. **[Done]** **Dashboard** (first tab, ⌘9): health with its reasons, progress against plan,
+    finish against the baseline, budget (with CPI/SPI once there is a baseline), late, due this
+    week, blocked (waiting on a late task), next milestones, missed deadlines, overbooked
+    people, recent changes (the team's history in a team project). One calculation
+    (`health.ts`) serves the dashboard, the progress bar and the Status Report.
+
+    What it shows comes from what project managers say they need. Reddit itself cannot be read
+    by the tools used, so this relies on an analysis of r/projectmanagement posts by a tool
+    vendor (oniq-landing.pages.dev/blog/reddit-pm-tools: tool gaps, scattered information and
+    no single source of truth, wanting progress pushed to people rather than chased) and on
+    practitioner guides (thedigitalprojectmanager.com, plane.so, productive.io: a few metrics
+    that drive a decision, a red/amber/green signal first, schedule and budget against plan,
+    blockers, workload, milestones). Treat them as vendor-leaning.
+

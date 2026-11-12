@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { Dashboard, ProgressBar } from "./Dashboard";
 import { StatusReport } from "./StatusReport";
 import { FirstSteps } from "./FirstSteps";
 import { FILTERS, filterRows, type TaskFilter } from "./filter";
@@ -59,7 +60,7 @@ export function App() {
   // The task list's filter; the chart shows the same rows.
   const [filter, setFilter] = useState<TaskFilter>("all");
   const shown = useMemo(() => (snapshot && filter !== "all" ? { ...snapshot, rows: filterRows(snapshot.rows, filter) } : snapshot), [snapshot, filter]);
-  const [view, setView] = useState<"tasks" | "resources" | "wbs" | "workload" | "calendar" | "board" | "history" | "chat">("tasks");
+  const [view, setView] = useState<"dashboard" | "tasks" | "resources" | "wbs" | "workload" | "calendar" | "board" | "history" | "chat">("tasks");
   const [notice, setNotice] = useState<string | null>(null);
   // The team server account, and this window's sync state (shared projects only).
   const [teamStatus, setTeamStatus] = useState<TeamStatus | null>(null);
@@ -220,6 +221,7 @@ export function App() {
         if (e.payload === "view.calendar") setView("calendar");
         if (e.payload === "view.board") setView("board");
         if (e.payload === "view.history") setView("history");
+        if (e.payload === "view.dashboard") setView("dashboard");
         if (e.payload === "view.chat") setView("chat");
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.recurring") setOverlay("recurring");
@@ -282,6 +284,7 @@ export function App() {
       { name: "Show Calendar", shortcut: "⌘5", run: () => setView("calendar") },
       { name: "Show Board (Not started / In progress / Done)", shortcut: "⌘6", run: () => setView("board") },
       { name: "Show History (every change in a team project)", shortcut: "⌘7", run: () => setView("history") },
+      { name: "Show Dashboard (the project at a glance)", shortcut: "⌘9", run: () => setView("dashboard") },
       { name: "Show Chat (teams, channels, posts)", shortcut: "⌘8", run: () => setView("chat") },
       { name: "Open Portfolio (all projects)", shortcut: "⌘0", run: () => void openPortfolio() },
       { name: "New Tab (open or create another project)", shortcut: "⌘T", run: () => void openNewTab() },
@@ -465,6 +468,7 @@ export function App() {
             {snapshot.project.costCents !== 0 && ` · ${formatMoney(snapshot.project.costCents, snapshot.project.currency)}`}
           </p>
         </div>
+        <ProgressBar snapshot={snapshot} />
         {snapshot.project.team && <SyncPill status={syncStatus} pending={snapshot.project.team.pending} />}
         {snapshot.project.team && <TeamPeople online={syncStatus?.state === "online"} onInvite={() => setTeamSheet("invite")} onManage={() => setTeamSheet("members")} />}
         {(() => {
@@ -478,6 +482,9 @@ export function App() {
           );
         })()}
         <div className="segmented" role="tablist" aria-label="View">
+          <button role="tab" aria-selected={view === "dashboard"} className={view === "dashboard" ? "on" : undefined} onClick={() => setView("dashboard")}>
+            Dashboard
+          </button>
           <button role="tab" aria-selected={view === "tasks"} className={view === "tasks" ? "on" : undefined} onClick={() => setView("tasks")}>
             Tasks
           </button>
@@ -541,7 +548,9 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
-      {view === "chat" ? (
+      {view === "dashboard" ? (
+        <Dashboard snapshot={snapshot} onShowTask={showTask} onOpen={(v) => setView(v)} />
+      ) : view === "chat" ? (
         <ChatView snapshot={snapshot} onShowTask={showTask} onConfirm={confirm} />
       ) : view === "history" && snapshot.project.team ? (
         <HistoryView snapshot={snapshot} onShowTask={showTask} onConfirm={confirm} />
