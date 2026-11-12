@@ -198,7 +198,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
         .item(&find)
         .build()?;
 
-    let view_tasks = item(app, id::VIEW_TASKS, "Tasks", Some("CmdOrCtrl+1"))?;
+    let view_tasks = item(app, id::VIEW_TASKS, "Gantt Chart", Some("CmdOrCtrl+1"))?;
     let view_resources = item(app, id::VIEW_RESOURCES, "Resource Sheet", Some("CmdOrCtrl+2"))?;
     let view_wbs = item(app, id::VIEW_WBS, "Work Breakdown Structure", Some("CmdOrCtrl+3"))?;
     let view_workload = item(app, id::VIEW_WORKLOAD, "Workload", Some("CmdOrCtrl+4"))?;

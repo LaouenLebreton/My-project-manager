@@ -80,7 +80,7 @@ export const SHORTCUTS: [string, string][] = [
   ["⌘Z / ⇧⌘Z", "Undo / redo any change"],
   ["⌘I", "Task Info: constraint, % complete, notes"],
   ["⌘F", "Find a task by name; Return for the next match"],
-  ["⌘1 … ⌘6", "Tasks / Resource Sheet / Work breakdown structure / Workload / Calendar / Board"],
+  ["⌘1 … ⌘9", "Gantt Chart / Resource Sheet / WBS / Workload / Calendar / Board / History / Chat / Dashboard (or click a view in the drawer on the left)"],
   ["Return / Tab (WBS)", "Add a task / a subtask in the WBS chart; Space renames"],
   ["⌘K", "Command bar: run any command by name"],
   ["⌘N / ⌘O", "New project / open a project"],

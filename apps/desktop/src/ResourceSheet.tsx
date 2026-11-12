@@ -337,7 +337,7 @@ function ResourceDetails({ resource }: { resource: ResourceRow | undefined }) {
   if (!resource) {
     return (
       <aside className="resource-details secondary" aria-live="polite">
-        People, equipment and materials for this project. Assign them in the Tasks view's Resources column.
+        People, equipment and materials for this project. Assign them in the Gantt Chart's Resources column.
       </aside>
     );
   }

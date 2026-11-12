@@ -30,6 +30,7 @@ import { RulesSheet } from "./RulesSheet";
 import { accessLabel } from "./permissions";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
+import { ViewDrawer, type View } from "./ViewDrawer";
 import type { ReportView } from "./bindings/ReportView";
 
 /** Window > Portfolio, from inside the page (start screen, command bar). */
@@ -60,7 +61,7 @@ export function App() {
   // The task list's filter; the chart shows the same rows.
   const [filter, setFilter] = useState<TaskFilter>("all");
   const shown = useMemo(() => (snapshot && filter !== "all" ? { ...snapshot, rows: filterRows(snapshot.rows, filter) } : snapshot), [snapshot, filter]);
-  const [view, setView] = useState<"dashboard" | "tasks" | "resources" | "wbs" | "workload" | "calendar" | "board" | "history" | "chat">("tasks");
+  const [view, setView] = useState<View>("tasks");
   const [notice, setNotice] = useState<string | null>(null);
   // The team server account, and this window's sync state (shared projects only).
   const [teamStatus, setTeamStatus] = useState<TeamStatus | null>(null);
@@ -277,7 +278,7 @@ export function App() {
   ];
   if (snapshot) {
     commands.push(
-      { name: "Show Tasks", shortcut: "⌘1", run: () => setView("tasks") },
+      { name: "Show Gantt Chart (tasks and timeline)", shortcut: "⌘1", run: () => setView("tasks") },
       { name: "Show Resource Sheet", shortcut: "⌘2", run: () => setView("resources") },
       { name: "Show Work Breakdown Structure (WBS)", shortcut: "⌘3", run: () => setView("wbs") },
       { name: "Show Workload (hours per person per day)", shortcut: "⌘4", run: () => setView("workload") },
@@ -469,6 +470,7 @@ export function App() {
           </p>
         </div>
         <ProgressBar snapshot={snapshot} />
+        <span className="toolbar-spacer" />
         {snapshot.project.team && <SyncPill status={syncStatus} pending={snapshot.project.team.pending} />}
         {snapshot.project.team && <TeamPeople online={syncStatus?.state === "online"} onInvite={() => setTeamSheet("invite")} onManage={() => setTeamSheet("members")} />}
         {(() => {
@@ -481,49 +483,6 @@ export function App() {
             )
           );
         })()}
-        <div className="segmented" role="tablist" aria-label="View">
-          <button role="tab" aria-selected={view === "dashboard"} className={view === "dashboard" ? "on" : undefined} onClick={() => setView("dashboard")}>
-            Dashboard
-          </button>
-          <button role="tab" aria-selected={view === "tasks"} className={view === "tasks" ? "on" : undefined} onClick={() => setView("tasks")}>
-            Tasks
-          </button>
-          <button role="tab" aria-selected={view === "resources"} className={view === "resources" ? "on" : undefined} onClick={() => setView("resources")}>
-            Resources
-            {snapshot.resources.some((r) => r.overloads.length > 0) && (
-              <span className="overload" aria-label="(some over-allocated)">
-                {" "}⚠
-              </span>
-            )}
-          </button>
-          <button role="tab" aria-selected={view === "wbs"} className={view === "wbs" ? "on" : undefined} onClick={() => setView("wbs")}>
-            WBS
-          </button>
-          <button role="tab" aria-selected={view === "workload"} className={view === "workload" ? "on" : undefined} onClick={() => setView("workload")}>
-            Workload
-          </button>
-          <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "on" : undefined} onClick={() => setView("calendar")}>
-            Calendar
-          </button>
-          <button role="tab" aria-selected={view === "board"} className={view === "board" ? "on" : undefined} onClick={() => setView("board")}>
-            Board
-          </button>
-          {snapshot.project.team && (
-            <button role="tab" aria-selected={view === "history"} className={view === "history" ? "on" : undefined} onClick={() => setView("history")}>
-              History
-            </button>
-          )}
-          {teamStatus?.user && (
-            <button role="tab" aria-selected={view === "chat"} className={view === "chat" ? "on" : undefined} onClick={() => setView("chat")}>
-              Chat
-              {chatUnread > 0 && view !== "chat" && (
-                <span className="tab-badge" aria-label={`${chatUnread} new`}>
-                  {chatUnread}
-                </span>
-              )}
-            </button>
-          )}
-        </div>
       </header>
       {error && (
         <p role="alert" className="banner error">
@@ -548,8 +507,25 @@ export function App() {
           {snapshot.rows.find((r) => r.id === c.taskId)?.name}: {c.message}
         </p>
       ))}
+      <div className="document-body">
+      <ViewDrawer
+        view={view}
+        onView={setView}
+        available={(v) => v !== "history" || snapshot.project.team !== null}
+        badges={{
+          ...(chatUnread > 0 && view !== "chat" ? { chat: String(chatUnread) } : {}),
+          ...(snapshot.resources.some((r) => r.overloads.length > 0) ? { resources: "⚠" } : {}),
+        }}
+      />
+      <div className="view-area">
       {view === "dashboard" ? (
         <Dashboard snapshot={snapshot} onShowTask={showTask} onOpen={(v) => setView(v)} />
+      ) : view === "chat" && !teamStatus?.user ? (
+        <TeamStart
+          onCreate={() => setTeamSheet("share")}
+          onJoin={() => setTeamSheet("join")}
+          onSignIn={() => setTeamSheet("signin")}
+        />
       ) : view === "chat" ? (
         <ChatView snapshot={snapshot} onShowTask={showTask} onConfirm={confirm} />
       ) : view === "history" && snapshot.project.team ? (
@@ -638,11 +614,33 @@ export function App() {
         </div>
         </>
       )}
+      </div>
+      </div>
       {report && <ImportReport report={report} onClose={() => setReport(null)} />}
       {overlays}
       <footer className="status" role="status" aria-live="polite" data-tour="status">
         {message ?? (import.meta.env.DEV ? timing : null) ?? "\u00a0"}
       </footer>
+    </main>
+  );
+}
+
+/** Chat before joining a team: what a team gives you, and the way in. */
+function TeamStart({ onCreate, onJoin, onSignIn }: { onCreate: () => void; onJoin: () => void; onSignIn: () => void }) {
+  return (
+    <main className="team-start" aria-label="Chat">
+      <h2>Work on this project with your team</h2>
+      <p className="secondary">
+        A team project syncs every change live, has a chat with channels for each project, a history of who changed what, and automatic posts when
+        tasks are done or late.
+      </p>
+      <div className="start-actions">
+        <button className="primary" onClick={onCreate}>
+          Create Team Project…
+        </button>
+        <button onClick={onJoin}>Join a Team…</button>
+        <button onClick={onSignIn}>Sign In…</button>
+      </div>
     </main>
   );
 }
