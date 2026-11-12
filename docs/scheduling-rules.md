@@ -107,3 +107,20 @@ assignment's work is spread over the task's own calendar. Project XML: a resourc
 (based on the project's) gives its non-working weekdays and non-working exceptions; different
 hours are reported as approximated.
 
+## R39 Task types and effort-driven (iteration 5)
+
+Work = duration × units (the sum of the work resources' units). Each task has a type, as in
+Microsoft Project, saying which one gives way when another is changed; these are applied when
+the user edits, not by the scheduler:
+
+| Type | New duration | New units | New work |
+|---|---|---|---|
+| Fixed units (default) | work follows | duration follows | duration follows |
+| Fixed work | units follow | duration follows | duration follows |
+| Fixed duration | work follows | work follows | units follow |
+
+Effort-driven (default off, as in Project 2010 and later): adding or removing people keeps the
+total work, so the duration (fixed units) or everyone's units (fixed duration) change. Fixed
+work always keeps the work. Milestones, summaries and elapsed tasks are left alone. Project
+XML: Task Type (0 fixed units, 1 fixed duration, 2 fixed work) and EffortDriven.
+

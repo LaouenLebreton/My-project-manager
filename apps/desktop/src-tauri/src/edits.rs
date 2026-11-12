@@ -55,7 +55,14 @@ pub enum Edit {
         actual_finish: Option<String>,
         /// Deadline (`YYYY-MM-DD`, the end of that working day; empty clears).
         deadline: Option<String>,
+        /// Task type and effort-driven (R39).
+        task_type: Option<TaskTypeEdit>,
+        effort_driven: Option<bool>,
+        /// Typed work, e.g. "40h" (R39): sets the duration, or the units for fixed duration.
+        work_text: Option<String>,
     },
+    /// The Work column / Task Info: typed work for the task's people (R39).
+    SetWork { id: String, text: String },
     /// Project Info: the day the project starts (`YYYY-MM-DD`).
     SetProjectStart { date: String },
     /// Working Time: the whole project calendar.
@@ -140,6 +147,25 @@ pub enum RepeatEdit {
     MonthlyOnDay { every: u32, day: u8 },
     /// `week`: 1–4, or 5 for the last.
     MonthlyOnWeekday { every: u32, week: u8, weekday: u8 },
+}
+
+/// Microsoft Project's task types (R39), as the UI sends them.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[ts(export)]
+pub enum TaskTypeEdit {
+    FixedUnits,
+    FixedWork,
+    FixedDuration,
+}
+
+impl From<TaskTypeEdit> for pm_core::TaskType {
+    fn from(t: TaskTypeEdit) -> Self {
+        match t {
+            TaskTypeEdit::FixedUnits => pm_core::TaskType::FixedUnits,
+            TaskTypeEdit::FixedWork => pm_core::TaskType::FixedWork,
+            TaskTypeEdit::FixedDuration => pm_core::TaskType::FixedDuration,
+        }
+    }
 }
 
 /// Days off from one date to another, inclusive (`YYYY-MM-DD`).
@@ -265,6 +291,8 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     manual_start: None,
                     deadline: None,
                     elapsed: false,
+                    task_type: Default::default(),
+                    effort_driven: false,
                     actual: Actual::default(),
                     notes: String::new(),
                 }],
@@ -295,7 +323,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
         Edit::Outdent { ids } => Ok(outdent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
-        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost, manual, actual_start, actual_finish, deadline } => {
+        Edit::UpdateTask { id, name, duration_text, milestone, constraint, percent_complete, notes, resources, fixed_cost, manual, actual_start, actual_finish, deadline, task_type, effort_driven, work_text } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
             let set = |change| Command::SetTask { id, change };
@@ -371,6 +399,22 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 let d = if text.trim().is_empty() { None } else { Some(end_of_day(p, text.trim())?) };
                 if d != t.deadline {
                     commands.push(set(TaskChange::Deadline(d)));
+                }
+            }
+            if let Some(ty) = task_type.map(pm_core::TaskType::from).filter(|ty| *ty != t.task_type) {
+                commands.push(set(TaskChange::Type(ty)));
+            }
+            if let Some(e) = effort_driven.filter(|e| *e != t.effort_driven) {
+                commands.push(set(TaskChange::EffortDriven(e)));
+            }
+            // Typed work last, on the task as the changes above leave it.
+            if let Some(text) = work_text.filter(|w| !w.trim().is_empty()) {
+                let mut q = p.clone();
+                for c in &commands {
+                    pm_core::apply(&mut q, c).map_err(|e| err(e.to_string()))?;
+                }
+                if let Some(planned) = set_work(&q, units, id, &text)? {
+                    commands.push(planned.command);
                 }
             }
             Ok(batch("Change Task Info", commands).map(|command| Planned { command, created: None, message: None }))
@@ -494,6 +538,8 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     manual_start: None,
                     deadline: None,
                     elapsed: false,
+                    task_type: Default::default(),
+                    effort_driven: false,
                     actual: Actual::default(),
                 }],
                 dependencies: vec![],
@@ -537,6 +583,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             }
             plain(Command::SetResource { id: rid, change: ResourceChange::Availability(a) })
         }
+        Edit::SetWork { id, text } => set_work(p, units, task_id(&id)?, &text),
         Edit::MoveUnder { id, parent_id } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
@@ -714,6 +761,36 @@ fn set_task_resources(p: &Project, task: TaskId, text: &str) -> Result<Option<Pl
         commands.push(Command::InsertResources { resources: created, assignments: vec![] });
     }
     let existing: Vec<&Assignment> = p.assignments.values().filter(|a| a.task == task).collect();
+    // Task types (R39): work = duration × units. Which one gives way depends on the type.
+    let is_work = |r: &ResourceId| p.resources.get(r).is_none_or(|x| x.kind == ResourceKind::Work);
+    let before: i64 = existing.iter().filter(|a| is_work(&a.resource)).map(|a| i64::from(a.units.0)).sum();
+    let after: i64 = wanted.iter().filter(|(r, _)| is_work(r)).map(|(_, u)| i64::from(*u)).sum();
+    let people_changed = {
+        let mut a: Vec<ResourceId> = existing.iter().map(|x| x.resource).collect();
+        let mut b: Vec<ResourceId> = wanted.iter().map(|x| x.0).collect();
+        a.sort();
+        b.sort();
+        a != b
+    };
+    let dur = t.duration.get();
+    let mut new_duration = None;
+    if !t.is_milestone && !t.elapsed && before > 0 && after > 0 && dur > 0 && !is_summary(p, task) {
+        let work = dur * before / 100;
+        use pm_core::TaskType::*;
+        match (t.task_type, people_changed, t.effort_driven) {
+            // Fixed duration, effort-driven: the same work shared, so everyone's units scale.
+            (FixedDuration, true, true) => {
+                for (r, u) in wanted.iter_mut().filter(|(r, _)| is_work(r)) {
+                    let _ = r;
+                    *u = ((i64::from(*u) * before + after / 2) / after).clamp(1, 100_000) as u32;
+                }
+            }
+            (FixedDuration, _, _) | (FixedUnits, true, false) => {}
+            // Fixed work, or fixed units with new units (or effort-driven people): the work
+            // stays, so the duration follows the units.
+            _ => new_duration = Some(work * 100 / after).filter(|d| *d != dur && *d > 0),
+        }
+    }
     for a in &existing {
         if !wanted.iter().any(|(r, _)| *r == a.resource) {
             commands.push(Command::DeleteAssignment { id: a.id });
@@ -727,6 +804,9 @@ fn set_task_resources(p: &Project, task: TaskId, text: &str) -> Result<Option<Pl
                 assignment: Assignment { id: AssignmentId(new_id()), task, resource, units: ResourceUnits(units) },
             }),
         }
+    }
+    if let Some(d) = new_duration {
+        commands.push(Command::SetTask { id: task, change: TaskChange::Duration(Duration::minutes(d)?) });
     }
     Ok(match commands.len() {
         0 => None,
@@ -1017,6 +1097,8 @@ fn add_recurring(p: &Project, units: &Units, edit: Edit) -> Result<Option<Planne
         manual_start: None,
         deadline: None,
         elapsed: false,
+        task_type: Default::default(),
+        effort_driven: false,
         actual: Actual::default(),
         notes: String::new(),
     };
@@ -1082,6 +1164,59 @@ fn set_duration(p: &Project, units: &Units, id: TaskId, text: &str) -> Result<Op
         },
         (m, false) if m == t.duration.get() => return Ok(None),
         (m, false) => set(TaskChange::Duration(Duration::minutes(m)?)),
+    };
+    // Fixed work (R39): the same work over a new duration changes the units.
+    let old = t.duration.get();
+    if t.task_type == pm_core::TaskType::FixedWork && minutes > 0 && old > 0 && !t.is_milestone && !t.elapsed {
+        let scaled: Vec<Command> = p
+            .assignments
+            .values()
+            .filter(|a| a.task == id && p.resources.get(&a.resource).is_some_and(|r| r.kind == ResourceKind::Work))
+            .map(|a| Command::SetAssignmentUnits { id: a.id, units: ResourceUnits(((i64::from(a.units.0) * old + minutes / 2) / minutes).clamp(1, 100_000) as u32) })
+            .collect();
+        if !scaled.is_empty() {
+            let mut commands = vec![command];
+            commands.extend(scaled);
+            return Ok(Some(Planned { command: Command::Batch { label: "Change Duration".into(), commands }, created: None, message: None }));
+        }
+    }
+    Ok(Some(Planned { command, created: None, message: None }))
+}
+
+/// Typed work (R39): fixed units and fixed work keep the units and set the duration; fixed
+/// duration keeps the duration and scales the units.
+fn set_work(p: &Project, units: &Units, id: TaskId, text: &str) -> Result<Option<Planned>, IpcError> {
+    let t = task(p, id)?;
+    if is_summary(p, id) {
+        return Err(err("a summary task's work comes from the tasks inside it"));
+    }
+    let work = units.parse_duration(text)?;
+    let mine: Vec<&Assignment> = p.assignments.values().filter(|a| a.task == id && p.resources.get(&a.resource).is_some_and(|r| r.kind == ResourceKind::Work)).collect();
+    let sum: i64 = mine.iter().map(|a| i64::from(a.units.0)).sum();
+    if sum == 0 {
+        return Err(err("work is done by people: assign someone first, then type the work"));
+    }
+    if work == 0 {
+        return Err(err("type the work as hours or days, such as 40h or 5d"));
+    }
+    let command = if t.task_type == pm_core::TaskType::FixedDuration {
+        let dur = t.duration.get().max(1);
+        let total = work * 100 / dur; // the units needed in all
+        let commands: Vec<Command> = mine
+            .iter()
+            .map(|a| Command::SetAssignmentUnits { id: a.id, units: ResourceUnits(((i64::from(a.units.0) * total + sum / 2) / sum).clamp(1, 100_000) as u32) })
+            .collect();
+        Command::Batch { label: "Change Work".into(), commands }
+    } else {
+        let d = work * 100 / sum;
+        if d == t.duration.get() && !t.is_milestone {
+            return Ok(None);
+        }
+        let mut commands = vec![Command::SetTask { id, change: TaskChange::Duration(Duration::minutes(d)?) }];
+        if t.is_milestone {
+            commands.push(Command::SetTask { id, change: TaskChange::Milestone(false) });
+        }
+        Command::Batch { label: "Change Work".into(), commands }
     };
     Ok(Some(Planned { command, created: None, message: None }))
 }
@@ -1293,6 +1428,8 @@ fn paste_text(p: &Project, units: &Units, after: Option<TaskId>, text: &str) -> 
                 manual_start: None,
                 deadline: None,
                 elapsed: false,
+                task_type: Default::default(),
+                effort_driven: false,
                 actual: Actual::default(),
                 notes: String::new(),
             }
@@ -1503,6 +1640,8 @@ mod tests {
                     manual_start: None,
                     deadline: None,
                     elapsed: false,
+                    task_type: Default::default(),
+                    effort_driven: false,
                     actual: Actual::default(),
                     notes: String::new(),
                 },
@@ -1680,7 +1819,7 @@ mod tests {
             manual: None,
             actual_start: None,
             actual_finish: None,
-            deadline: Some(d.into()),
+            deadline: Some(d.into()), task_type: None, effort_driven: None, work_text: None,
         };
         run(&mut p, info("2026-11-20"));
         assert_eq!(p.tasks[&id[0]].deadline.map(|m| m.to_datetime().to_string()), Some("2026-11-20T17:00:00".into()));
@@ -1721,6 +1860,75 @@ mod tests {
         assert_eq!(e.message, "choose at least one day of the week they work");
         let e = plan(&p, None, &Units::default(), edit(vec![false; 7], &[("2026-12-26", "2026-12-24")])).err().unwrap();
         assert_eq!(e.message, "a day-off period ends before it starts");
+    }
+
+    fn set_type(p: &mut Project, id: TaskId, ty: pm_core::TaskType, effort: bool) {
+        apply(p, &Command::SetTask { id, change: TaskChange::Type(ty) }).unwrap();
+        apply(p, &Command::SetTask { id, change: TaskChange::EffortDriven(effort) }).unwrap();
+    }
+    fn units_of(p: &Project, id: TaskId) -> Vec<u32> {
+        let mut v: Vec<u32> = p.assignments.values().filter(|a| a.task == id).map(|a| a.units.0).collect();
+        v.sort();
+        v
+    }
+    fn res(p: &mut Project, id: TaskId, text: &str) {
+        run(p, Edit::SetTaskResources { id: id.0.to_string(), text: text.into() });
+    }
+
+    #[test]
+    fn fixed_units_halving_units_doubles_the_duration() {
+        // 2 days for Alex full time = 16 hours of work; at 50% the same work takes 4 days.
+        let (mut p, id) = project(&[("A", 0)]);
+        run(&mut p, Edit::SetDuration { id: id[0].0.to_string(), text: "2d".into() });
+        res(&mut p, id[0], "Alex");
+        res(&mut p, id[0], "Alex[50%]");
+        assert_eq!(p.tasks[&id[0]].duration.get(), 4 * 480);
+    }
+
+    #[test]
+    fn effort_driven_adding_a_person_shortens_the_task() {
+        let (mut p, id) = project(&[("A", 0)]);
+        run(&mut p, Edit::SetDuration { id: id[0].0.to_string(), text: "4d".into() });
+        res(&mut p, id[0], "Alex");
+        set_type(&mut p, id[0], pm_core::TaskType::FixedUnits, true);
+        res(&mut p, id[0], "Alex, Sam");
+        assert_eq!(p.tasks[&id[0]].duration.get(), 2 * 480, "32 hours of work shared by two");
+        // Not effort-driven: Sam joining adds work, the duration stays.
+        set_type(&mut p, id[0], pm_core::TaskType::FixedUnits, false);
+        res(&mut p, id[0], "Alex, Sam, Robin");
+        assert_eq!(p.tasks[&id[0]].duration.get(), 2 * 480);
+    }
+
+    #[test]
+    fn fixed_duration_keeps_the_dates_and_fixed_work_changes_units() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0)]);
+        // Fixed duration, effort-driven: a second person halves everyone's units.
+        run(&mut p, Edit::SetDuration { id: id[0].0.to_string(), text: "2d".into() });
+        res(&mut p, id[0], "Alex");
+        set_type(&mut p, id[0], pm_core::TaskType::FixedDuration, true);
+        res(&mut p, id[0], "Alex, Sam");
+        assert_eq!((p.tasks[&id[0]].duration.get(), units_of(&p, id[0])), (960, vec![50, 50]));
+        // Fixed work: a longer duration lowers the units.
+        run(&mut p, Edit::SetDuration { id: id[1].0.to_string(), text: "2d".into() });
+        res(&mut p, id[1], "Alex");
+        set_type(&mut p, id[1], pm_core::TaskType::FixedWork, false);
+        run(&mut p, Edit::SetDuration { id: id[1].0.to_string(), text: "4d".into() });
+        assert_eq!(units_of(&p, id[1]), vec![50]);
+    }
+
+    #[test]
+    fn typed_work_sets_the_duration_or_the_units() {
+        let (mut p, id) = project(&[("A", 0)]);
+        res(&mut p, id[0], "Alex");
+        let work = |p: &mut Project, text: &str| run(p, Edit::SetWork { id: id[0].0.to_string(), text: text.into() });
+        work(&mut p, "24h");
+        assert_eq!(p.tasks[&id[0]].duration.get(), 3 * 480, "fixed units: 24 hours at 100% is 3 days");
+        set_type(&mut p, id[0], pm_core::TaskType::FixedDuration, false);
+        work(&mut p, "12h");
+        assert_eq!(units_of(&p, id[0]), vec![50], "fixed duration: half the work at half the units");
+        let (q, qid) = project(&[("B", 0)]);
+        let e = plan(&q, None, &Units::default(), Edit::SetWork { id: qid[0].0.to_string(), text: "8h".into() }).err().unwrap();
+        assert_eq!(e.message, "work is done by people: assign someone first, then type the work");
     }
 
     #[test]
@@ -1844,7 +2052,7 @@ mod tests {
             manual: None,
             actual_start: None,
             actual_finish: None,
-            deadline: None,
+            deadline: None, task_type: None, effort_driven: None, work_text: None,
         };
         let planned = plan(&p, None, &Units::default(), edit).unwrap().unwrap();
         assert_eq!(planned.command.label(), "Change Task Info");
@@ -1857,7 +2065,7 @@ mod tests {
 
         assert_eq!(p.assignments.values().next().map(|a| a.units.0), Some(50), "resources set in the same step");
         assert_eq!(p.tasks[&id[0]].fixed_cost, Money(125_000));
-        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()), manual: None, actual_start: None, actual_finish: None, deadline: None };
+        let unchanged = Edit::UpdateTask { id: id[0].0.to_string(), name: Some("Survey".into()), duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: Some("robin[50%]".into()), fixed_cost: Some("1250".into()), manual: None, actual_start: None, actual_finish: None, deadline: None, task_type: None, effort_driven: None, work_text: None };
         assert!(plan(&p, None, &Units::default(), unchanged).unwrap().is_none(), "nothing to undo when nothing changed");
         let no_date = Edit::UpdateTask {
             id: id[0].0.to_string(),
@@ -1872,7 +2080,7 @@ mod tests {
             manual: None,
             actual_start: None,
             actual_finish: None,
-            deadline: None,
+            deadline: None, task_type: None, effort_driven: None, work_text: None,
         };
         assert_eq!(plan(&p, None, &Units::default(), no_date).err().unwrap().message, "choose a date for “Start no earlier than”");
     }
@@ -1956,7 +2164,7 @@ mod tests {
         let (mut p, id) = project(&[("A", 0)]);
         p.start = Moment::from_datetime(jiff::civil::date(2026, 10, 5).at(8, 0, 0, 0));
         let a = id[0].0.to_string();
-        let manual = |on| Edit::UpdateTask { id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: None, fixed_cost: None, manual: Some(on), actual_start: None, actual_finish: None, deadline: None };
+        let manual = |on| Edit::UpdateTask { id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None, resources: None, fixed_cost: None, manual: Some(on), actual_start: None, actual_finish: None, deadline: None, task_type: None, effort_driven: None, work_text: None };
         run(&mut p, manual(true));
         assert_eq!(p.tasks[&id[0]].manual_start, Some(p.start));
         run(&mut p, Edit::MoveTask { id: a.clone(), start_date: "2026-10-08".into() });
@@ -1985,7 +2193,7 @@ mod tests {
         // Typed in Task Info: a finish makes it 100%; clearing the start makes it 0%.
         let info = |start: Option<&str>, finish: Option<&str>| Edit::UpdateTask {
             id: a.clone(), name: None, duration_text: None, milestone: None, constraint: None, percent_complete: None, notes: None,
-            resources: None, fixed_cost: None, manual: None, actual_start: start.map(Into::into), actual_finish: finish.map(Into::into), deadline: None,
+            resources: None, fixed_cost: None, manual: None, actual_start: start.map(Into::into), actual_finish: finish.map(Into::into), deadline: None, task_type: None, effort_driven: None, work_text: None,
         };
         run(&mut p, info(Some("2026-10-06"), Some("2026-10-07")));
         assert_eq!(p.tasks[&id[0]].actual, Actual::Finished { start: at(6, 8), finish: at(7, 17) });

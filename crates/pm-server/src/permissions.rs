@@ -185,6 +185,8 @@ mod tests {
                 manual_start: None,
                 deadline: None,
                 elapsed: false,
+                task_type: Default::default(),
+                effort_driven: false,
                 actual: Actual::default(),
                 notes: String::new(),
             };

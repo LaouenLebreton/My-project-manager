@@ -162,6 +162,12 @@ pub struct Task {
     /// elapsed duration, "3ed"); otherwise only working time.
     #[serde(default)]
     pub elapsed: bool,
+    /// Which of duration, units and work stays when another changes (R39).
+    #[serde(default)]
+    pub task_type: TaskType,
+    /// Adding or removing people keeps the total work (R39).
+    #[serde(default)]
+    pub effort_driven: bool,
     /// What really happened (R35): once a task has started, its dates are facts.
     #[serde(default)]
     pub actual: Actual,
@@ -218,6 +224,19 @@ pub struct Dependency {
     pub lag: i64,
     #[serde(default)]
     pub lag_format: LagFormat,
+}
+
+/// Microsoft Project's task types (R39): work = duration × units, and the type says which one
+/// stays when another is changed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskType {
+    /// Units stay: a new duration changes the work; new units or work change the duration.
+    #[default]
+    FixedUnits,
+    /// Work stays: a new duration changes the units; new units change the duration.
+    FixedWork,
+    /// Duration stays: new units change the work; new work changes the units.
+    FixedDuration,
 }
 
 /// How a link's lag is measured, as in Microsoft Project (R37).

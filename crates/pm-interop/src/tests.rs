@@ -280,6 +280,8 @@ fn random_project() -> impl Strategy<Value = Project> {
                 manual_start: None,
                 deadline: (k % 4 == 1).then_some(date),
                 elapsed: k % 5 == 2,
+                task_type: [pm_core::TaskType::FixedUnits, pm_core::TaskType::FixedWork, pm_core::TaskType::FixedDuration][k % 3],
+                effort_driven: k % 2 == 0,
                 actual: Actual::default(),
                 notes: if k % 3 == 0 { format!("Note {k}: <b>&amp;</b>\nline two") } else { String::new() },
             };

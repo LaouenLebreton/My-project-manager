@@ -136,6 +136,12 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         let minutes = t.text_of("Duration").and_then(parse_iso_duration).unwrap_or(0);
         // Elapsed durations count clock time (R36); the file gives them as clock time too.
         let elapsed = ELAPSED_FORMATS.contains(&format);
+        // Task type (R39): 0 fixed units, 1 fixed duration, 2 fixed work.
+        let task_type = match t.int_of("Type") {
+            Some(1) => pm_core::TaskType::FixedDuration,
+            Some(2) => pm_core::TaskType::FixedWork,
+            _ => pm_core::TaskType::FixedUnits,
+        };
         let is_milestone = t.flag("Milestone");
         if is_milestone && minutes > 0 {
             r.approximated("Milestones with a duration became zero-duration milestones", Some(&label));
@@ -170,6 +176,8 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
                 manual_start,
                 deadline: t.text_of("Deadline").and_then(parse_datetime),
                 elapsed,
+                task_type,
+                effort_driven: t.flag("EffortDriven"),
                 actual,
                 notes: t.raw_of("Notes").unwrap_or("").to_owned(),
             },

@@ -127,6 +127,8 @@ fn sample_project(name: &str) -> Value {
         manual_start: None,
         deadline: None,
         elapsed: false,
+        task_type: Default::default(),
+        effort_driven: false,
         actual: Actual::default(),
         notes: String::new(),
     };

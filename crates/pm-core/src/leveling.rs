@@ -160,6 +160,8 @@ mod tests {
                 manual_start: None,
                 deadline: None,
                 elapsed: false,
+                task_type: Default::default(),
+                effort_driven: false,
                 actual: Actual::default(),
             };
             apply(&mut self.0, &Command::InsertTasks { tasks: vec![t], dependencies: vec![] }).unwrap();

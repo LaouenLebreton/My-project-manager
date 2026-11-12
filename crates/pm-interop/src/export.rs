@@ -205,6 +205,15 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         leaf(&mut w, "UID", &(i + 1).to_string());
         leaf(&mut w, "ID", &(i + 1).to_string());
         leaf(&mut w, "Name", &t.name);
+        leaf(
+            &mut w,
+            "Type",
+            match t.task_type {
+                pm_core::TaskType::FixedUnits => "0",
+                pm_core::TaskType::FixedDuration => "1",
+                pm_core::TaskType::FixedWork => "2",
+            },
+        );
         leaf(&mut w, "Type", "1"); // fixed duration
         leaf(&mut w, "IsNull", "0");
         leaf(&mut w, "OutlineNumber", &outline_numbers.iter().map(usize::to_string).collect::<Vec<_>>().join("."));
@@ -232,6 +241,7 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         // A summary's dates come from its tasks, so a milestone flag on it means nothing.
         leaf(&mut w, "Milestone", if t.is_milestone && !row.has_children { "1" } else { "0" });
         leaf(&mut w, "Summary", if row.has_children { "1" } else { "0" });
+        leaf(&mut w, "EffortDriven", if t.effort_driven { "1" } else { "0" });
         leaf(&mut w, "PercentComplete", &t.percent_complete.get().to_string());
         if let Some(start) = t.actual.start().filter(|_| !row.has_children) {
             leaf(&mut w, "ActualStart", &datetime(start));

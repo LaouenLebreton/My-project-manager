@@ -277,6 +277,11 @@ pub struct Row {
     pub deadline: Option<String>,
     /// Not finished, and scheduled to finish after its deadline.
     pub missed_deadline: bool,
+    /// Task type and effort-driven (R39).
+    pub task_type: crate::edits::TaskTypeEdit,
+    pub effort_driven: bool,
+    /// The work of the people on it, as typed ("40h"); empty without people.
+    pub work_text: String,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -528,6 +533,21 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 actual_finish: t.actual.finish().map(iso),
                 deadline: t.deadline.map(iso),
                 missed_deadline: t.percent_complete.get() < 100 && t.deadline.zip(s).is_some_and(|(d, s)| s.early_finish > d),
+                task_type: match t.task_type {
+                    pm_core::TaskType::FixedUnits => crate::edits::TaskTypeEdit::FixedUnits,
+                    pm_core::TaskType::FixedWork => crate::edits::TaskTypeEdit::FixedWork,
+                    pm_core::TaskType::FixedDuration => crate::edits::TaskTypeEdit::FixedDuration,
+                },
+                effort_driven: t.effort_driven,
+                work_text: {
+                    let work: i64 = p
+                        .assignments
+                        .values()
+                        .filter(|a| a.task == r.id && p.resources.get(&a.resource).is_some_and(|x| x.kind == ResourceKind::Work))
+                        .filter_map(|a| doc.loads.work.get(&a.id))
+                        .sum();
+                    if work > 0 { format!("{}h", (work as f64 / 60.0 * 100.0).round() / 100.0) } else { String::new() }
+                },
                 earned_value: earned.as_ref().and_then(|e| e.tasks.get(&r.id)).map(|ev| EarnedView::new(as_of, *ev)),
                 leveled_from: s
                     .filter(|_| t.leveling_delay.get() > 0)

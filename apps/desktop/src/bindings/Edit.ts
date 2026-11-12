@@ -4,6 +4,7 @@ import type { DayException } from "./DayException";
 import type { DayOffRange } from "./DayOffRange";
 import type { RepeatEdit } from "./RepeatEdit";
 import type { ResourceKindEdit } from "./ResourceKindEdit";
+import type { TaskTypeEdit } from "./TaskTypeEdit";
 import type { TimeRange } from "./TimeRange";
 
 export type Edit = { "kind": "AddTask", afterId: string | null, name: string, } | { "kind": "RenameTask", id: string, name: string, } | { "kind": "SetDuration", id: string, text: string, } | { "kind": "SetPredecessors", id: string, text: string, } | { "kind": "DeleteTasks", ids: Array<string>, } | { "kind": "AddLink", predecessorId: string, successorId: string, } | { "kind": "Indent", ids: Array<string>, } | { "kind": "Outdent", ids: Array<string>, } | { "kind": "MoveTask", id: string, startDate: string, } | { "kind": "SetFinish", id: string, finishDate: string, } | { "kind": "UpdateTask", id: string, name: string | null, durationText: string | null, milestone: boolean | null, constraint: ConstraintEdit | null, percentComplete: number | null, notes: string | null, 
@@ -26,7 +27,15 @@ actualStart: string | null, actualFinish: string | null,
 /**
  * Deadline (`YYYY-MM-DD`, the end of that working day; empty clears).
  */
-deadline: string | null, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
+deadline: string | null, 
+/**
+ * Task type and effort-driven (R39).
+ */
+taskType: TaskTypeEdit | null, effortDriven: boolean | null, 
+/**
+ * Typed work, e.g. "40h" (R39): sets the duration, or the units for fixed duration.
+ */
+workText: string | null, } | { "kind": "SetWork", id: string, text: string, } | { "kind": "SetProjectStart", date: string, } | { "kind": "SetCalendar", week: Array<Array<TimeRange>>, exceptions: Array<DayException>, } | { "kind": "SetTaskResources", id: string, text: string, } | { "kind": "AddResource", afterId: string | null, name: string, } | { "kind": "UpdateResource", id: string, name: string | null, initials: string | null, resourceType: ResourceKindEdit | null, 
 /**
  * Typed maximum: `100%`, `300%` or `3` (people).
  */

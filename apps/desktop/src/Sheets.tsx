@@ -112,6 +112,9 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
   const [actualFinish, setActualFinish] = useState(initialFinish);
   const initialDeadline = row.deadline?.slice(0, 10) ?? "";
   const [deadline, setDeadline] = useState(initialDeadline);
+  const [taskType, setTaskType] = useState(row.taskType);
+  const [effortDriven, setEffortDriven] = useState(row.effortDriven);
+  const [work, setWork] = useState(row.workText);
   return (
     <Sheet
       title="Task Info"
@@ -133,6 +136,9 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
           actualStart: row.isSummary || actualStart === initialStart ? null : actualStart,
           actualFinish: row.isSummary || actualFinish === initialFinish ? null : actualFinish,
           deadline: deadline === initialDeadline ? null : deadline,
+          taskType: row.isSummary ? null : taskType,
+          effortDriven: row.isSummary ? null : effortDriven,
+          workText: row.isSummary || work === row.workText ? null : work,
         })
       }
     >
@@ -230,6 +236,31 @@ export function TaskInfo({ row, send, onClose }: { row: Row; send: Send; onClose
             <input id="ti-actual-start" type="date" value={actualStart} onChange={(e) => setActualStart(e.target.value)} />
             <label htmlFor="ti-actual-finish">Actual finish</label>
             <input id="ti-actual-finish" type="date" value={actualFinish} onChange={(e) => setActualFinish(e.target.value)} />
+          </>
+        )}
+
+        {!row.isSummary && (
+          <>
+            <label htmlFor="ti-type">Task type</label>
+            <div>
+              <select id="ti-type" value={taskType} onChange={(e) => setTaskType(e.target.value as typeof taskType)}>
+                <option value="FixedUnits">Fixed units</option>
+                <option value="FixedWork">Fixed work</option>
+                <option value="FixedDuration">Fixed duration</option>
+              </select>{" "}
+              <label className="inline">
+                <input type="checkbox" checked={effortDriven} onChange={(e) => setEffortDriven(e.target.checked)} /> Effort-driven
+              </label>
+              <p className="secondary small">
+                Work = duration × units. Fixed units: new units or work change the duration. Fixed work: the work stays; a new duration changes the units. Fixed
+                duration: the dates stay; new work changes the units. Effort-driven: adding people shares the same work.
+              </p>
+            </div>
+            <label htmlFor="ti-work">Work</label>
+            <div>
+              <input id="ti-work" value={work} placeholder={resources.trim() ? "e.g. 40h" : "assign people first"} disabled={!row.resourceNames.trim()} onChange={(e) => setWork(e.target.value)} size={10} />
+              <p className="secondary small">The hours the people on it put in, all together.</p>
+            </div>
           </>
         )}
 

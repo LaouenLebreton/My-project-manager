@@ -56,6 +56,9 @@ function row(name: string, depth = 0): Row {
     earnedValue: null,
     deadline: null,
     missedDeadline: false,
+    taskType: "FixedUnits",
+    effortDriven: false,
+    workText: "",
   };
 }
 

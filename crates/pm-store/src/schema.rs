@@ -156,6 +156,11 @@ pub const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE resource ADD COLUMN availability TEXT NOT NULL DEFAULT '';
     "#,
+    // 11 -> 12: task types (iteration 5).
+    r#"
+    ALTER TABLE task ADD COLUMN task_type TEXT NOT NULL DEFAULT 'fixed_units' CHECK (task_type IN ('fixed_units', 'fixed_work', 'fixed_duration'));
+    ALTER TABLE task ADD COLUMN effort_driven INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

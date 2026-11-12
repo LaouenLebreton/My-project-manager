@@ -155,6 +155,16 @@ fn one(p: &Project, cmd: &Command) -> Vec<String> {
                 TaskChange::Deadline(None) => format!("removed the deadline of {n}"),
                 TaskChange::Elapsed(true) => format!("made {n}'s duration count nights and weekends (elapsed)"),
                 TaskChange::Elapsed(false) => format!("made {n}'s duration count working time only"),
+                TaskChange::Type(t) => format!(
+                    "made {n} {}",
+                    match t {
+                        pm_core::TaskType::FixedUnits => "fixed units",
+                        pm_core::TaskType::FixedWork => "fixed work",
+                        pm_core::TaskType::FixedDuration => "fixed duration",
+                    }
+                ),
+                TaskChange::EffortDriven(true) => format!("made {n} effort-driven"),
+                TaskChange::EffortDriven(false) => format!("made {n} no longer effort-driven"),
                 TaskChange::Actual(Actual::NotStarted) => format!("cleared the actual dates of {n}"),
                 TaskChange::Actual(Actual::Started { start }) => format!("recorded that {n} started on {}", date(*start)),
                 TaskChange::Actual(Actual::Finished { finish, .. }) => format!("recorded that {n} finished on {}", date(*finish)),
@@ -277,6 +287,8 @@ mod tests {
             manual_start: None,
             deadline: None,
             elapsed: false,
+            task_type: Default::default(),
+            effort_driven: false,
             actual: Actual::default(),
             notes: String::new(),
         };

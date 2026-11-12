@@ -22,7 +22,7 @@ its own, test-first, in this order.
 8. **[Done]** **Exports:** CSV of the task list; a printable status report.
 9. **[Done]** **Elapsed durations and percentage lags** (`3ed`, `50%`), read from Project XML exactly.
 10. **[Done]** **Resource calendars:** each person's days off and part-time weeks.
-11. **Task types:** fixed units, fixed work, fixed duration, and effort-driven.
+11. **[Done]** **Task types:** fixed units, fixed work, fixed duration, and effort-driven.
 
 ## C. Teams
 

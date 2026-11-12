@@ -63,6 +63,10 @@ pub enum TaskChange {
     Deadline(Option<Moment>),
     /// Whether the duration counts every minute (elapsed) or working time only.
     Elapsed(bool),
+    /// Fixed units, fixed work or fixed duration (R39).
+    Type(crate::TaskType),
+    /// Whether adding or removing people keeps the total work (R39).
+    EffortDriven(bool),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +184,7 @@ impl Command {
                 TaskChange::Deadline(Some(_)) => "Set Deadline",
                 TaskChange::Deadline(None) => "Clear Deadline",
                 TaskChange::Elapsed(_) => "Change Duration",
+                TaskChange::Type(_) | TaskChange::EffortDriven(_) => "Change Task Type",
                 TaskChange::Actual(_) => "Update Progress",
             }
             .into(),
@@ -570,6 +575,8 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
         TaskChange::ManualStart(v) => TaskChange::ManualStart(std::mem::replace(&mut t.manual_start, *v)),
         TaskChange::Deadline(v) => TaskChange::Deadline(std::mem::replace(&mut t.deadline, *v)),
         TaskChange::Elapsed(v) => TaskChange::Elapsed(std::mem::replace(&mut t.elapsed, *v)),
+        TaskChange::Type(v) => TaskChange::Type(std::mem::replace(&mut t.task_type, *v)),
+        TaskChange::EffortDriven(v) => TaskChange::EffortDriven(std::mem::replace(&mut t.effort_driven, *v)),
         TaskChange::Actual(v) => TaskChange::Actual(std::mem::replace(&mut t.actual, *v)),
         TaskChange::Position { parent, sort_key } => TaskChange::Position {
             parent: std::mem::replace(&mut t.parent, *parent),
@@ -617,6 +624,8 @@ mod tests {
             manual_start: None,
             deadline: None,
             elapsed: false,
+            task_type: Default::default(),
+            effort_driven: false,
             actual: Actual::default(),
             notes: String::new(),
         }

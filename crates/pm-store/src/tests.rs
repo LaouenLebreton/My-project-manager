@@ -39,6 +39,8 @@ fn task(n: u128) -> Task {
         manual_start: None,
         deadline: None,
         elapsed: false,
+        task_type: Default::default(),
+        effort_driven: false,
         actual: Actual::default(),
         notes: String::new(),
     }
@@ -169,7 +171,7 @@ fn version_1_files_are_upgraded() {
     drop(Store::create(&path, &p).unwrap());
     // Turn it back into a version 1 file, as an iteration 1 build would have written it.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; ALTER TABLE task DROP COLUMN actual_start_min; ALTER TABLE task DROP COLUMN actual_finish_min; ALTER TABLE project DROP COLUMN status_date_min; ALTER TABLE task DROP COLUMN deadline_min; ALTER TABLE task DROP COLUMN elapsed; ALTER TABLE dependency DROP COLUMN lag_format; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; ALTER TABLE task DROP COLUMN actual_start_min; ALTER TABLE task DROP COLUMN actual_finish_min; ALTER TABLE project DROP COLUMN status_date_min; ALTER TABLE task DROP COLUMN deadline_min; ALTER TABLE task DROP COLUMN elapsed; ALTER TABLE dependency DROP COLUMN lag_format; ALTER TABLE task DROP COLUMN task_type; ALTER TABLE task DROP COLUMN effort_driven; PRAGMA user_version = 1;").unwrap();
     drop(conn);
     let (mut s, mut loaded) = Store::open(&path).unwrap();
     // Version 1 had no leveling delays; they come back as zero.
@@ -487,6 +489,8 @@ fn elapsed_durations_and_lag_formats_are_saved() {
     let mut p = rich_project();
     for t in p.tasks.values_mut() {
         t.elapsed = true;
+        t.task_type = pm_core::TaskType::FixedWork;
+        t.effort_driven = true;
     }
     for d in p.dependencies.values_mut() {
         d.lag_format = pm_core::LagFormat::Percent;

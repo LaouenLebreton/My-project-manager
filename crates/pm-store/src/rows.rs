@@ -92,8 +92,8 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
     let cdate = t.constraint.date().map(|m| m.0);
     conn.execute(
         "INSERT OR REPLACE INTO task
-         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min, elapsed)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min, elapsed, task_type, effort_driven)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             t.id.0.to_string(),
             t.parent.map(|p| p.0.to_string()),
@@ -112,6 +112,8 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
             t.actual.finish().map(|m| m.0),
             t.deadline.map(|m| m.0),
             t.elapsed,
+            task_type_code(t.task_type),
+            t.effort_driven,
         ],
     )?;
     Ok(())
@@ -204,6 +206,8 @@ fn task_from_row(r: &Row) -> Result<Task, StoreError> {
         manual_start: r.get::<_, Option<i64>>(12)?.map(Moment),
         deadline: r.get::<_, Option<i64>>(15)?.map(Moment),
         elapsed: r.get(16)?,
+        task_type: task_type_of(&r.get::<_, String>(17)?)?,
+        effort_driven: r.get(18)?,
         actual: match (r.get::<_, Option<i64>>(13)?, r.get::<_, Option<i64>>(14)?) {
             (None, None) => Actual::NotStarted,
             (Some(s), None) => Actual::Started { start: Moment(s) },
@@ -227,7 +231,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
 
     let mut tasks = BTreeMap::new();
     let mut stmt = conn.prepare(
-        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min, elapsed FROM task",
+        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min, elapsed, task_type, effort_driven FROM task",
     )?;
     let mut q = stmt.query([])?;
     while let Some(r) = q.next()? {
@@ -320,5 +324,22 @@ fn lag_format_of(code: &str) -> Result<pm_core::LagFormat, StoreError> {
         "elapsed" => Ok(pm_core::LagFormat::Elapsed),
         "percent" => Ok(pm_core::LagFormat::Percent),
         other => Err(StoreError::Damaged(format!("lag format {other}"))),
+    }
+}
+
+fn task_type_code(t: pm_core::TaskType) -> &'static str {
+    match t {
+        pm_core::TaskType::FixedUnits => "fixed_units",
+        pm_core::TaskType::FixedWork => "fixed_work",
+        pm_core::TaskType::FixedDuration => "fixed_duration",
+    }
+}
+
+fn task_type_of(code: &str) -> Result<pm_core::TaskType, StoreError> {
+    match code {
+        "fixed_units" => Ok(pm_core::TaskType::FixedUnits),
+        "fixed_work" => Ok(pm_core::TaskType::FixedWork),
+        "fixed_duration" => Ok(pm_core::TaskType::FixedDuration),
+        other => Err(StoreError::Damaged(format!("task type {other}"))),
     }
 }
