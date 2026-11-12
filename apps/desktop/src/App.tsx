@@ -3,7 +3,7 @@ import { Dashboard, ProgressBar } from "./Dashboard";
 import { StatusReport } from "./StatusReport";
 import { FirstSteps } from "./FirstSteps";
 import { FILTERS, filterRows, type TaskFilter } from "./filter";
-import { isMac } from "./platform";
+import { isMac, keys } from "./platform";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, chat, errorMessage, team, type Edit, type IpcError, type RecentFile, type Snapshot, type SyncStatus, type TeamStatus } from "./api";
@@ -31,6 +31,7 @@ import { accessLabel } from "./permissions";
 import { Grid, type GridHandle } from "./Grid";
 import { ImportReport } from "./ImportReport";
 import { ViewDrawer, type View } from "./ViewDrawer";
+import { TaskDetails } from "./TaskDetails";
 import type { ReportView } from "./bindings/ReportView";
 
 /** Window > Portfolio, from inside the page (start screen, command bar). */
@@ -62,6 +63,13 @@ export function App() {
   const [filter, setFilter] = useState<TaskFilter>("all");
   const shown = useMemo(() => (snapshot && filter !== "all" ? { ...snapshot, rows: filterRows(snapshot.rows, filter) } : snapshot), [snapshot, filter]);
   const [view, setView] = useState<View>("tasks");
+  // The task details panel beside the Gantt Chart and the WBS (remembered on this computer).
+  const [detailsOpen, setDetailsOpenState] = useState(() => readFlag(DETAILS_KEY, true));
+  const setDetailsOpen = useCallback((open: boolean) => {
+    setDetailsOpenState(open);
+    writeFlag(DETAILS_KEY, open);
+  }, []);
+  const [wbsSelected, setWbsSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // The team server account, and this window's sync state (shared projects only).
   const [teamStatus, setTeamStatus] = useState<TeamStatus | null>(null);
@@ -226,6 +234,10 @@ export function App() {
         if (e.payload === "view.chat") setView("chat");
         if (e.payload === "task.insert") gridRef.current?.insertTask();
         if (e.payload === "task.add_subtask") gridRef.current?.addSubtask();
+        if (e.payload === "view.details") setDetailsOpenState((o) => {
+          writeFlag(DETAILS_KEY, !o);
+          return !o;
+        });
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.recurring") setOverlay("recurring");
         if (e.payload === "edit.undo_history") setOverlay("undo");
@@ -296,6 +308,7 @@ export function App() {
       { name: "Insert Task (above the selected one)", shortcut: "⇧⌘↩", run: () => gridRef.current?.insertTask() },
       { name: "Add Subtask (inside the selected task)", run: () => gridRef.current?.addSubtask() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
+      { name: detailsOpen ? "Hide Task Details" : "Show Task Details (everything about the selected task)", shortcut: "⇧⌘D", run: () => setDetailsOpen(!detailsOpen) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
       { name: "Recurring Task… (a meeting or report that repeats)", run: () => setOverlay("recurring") },
       { name: "Project Info…", run: () => setOverlay("project") },
@@ -475,6 +488,16 @@ export function App() {
         </div>
         <ProgressBar snapshot={snapshot} />
         <span className="toolbar-spacer" />
+        {(view === "tasks" || view === "wbs") && (
+          <button
+            className={detailsOpen ? "details-toggle on" : "details-toggle"}
+            aria-pressed={detailsOpen}
+            onClick={() => setDetailsOpen(!detailsOpen)}
+            title={keys("Task details: everything about the selected task (⇧⌘D)")}
+          >
+            Details
+          </button>
+        )}
         {snapshot.project.team && <SyncPill status={syncStatus} pending={snapshot.project.team.pending} />}
         {snapshot.project.team && <TeamPeople online={syncStatus?.state === "online"} onInvite={() => setTeamSheet("invite")} onManage={() => setTeamSheet("members")} />}
         {(() => {
@@ -522,6 +545,7 @@ export function App() {
         }}
       />
       <div className="view-area">
+      <div className="view-main">
       {view === "dashboard" ? (
         <Dashboard snapshot={snapshot} onShowTask={showTask} onOpen={(v) => setView(v)} />
       ) : view === "chat" && !teamStatus?.user ? (
@@ -541,7 +565,7 @@ export function App() {
       ) : view === "workload" ? (
         <Workload snapshot={snapshot} onShowTask={showTask} />
       ) : view === "wbs" ? (
-        <WbsChart snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
+        <WbsChart snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} onSelect={setWbsSelected} onTaskInfo={setInfoRow} />
       ) : view === "resources" ? (
         <ResourceSheet snapshot={snapshot} onEdit={edit} onTextEditing={textEditing} />
       ) : (
@@ -620,6 +644,17 @@ export function App() {
         </>
       )}
       </div>
+      {detailsOpen && (view === "tasks" || view === "wbs") && (
+        <TaskDetails
+          snapshot={snapshot}
+          taskId={view === "wbs" ? wbsSelected : ([...selectedIds][0] ?? null)}
+          count={view === "wbs" ? 1 : selectedIds.size}
+          onEdit={edit}
+          onMore={setInfoRow}
+          onClose={() => setDetailsOpen(false)}
+        />
+      )}
+      </div>
       </div>
       {report && <ImportReport report={report} onClose={() => setReport(null)} />}
       {overlays}
@@ -648,6 +683,23 @@ function TeamStart({ onCreate, onJoin, onSignIn }: { onCreate: () => void; onJoi
       </div>
     </main>
   );
+}
+
+const DETAILS_KEY = "superpm.detailsOpen";
+function readFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+function writeFlag(key: string, on: boolean) {
+  try {
+    localStorage.setItem(key, on ? "1" : "0");
+  } catch {
+    // a convenience only
+  }
 }
 
 // The first-run flag is a per-machine convenience, so browser storage is enough; if it is

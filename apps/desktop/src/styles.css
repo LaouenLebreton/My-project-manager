@@ -2652,3 +2652,175 @@ dialog.status-report {
   font-weight: 600;
   color: var(--text-secondary);
 }
+
+/* ---- WBS boxes: dates, people and progress ---- */
+.wbs-meta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.wbs-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  font-size: 0.75em;
+  color: var(--text-secondary);
+}
+.wbs-progress-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, CanvasText 12%, transparent);
+  overflow: hidden;
+}
+.wbs-progress-track > span {
+  display: block;
+  height: 100%;
+  background: #30d158;
+}
+.wbs-percent {
+  min-width: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Task details, beside the Gantt Chart and the WBS ---- */
+.view-area {
+  flex-direction: row;
+}
+.view-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.view-main > main,
+.view-main > section,
+.view-main > div:not(.filter-bar):not(.find-bar) {
+  flex: 1;
+  min-height: 0;
+}
+.view-main > .filter-bar {
+  flex: 0 0 auto;
+}
+.task-details {
+  flex: 0 0 264px;
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, CanvasText 2%, Canvas);
+  padding: 10px 14px 16px;
+  font-size: 12.5px;
+}
+.task-details > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.task-details h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.task-details h3 {
+  margin: 14px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.details-wbs {
+  margin: 0 0 4px;
+}
+.task-details input,
+.task-details textarea {
+  width: 100%;
+  font: inherit;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+}
+.task-details input:hover,
+.task-details textarea:hover {
+  border-color: var(--line);
+}
+.task-details input:focus,
+.task-details textarea:focus {
+  outline: none;
+  border-color: AccentColor;
+  background: Canvas;
+}
+.task-details textarea {
+  border-color: var(--line);
+  resize: vertical;
+}
+.task-details .details-name {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 3px 6px;
+  margin-left: -6px;
+}
+.details-progress {
+  height: 4px;
+  border-radius: 2px;
+  margin: 6px 0 2px;
+  background: color-mix(in srgb, CanvasText 12%, transparent);
+  overflow: hidden;
+}
+.details-progress > span {
+  display: block;
+  height: 100%;
+  background: #30d158;
+}
+.task-details dl {
+  margin: 0;
+}
+.details-pair {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  min-height: 24px;
+}
+.details-pair dt {
+  color: var(--text-secondary);
+}
+.details-pair dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.details-pair dd > span {
+  padding: 2px 0;
+}
+.task-details > .details-body > button {
+  margin-top: 14px;
+}
+.details-toggle.on {
+  background: color-mix(in srgb, AccentColor 18%, transparent);
+  border-color: color-mix(in srgb, AccentColor 50%, transparent);
+}
+.wbs-toolbar {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.wbs-toolbar button,
+.wbs-toolbar label {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.wbs-toolbar > [role="status"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

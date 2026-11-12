@@ -3,9 +3,12 @@ import { errorMessage, type Edit, type EditResult } from "./api";
 import type { Row } from "./bindings/Row";
 import type { Snapshot } from "./bindings/Snapshot";
 import { formatDays, formatMoney } from "./format";
+import { useContextMenu, type MenuItem } from "./ContextMenu";
+
+const short = (iso: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "");
 
 const BOX_W = 196;
-const BOX_H = 64;
+const BOX_H = 104;
 const COL_GAP = 32;
 const ROW_GAP = 14;
 const INDENT = 24;
@@ -28,7 +31,20 @@ interface Placed {
  * sibling, Tab a subtask, Space or a double-click renames, Delete removes, arrows move;
  * drag a box onto another to move it underneath.
  */
-export function WbsChart({ snapshot, onEdit, onTextEditing }: { snapshot: Snapshot; onEdit: (e: Edit) => Promise<EditResult>; onTextEditing: (editing: boolean) => void }) {
+export function WbsChart({
+  snapshot,
+  onEdit,
+  onTextEditing,
+  onSelect,
+  onTaskInfo,
+}: {
+  snapshot: Snapshot;
+  onEdit: (e: Edit) => Promise<EditResult>;
+  onTextEditing: (editing: boolean) => void;
+  /** The selected task (null: the project box), for the details panel. */
+  onSelect?: (id: string | null) => void;
+  onTaskInfo?: (r: Row) => void;
+}) {
   const rows = snapshot.rows;
   const perDay = snapshot.project.minutesPerDay;
   const [selected, setSelected] = useState<string>(ROOT);
@@ -93,6 +109,7 @@ export function WbsChart({ snapshot, onEdit, onTextEditing }: { snapshot: Snapsh
   useEffect(() => {
     if (!byId.has(selected)) setSelected(ROOT);
   }, [byId, selected]);
+  useEffect(() => onSelect?.(selected === ROOT ? null : selected), [selected, onSelect]);
 
   const send = async (edit: Edit) => {
     try {
@@ -231,6 +248,25 @@ export function WbsChart({ snapshot, onEdit, onTextEditing }: { snapshot: Snapsh
   }
 
   const selectedRow = byId.get(selected)?.row;
+  const openMenu = useContextMenu();
+  const boxMenu = (p: Placed): MenuItem[] => {
+    const r = p.row;
+    if (!r) return [{ label: "Add Task", shortcut: "↩", run: () => void add({ kind: "AddTask", afterId: null, name: "New task", place: "End" }) }];
+    return [
+      { label: "Add Task After", shortcut: "↩", run: () => void add({ kind: "AddTask", afterId: r.id, name: "New task", place: "After" }) },
+      { label: "Add Task Before", run: () => void add({ kind: "AddTask", afterId: r.id, name: "New task", place: "Above" }) },
+      { label: "Add Subtask", shortcut: "⇥", run: () => void add({ kind: "AddSubtask", parentId: r.id, name: "New task" }) },
+      { separator: true },
+      { label: "Rename", shortcut: "Space", run: () => setEditing({ id: r.id, text: r.name, error: null }) },
+      { label: "Task Info…", run: () => onTaskInfo?.(r) },
+      ...(r.isSummary ? [{ label: p.hiddenCount ? "Show the Tasks Inside" : "Hide the Tasks Inside", run: () => toggle(p.id, p.hiddenCount > 0) }] : []),
+      { separator: true },
+      { heading: "Mark complete" },
+      ...[0, 50, 100].map((n) => ({ label: `${n}%`, checked: r.percentComplete === n, run: () => void send({ kind: "SetPercentComplete", ids: [r.id], percent: n }) })),
+      { separator: true },
+      { label: "Delete Task", shortcut: "⌫", danger: true, run: () => void send({ kind: "DeleteTasks", ids: [r.id] }) },
+    ];
+  };
 
   return (
     <div className="wbs-view">
@@ -297,7 +333,7 @@ export function WbsChart({ snapshot, onEdit, onTextEditing }: { snapshot: Snapsh
                 drag?.id === p.id ? "dragging" : "",
               ].filter(Boolean);
               const label = r
-                ? `${r.wbs} ${r.name}, ${r.isMilestone ? "milestone" : formatDays(r.durationMinutes, perDay)}${r.critical ? ", critical" : ""}${r.overloaded ? ", over-allocated resource" : ""}`
+                ? `${r.wbs} ${r.name}, ${r.isMilestone ? "milestone" : formatDays(r.durationMinutes, perDay)}, ${short(r.start)} to ${short(r.finish)}, ${r.percentComplete}% done${r.resourceNames ? `, ${r.resourceNames}` : ""}${r.critical ? ", critical" : ""}${r.overloaded ? ", over-allocated resource" : ""}`
                 : `${snapshot.project.name}, the whole project`;
               return (
                 <div
@@ -312,10 +348,15 @@ export function WbsChart({ snapshot, onEdit, onTextEditing }: { snapshot: Snapsh
                   className={classes.join(" ")}
                   style={{ left: p.x, top: p.y, width: BOX_W, height: BOX_H }}
                   onPointerDown={(e) => {
+                    if (e.button !== 0) return;
                     setSelected(p.id);
                     if (!isEditing) startDrag(e, p.id);
                   }}
                   onDoubleClick={() => r && setEditing({ id: r.id, text: r.name, error: null })}
+                  onContextMenu={(e) => {
+                    setSelected(p.id);
+                    openMenu(e, boxMenu(p));
+                  }}
                 >
                   <div className="wbs-top">
                     <span className="wbs-code">{r ? r.wbs : "Project"}</span>
@@ -363,9 +404,24 @@ export function WbsChart({ snapshot, onEdit, onTextEditing }: { snapshot: Snapsh
                   )}
                   <div className="wbs-meta secondary">
                     {r
-                      ? `${r.isMilestone ? "Milestone" : formatDays(r.durationMinutes, perDay)}${r.costCents ? ` · ${formatMoney(r.costCents, snapshot.project.currency)}` : ""}`
-                      : `${rows.length} tasks${snapshot.project.costCents ? ` · ${formatMoney(snapshot.project.costCents, snapshot.project.currency)}` : ""}`}
+                      ? `${r.isMilestone ? `Milestone · ${short(r.start)}` : `${short(r.start)} – ${short(r.finish)} · ${formatDays(r.durationMinutes, perDay)}`}`
+                      : `${short(snapshot.project.start)} – ${short(snapshot.project.finish)} · ${rows.length} tasks`}
                   </div>
+                  <div className="wbs-meta secondary">
+                    {r
+                      ? [r.resourceNames, r.costCents ? formatMoney(r.costCents, snapshot.project.currency) : ""].filter(Boolean).join(" · ") || "\u00a0"
+                      : snapshot.project.costCents
+                        ? formatMoney(snapshot.project.costCents, snapshot.project.currency)
+                        : "\u00a0"}
+                  </div>
+                  {r && (
+                    <div className="wbs-progress" title={`${r.percentComplete}% done`}>
+                      <span className="wbs-progress-track">
+                        <span style={{ width: `${r.percentComplete}%` }} />
+                      </span>
+                      <span className="wbs-percent">{r.percentComplete}%</span>
+                    </div>
+                  )}
                   {r?.isSummary && (
                     <button
                       className="wbs-toggle"
