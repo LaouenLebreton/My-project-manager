@@ -38,6 +38,8 @@ pub mod id {
     pub const HELP: &str = "help.contents";
     pub const TOUR: &str = "help.tour";
     pub const TASK_INFO: &str = "task.info";
+    pub const INSERT_TASK: &str = "task.insert";
+    pub const ADD_SUBTASK: &str = "task.add_subtask";
     pub const UNDO_HISTORY: &str = "edit.undo_history";
     pub const REMINDERS: &str = "window.reminders";
     pub const RECURRING: &str = "task.recurring";
@@ -227,6 +229,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     // keys (the grid handles them), so they have no accelerator here.
     let task_info = item(app, id::TASK_INFO, "Task Info…", Some("CmdOrCtrl+I"))?;
     let recurring = item(app, id::RECURRING, "Recurring Task…", None)?;
+    // Microsoft Project's Insert Task: a new task above the selected one, at its level.
+    let insert_task = item(app, id::INSERT_TASK, "Insert Task", Some("CmdOrCtrl+Shift+Return"))?;
+    let add_subtask = item(app, id::ADD_SUBTASK, "Add Subtask", None)?;
     let indent = item(app, id::INDENT, "Indent", None)?;
     let outdent = item(app, id::OUTDENT, "Outdent", None)?;
     // Microsoft Project's keys on Windows (Alt+Shift+arrow); ⌃⌘arrow on a Mac.
@@ -235,7 +240,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuHandles)> {
     let duplicate = item(app, id::DUPLICATE, "Duplicate", Some("CmdOrCtrl+D"))?;
     let move_down = item(app, id::MOVE_DOWN, "Move Down", Some(down_key))?;
     let percent = id::PERCENT.iter().map(|(i, label)| item(app, i, label, None)).collect::<Result<Vec<_>, _>>()?;
-    let mut task = SubmenuBuilder::new(app, "Task").item(&task_info).item(&recurring).separator().item(&indent).item(&outdent).item(&move_up).item(&move_down).item(&duplicate).separator();
+    let mut task = SubmenuBuilder::new(app, "Task").item(&insert_task).item(&add_subtask).separator().item(&task_info).item(&recurring).separator().item(&indent).item(&outdent).item(&move_up).item(&move_down).item(&duplicate).separator();
     for p in &percent {
         task = task.item(p);
     }

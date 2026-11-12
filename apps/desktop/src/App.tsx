@@ -224,6 +224,8 @@ export function App() {
         if (e.payload === "view.history") setView("history");
         if (e.payload === "view.dashboard") setView("dashboard");
         if (e.payload === "view.chat") setView("chat");
+        if (e.payload === "task.insert") gridRef.current?.insertTask();
+        if (e.payload === "task.add_subtask") gridRef.current?.addSubtask();
         if (e.payload === "task.info") setInfoRow(gridRef.current?.activeRow() ?? null);
         if (e.payload === "task.recurring") setOverlay("recurring");
         if (e.payload === "edit.undo_history") setOverlay("undo");
@@ -290,7 +292,9 @@ export function App() {
       { name: "Open Portfolio (all projects)", shortcut: "⌘0", run: () => void openPortfolio() },
       { name: "New Tab (open or create another project)", shortcut: "⌘T", run: () => void openNewTab() },
       { name: "Home (start page)", run: () => void openHome() },
-      { name: "Add Task", run: () => gridRef.current?.addTaskBelow() },
+      { name: "Add Task (below the selected one)", run: () => gridRef.current?.addTaskBelow() },
+      { name: "Insert Task (above the selected one)", shortcut: "⇧⌘↩", run: () => gridRef.current?.insertTask() },
+      { name: "Add Subtask (inside the selected task)", run: () => gridRef.current?.addSubtask() },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
       { name: "Recurring Task… (a meeting or report that repeats)", run: () => setOverlay("recurring") },

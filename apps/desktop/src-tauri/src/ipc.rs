@@ -940,7 +940,7 @@ mod tests {
         assert!(row(&before, "Preparation").is_summary);
 
         // Added right after "Pack offices", inside the same summary.
-        let cmd = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::AddTask { after_id: Some(pack.id.clone()), name: "Label boxes".into() }).unwrap().unwrap();
+        let cmd = plan(&doc.project, doc.schedule.as_ref().ok(), &UNITS, Edit::AddTask { after_id: Some(pack.id.clone()), name: "Label boxes".into(), place: Default::default() }).unwrap().unwrap();
         assert!(cmd.created.is_some());
         doc.apply(&cmd.command).unwrap();
         let s = snapshot(&doc);

@@ -135,6 +135,10 @@ export interface GridHandle {
   /** Task > Duplicate. */
   duplicate: () => void;
   addTaskBelow: () => void;
+  /** Insert Task: a new task above the active one, at its level. */
+  insertTask: () => void;
+  /** A new task inside the active one. */
+  addSubtask: () => void;
   deleteSelection: () => void;
   /** The task under the cursor, for Task Info. */
   activeRow: () => Row | undefined;
@@ -246,7 +250,11 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       const ids = selection.length ? selection.map((r) => r.id) : current ? [current.id] : [];
       if (ids.length) void reorder({ kind: "MoveTasks", ids, down }, ids);
     },
-    addTaskBelow: () => void send({ kind: "AddTask", afterId: current?.id ?? rows.at(-1)?.id ?? null, name: "New task" }),
+    addTaskBelow: () => void send({ kind: "AddTask", afterId: current?.id ?? null, name: "New task", place: current ? "After" : "End" }),
+    insertTask: () => void send({ kind: "AddTask", afterId: current?.id ?? null, name: "New task", place: current ? "Above" : "End" }),
+    addSubtask: () => {
+      if (current) void send({ kind: "AddSubtask", parentId: current.id, name: "New task" });
+    },
     deleteSelection: () => {
       if (selection.length) void send({ kind: "DeleteTasks", ids: selection.map((r) => r.id) });
     },
@@ -318,7 +326,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     if (current && col.edit) {
       if (text !== col.edit.initial(current)) edit = col.edit.make(current, text);
     } else if (!current && text.trim() !== "") {
-      edit = { kind: "AddTask", afterId: rows.at(-1)?.id ?? null, name: text.trim() };
+      // The blank row under the list: a new top-level task at the end (Tab makes it a subtask).
+      edit = { kind: "AddTask", afterId: null, name: text.trim(), place: "End" };
     }
     if (edit) {
       const error = await send(edit);

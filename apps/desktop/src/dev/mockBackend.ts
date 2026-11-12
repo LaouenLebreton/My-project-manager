@@ -462,9 +462,9 @@ export function install() {
           let createdId: string | null = null;
           switch (e.kind) {
             case "AddTask": {
-              const after = e.afterId ? state.rows[at(e.afterId)] : null;
+              const after = e.afterId && e.place !== "End" ? state.rows[at(e.afterId)] : null;
               const r = { ...row(e.name, after?.depth ?? 0), parentId: after?.parentId ?? null, wbs: "new" };
-              state.rows.splice(e.afterId ? at(e.afterId) + 1 : state.rows.length, 0, r);
+              state.rows.splice(after ? at(after.id) + (e.place === "Above" ? 0 : 1) : state.rows.length, 0, r);
               createdId = r.id;
               break;
             }

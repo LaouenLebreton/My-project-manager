@@ -20,8 +20,13 @@ use crate::ipc::IpcError;
 #[ts(export)]
 #[serde(tag = "kind", rename_all_fields = "camelCase")]
 pub enum Edit {
-    /// A new task right after `afterId` at the same level, or at the end if absent.
-    AddTask { after_id: Option<String>, name: String },
+    /// A new task placed by `place` next to `afterId` (at the end of the project if absent).
+    AddTask {
+        after_id: Option<String>,
+        name: String,
+        #[serde(default)]
+        place: AddPlace,
+    },
     RenameTask { id: String, name: String },
     /// Typed duration such as `3d`, `4h`, `2w`; `0` makes the task a milestone.
     SetDuration { id: String, text: String },
@@ -257,6 +262,19 @@ fn is_summary(p: &Project, id: TaskId) -> bool {
 }
 
 /// Sort keys of a parent's children, ascending.
+/// Where a new task goes, relative to the task it is added from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, TS)]
+#[ts(export)]
+pub enum AddPlace {
+    /// Right after it, at its level (after everything inside it, for a summary).
+    #[default]
+    After,
+    /// Right before it, at its level: Microsoft Project's Insert Task.
+    Above,
+    /// The end of the project, at the top level (the blank row under the list).
+    End,
+}
+
 fn child_keys(p: &Project, parent: Option<TaskId>) -> Vec<&SortKey> {
     let mut keys: Vec<&SortKey> = p.tasks.values().filter(|t| t.parent == parent).map(|t| &t.sort_key).collect();
     keys.sort();
@@ -268,13 +286,18 @@ fn child_keys(p: &Project, parent: Option<TaskId>) -> Vec<&SortKey> {
 pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit) -> Result<Option<Planned>, IpcError> {
     let plain = |command| Ok(Some(Planned { command, created: None, message: None }));
     match edit {
-        Edit::AddTask { after_id, name } => {
-            let after = after_id.as_deref().map(task_id).transpose()?.map(|a| task(p, a)).transpose()?;
-            let parent = after.and_then(|t| t.parent);
-            let keys = child_keys(p, parent);
-            let (before, next) = match after {
-                Some(a) => (Some(&a.sort_key), keys.iter().copied().find(|k| **k > a.sort_key)),
-                None => (keys.last().copied(), None),
+        Edit::AddTask { after_id, name, place } => {
+            let from = after_id.as_deref().map(task_id).transpose()?.map(|a| task(p, a)).transpose()?;
+            let (parent, before, next) = match (from, place) {
+                (Some(a), AddPlace::After) => {
+                    let keys = child_keys(p, a.parent);
+                    (a.parent, Some(&a.sort_key), keys.iter().copied().find(|k| **k > a.sort_key))
+                }
+                (Some(a), AddPlace::Above) => {
+                    let keys = child_keys(p, a.parent);
+                    (a.parent, keys.iter().copied().filter(|k| **k < a.sort_key).next_back(), Some(&a.sort_key))
+                }
+                (None, _) | (_, AddPlace::End) => (None, child_keys(p, None).last().copied(), None),
             };
             let id = TaskId(new_id());
             let command = Command::InsertTasks {
@@ -1670,6 +1693,32 @@ mod tests {
 
     fn ids(list: &[TaskId]) -> Vec<String> {
         list.iter().map(|i| i.0.to_string()).collect()
+    }
+
+    #[test]
+    fn new_tasks_go_where_asked() {
+        let (mut p, id) = project(&[("Phase", 0), ("A", 1), ("B", 1)]);
+        let add = |after: Option<TaskId>, name: &str, place: AddPlace| Edit::AddTask { after_id: after.map(|a| a.0.to_string()), name: name.into(), place };
+        // The blank row at the bottom: a top-level task at the end, not inside the last phase.
+        run(&mut p, add(Some(id[2]), "End", AddPlace::End));
+        assert_eq!(shape(&p), s(&[("Phase", 0), ("A", 1), ("B", 1), ("End", 0)]));
+        // Insert Task: above the selected task, at its level (as in Microsoft Project).
+        run(&mut p, add(Some(id[1]), "Above A", AddPlace::Above));
+        assert_eq!(shape(&p), s(&[("Phase", 0), ("Above A", 1), ("A", 1), ("B", 1), ("End", 0)]));
+        // After a task, at its level; after a summary, after everything inside it.
+        run(&mut p, add(Some(id[1]), "After A", AddPlace::After));
+        run(&mut p, add(Some(id[0]), "After Phase", AddPlace::After));
+        assert_eq!(shape(&p), s(&[("Phase", 0), ("Above A", 1), ("A", 1), ("After A", 1), ("B", 1), ("After Phase", 0), ("End", 0)]));
+        // A subtask: the last task inside the selected one, which becomes a summary.
+        run(&mut p, Edit::AddSubtask { parent_id: id[2].0.to_string(), name: "Under B".into() });
+        run(&mut p, Edit::AddSubtask { parent_id: id[0].0.to_string(), name: "Last in Phase".into() });
+        assert_eq!(
+            shape(&p),
+            s(&[("Phase", 0), ("Above A", 1), ("A", 1), ("After A", 1), ("B", 1), ("Under B", 2), ("Last in Phase", 1), ("After Phase", 0), ("End", 0)])
+        );
+        // With nothing selected, at the end.
+        run(&mut p, add(None, "Last", AddPlace::After));
+        assert_eq!(shape(&p).last().unwrap(), &("Last".to_string(), 0));
     }
 
     #[test]

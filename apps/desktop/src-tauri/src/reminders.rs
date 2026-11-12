@@ -192,8 +192,8 @@ mod tests {
             apply(p, &planned.command).unwrap();
             planned.created
         };
-        let survey = run(&mut p, Edit::AddTask { after_id: None, name: "Survey".into() }).unwrap();
-        let report = run(&mut p, Edit::AddTask { after_id: Some(survey.0.to_string()), name: "Report".into() }).unwrap();
+        let survey = run(&mut p, Edit::AddTask { after_id: None, name: "Survey".into(), place: Default::default() }).unwrap();
+        let report = run(&mut p, Edit::AddTask { after_id: Some(survey.0.to_string()), name: "Report".into(), place: Default::default() }).unwrap();
         run(&mut p, Edit::AddLink { predecessor_id: survey.0.to_string(), successor_id: report.0.to_string() });
         run(&mut p, Edit::SetTaskResources { id: survey.0.to_string(), text: "Alex".into() });
         p

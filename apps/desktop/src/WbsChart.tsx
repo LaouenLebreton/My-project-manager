@@ -161,10 +161,10 @@ export function WbsChart({ snapshot, onEdit, onTextEditing }: { snapshot: Snapsh
       }
       case "Enter":
         // A sibling after this one (or, on the project, a new top-level task).
-        void add(row ? { kind: "AddTask", afterId: row.id, name: "New task" } : { kind: "AddTask", afterId: rows.at(-1)?.id ?? null, name: "New task" });
+        void add(row ? { kind: "AddTask", afterId: row.id, name: "New task", place: "After" } : { kind: "AddTask", afterId: null, name: "New task", place: "End" });
         break;
       case "Tab":
-        void add(row ? { kind: "AddSubtask", parentId: row.id, name: "New task" } : { kind: "AddTask", afterId: rows.at(-1)?.id ?? null, name: "New task" });
+        void add(row ? { kind: "AddSubtask", parentId: row.id, name: "New task" } : { kind: "AddTask", afterId: null, name: "New task", place: "End" });
         break;
       case " ":
         if (row) setEditing({ id: row.id, text: row.name, error: null });
@@ -235,11 +235,11 @@ export function WbsChart({ snapshot, onEdit, onTextEditing }: { snapshot: Snapsh
   return (
     <div className="wbs-view">
       <div className="wbs-toolbar">
-        <button onClick={() => void add(selectedRow ? { kind: "AddTask", afterId: selectedRow.id, name: "New task" } : { kind: "AddTask", afterId: rows.at(-1)?.id ?? null, name: "New task" })}>
+        <button onClick={() => void add(selectedRow ? { kind: "AddTask", afterId: selectedRow.id, name: "New task", place: "After" } : { kind: "AddTask", afterId: null, name: "New task", place: "End" })}>
           Add Task <kbd>↩</kbd>
         </button>
         <button
-          onClick={() => void add(selectedRow ? { kind: "AddSubtask", parentId: selectedRow.id, name: "New task" } : { kind: "AddTask", afterId: rows.at(-1)?.id ?? null, name: "New task" })}
+          onClick={() => void add(selectedRow ? { kind: "AddSubtask", parentId: selectedRow.id, name: "New task" } : { kind: "AddTask", afterId: null, name: "New task", place: "End" })}
         >
           Add Subtask <kbd>⇥</kbd>
         </button>
