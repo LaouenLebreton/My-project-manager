@@ -77,6 +77,12 @@
       <Name>Sam</Name>
       <IsBaseCalendar>0</IsBaseCalendar>
       <BaseCalendarUID>1</BaseCalendarUID>
+      <WeekDays>
+        <WeekDay><DayType>6</DayType><DayWorking>0</DayWorking></WeekDay>
+      </WeekDays>
+      <Exceptions>
+        <Exception><EnteredByOccurrences>0</EnteredByOccurrences><TimePeriod><FromDate>2026-10-21T00:00:00</FromDate><ToDate>2026-10-22T23:59:00</ToDate></TimePeriod><Occurrences>1</Occurrences><Name>Leave</Name><Type>1</Type><DayWorking>0</DayWorking></Exception>
+      </Exceptions>
     </Calendar>
   </Calendars>
   <Tasks>

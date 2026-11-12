@@ -152,6 +152,10 @@ pub const MIGRATIONS: &[&str] = &[
     ALTER TABLE task ADD COLUMN elapsed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dependency ADD COLUMN lag_format TEXT NOT NULL DEFAULT 'working' CHECK (lag_format IN ('working', 'elapsed', 'percent'));
     "#,
+    // 10 -> 11: each person's own working time (iteration 5), as JSON; empty = the project's.
+    r#"
+    ALTER TABLE resource ADD COLUMN availability TEXT NOT NULL DEFAULT '';
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

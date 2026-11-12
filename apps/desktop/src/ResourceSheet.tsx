@@ -327,6 +327,7 @@ export function ResourceSheet({ snapshot, onEdit, onTextEditing }: { snapshot: S
         </div>
       </div>
       <ResourceDetails resource={current} />
+      {current && current.resourceType === "Work" && <WorkingTime resource={current} projectDays={snapshot.project.workingWeekdays} onEdit={onEdit} />}
     </div>
   );
 }
@@ -360,5 +361,65 @@ function ResourceDetails({ resource }: { resource: ResourceRow | undefined }) {
       </ul>
       <p className="secondary small">{GLOSSARY.overallocated.text}</p>
     </aside>
+  );
+}
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/**
+ * A person's own working time (R38): the weekdays they work and their days off. Their tasks are
+ * scheduled around them, and Workload shows no capacity on those days.
+ */
+function WorkingTime({ resource, projectDays, onEdit }: { resource: ResourceRow; projectDays: boolean[]; onEdit: (e: Edit) => Promise<EditResult> }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const send = (offWeekdays: boolean[], daysOff: { from: string; to: string }[]) =>
+    void onEdit({ kind: "SetAvailability", id: resource.id, offWeekdays, daysOff }).then(
+      () => setProblem(null),
+      (e) => setProblem(errorMessage(e)),
+    );
+  const off = resource.offWeekdays;
+  const add = () => {
+    if (!from) return;
+    send(off, [...resource.daysOff, { from, to: to || from }]);
+    setFrom("");
+    setTo("");
+  };
+  return (
+    <section className="working-time" aria-label={`When ${resource.name} works`}>
+      <strong>Working time</strong>
+      <div className="weekday-picks" role="group" aria-label="Works on">
+        <span className="secondary small">Works on</span>
+        {WEEKDAYS.map((d, i) => projectDays[i] && (
+          <label key={d}>
+            <input type="checkbox" checked={!off[i]} onChange={(e) => send(off.map((o, j) => (j === i ? !e.target.checked : o)), resource.daysOff)} /> {d}
+          </label>
+        ))}
+      </div>
+      <div className="days-off">
+        <span className="secondary small">Days off</span>
+        {resource.daysOff.length === 0 && <span className="secondary small">none</span>}
+        {resource.daysOff.map((r, i) => (
+          <span key={`${r.from}-${r.to}`} className="day-off">
+            {r.from === r.to ? formatDate(r.from) : `${formatDate(r.from)} – ${formatDate(r.to)}`}
+            <button className="link" aria-label={`Remove days off ${r.from} to ${r.to}`} onClick={() => send(off, resource.daysOff.filter((_, j) => j !== i))}>
+              ×
+            </button>
+          </span>
+        ))}
+        <label>
+          From <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          to <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <button onClick={add} disabled={!from}>
+          Add
+        </button>
+      </div>
+      {problem && <p className="error small">{problem}</p>}
+      <p className="secondary small">Their tasks are scheduled around these days, and Workload counts nothing for them then. Their hours on working days are the project's.</p>
+    </section>
   );
 }

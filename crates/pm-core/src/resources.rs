@@ -74,7 +74,9 @@ pub fn loads(p: &Project, s: &Schedule) -> Loads {
         let mut total = 0;
         for a in &mine {
             let Some(t) = s.tasks.get(&a.task) else { continue };
-            let work = p.calendar.working_between(t.early_start, t.early_finish) * i64::from(a.units.0) / 100;
+            let own = crate::schedule::task_calendar(p, a.task);
+            let cal = own.as_ref().unwrap_or(&p.calendar);
+            let work = cal.working_between(t.early_start, t.early_finish) * i64::from(a.units.0) / 100;
             out.work.insert(a.id, work);
             total += work;
             if t.early_finish > t.early_start {
@@ -140,10 +142,12 @@ pub fn assignment_days(p: &Project, s: &Schedule, a: &crate::model::Assignment) 
     if r.kind == ResourceKind::Material {
         return days;
     }
+    let own = crate::schedule::task_calendar(p, a.task);
+    let cal = own.as_ref().unwrap_or(&p.calendar);
     for day in t.early_start.day()..=t.early_finish.day() {
         let from = t.early_start.max(Moment::from_day_minute(day, 0));
         let to = t.early_finish.min(Moment::from_day_minute(day + 1, 0));
-        let minutes = mul_div(p.calendar.working_between(from, to), i64::from(a.units.0), 100);
+        let minutes = mul_div(cal.working_between(from, to), i64::from(a.units.0), 100);
         if minutes > 0 {
             days.insert(day, minutes);
         }
@@ -151,9 +155,16 @@ pub fn assignment_days(p: &Project, s: &Schedule, a: &crate::model::Assignment) 
     days
 }
 
-/// What a work resource can give on a day: its working time × maximum units, in minutes.
+/// What a work resource can give on a day: its working time × maximum units, in minutes;
+/// nothing on their days off or the weekdays they do not work (R38).
 pub fn capacity(p: &Project, resource: ResourceId, day: i64) -> i64 {
-    p.resources.get(&resource).map_or(0, |r| mul_div(p.calendar.pattern(day).working_minutes(), i64::from(r.max_units.0), 100))
+    p.resources.get(&resource).map_or(0, |r| {
+        let a = &r.availability;
+        if a.days_off.contains(&day) || a.off_weekdays[crate::time::weekday_index(day)] {
+            return 0;
+        }
+        mul_div(p.calendar.pattern(day).working_minutes(), i64::from(r.max_units.0), 100)
+    })
 }
 
 pub fn capture_baseline(p: &Project, s: &Schedule, l: &Loads, saved_at: &str) -> crate::model::Baseline {
@@ -300,6 +311,7 @@ mod tests {
                 material_label: String::new(),
                 rate: Money(0),
                 notes: String::new(),
+                availability: Default::default(),
             };
             apply(&mut self.0, &Command::InsertResources { resources: vec![r], assignments: vec![] }).unwrap();
             self

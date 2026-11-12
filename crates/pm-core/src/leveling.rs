@@ -184,6 +184,7 @@ mod tests {
                 material_label: String::new(),
                 rate: Money(0),
                 notes: String::new(),
+                availability: Default::default(),
             };
             apply(&mut self.0, &Command::InsertResources { resources: vec![r], assignments: vec![] }).unwrap();
             self

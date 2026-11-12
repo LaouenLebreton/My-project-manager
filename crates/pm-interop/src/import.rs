@@ -365,8 +365,10 @@ fn import_resources(root: &Element, p: &mut Project, tasks: &HashMap<i64, TaskId
             // *verify* with a real file (docs/scheduling-rules.md, costs).
             rate: Money(money(res.text_of("StandardRate")).max(0)),
             notes: res.raw_of("Notes").unwrap_or("").to_owned(),
+            availability: availability_of(root, res, &p.calendar, &name, r),
         });
     }
+    r.imported("People's own calendars: days off and weekdays they do not work", resources.iter().filter(|x| !x.availability.is_full()).count());
     let count = resources.len();
     if count > 0 {
         apply(p, &Command::InsertResources { resources, assignments: vec![] }).expect("fresh resources with unique ids");
@@ -391,6 +393,49 @@ fn import_resources(root: &Element, p: &mut Project, tasks: &HashMap<i64, TaskId
         }
     }
     r.imported("Assignments: which resources work on which tasks, at what units", assigned);
+}
+
+/// A person's own calendar (R38): weekdays they do not work and days off. Their hours are the
+/// project's; other differences are reported.
+fn availability_of(root: &Element, res: &Element, project: &Calendar, name: &str, r: &mut ReportBuilder) -> pm_core::Availability {
+    let mut a = pm_core::Availability::default();
+    let Some(uid) = res.int_of("CalendarUID").filter(|&u| u >= 0 && Some(u) != root.int_of("CalendarUID")) else { return a };
+    let Some(cal) = root.child("Calendars").into_iter().flat_map(|c| c.children("Calendar")).find(|c| c.int_of("UID") == Some(uid)) else { return a };
+    let mut hours_differ = false;
+    for wd in cal.child("WeekDays").into_iter().flat_map(|w| w.children("WeekDay")) {
+        let day_type = wd.int_of("DayType").unwrap_or(-1);
+        if (1..=7).contains(&day_type) {
+            let index = ((day_type + 5) % 7) as usize;
+            if !wd.flag("DayWorking") {
+                a.off_weekdays[index] = project.week()[index].is_working();
+            } else if day_pattern(wd, r) != project.week()[index] {
+                hours_differ = true;
+            }
+        } else if day_type == 0 && !wd.flag("DayWorking") {
+            add_days_off(&mut a, wd);
+        }
+    }
+    for ex in cal.child("Exceptions").into_iter().flat_map(|e| e.children("Exception")) {
+        if ex.flag("DayWorking") {
+            hours_differ = true;
+        } else {
+            add_days_off(&mut a, ex);
+        }
+    }
+    if hours_differ {
+        r.approximated("People's own working hours (Super PM uses the project's hours on the days they work)", Some(name));
+    }
+    a
+}
+
+fn add_days_off(a: &mut pm_core::Availability, ex: &Element) {
+    let period = ex.child("TimePeriod");
+    let from = period.and_then(|p| p.text_of("FromDate")).and_then(parse_date);
+    let to = period.and_then(|p| p.text_of("ToDate")).and_then(parse_date).or(from);
+    if let (Some(from), Some(to)) = (from, to) {
+        let (from, to) = (pm_core::time::day_number(from), pm_core::time::day_number(to));
+        a.days_off.extend((from..=to).take(3660));
+    }
 }
 
 /// Project-level options Super PM does not use, as one line with examples.
@@ -423,7 +468,10 @@ fn import_calendar(root: &Element, r: &mut ReportBuilder) -> Result<Calendar, Im
         r.approximated("The file has no calendar; the standard calendar (Monday to Friday, 8–12 and 13–17) is used", None);
         return Ok(Calendar::standard());
     };
-    let others = calendars.len() - 1;
+    // People's own calendars are read with the people (R38); any others are not used.
+    let people: std::collections::HashSet<i64> =
+        root.child("Resources").into_iter().flat_map(|x| x.children("Resource")).filter_map(|x| x.int_of("CalendarUID")).collect();
+    let others = calendars.iter().filter(|c| !std::ptr::eq(**c, cal) && !c.int_of("UID").is_some_and(|u| people.contains(&u))).count();
     for _ in 0..others {
         r.ignored("Other calendars (resource and task calendars; only the project calendar is used)", None);
     }

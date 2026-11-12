@@ -96,6 +96,9 @@ pub enum Edit {
     /// Text pasted from elsewhere (a list of names, a spreadsheet column): one task per line,
     /// named by the line's first column, after `afterId` (or at the end).
     PasteText { after_id: Option<String>, text: String },
+    /// Resource Sheet > Working time: the weekdays a person does not work (Monday first) and
+    /// their days off, as date ranges (R38). Replaces what was there.
+    SetAvailability { id: String, off_weekdays: Vec<bool>, days_off: Vec<DayOffRange> },
     /// WBS chart: drag a box onto another (or onto the project) to move it underneath, at the end.
     MoveUnder { id: String, parent_id: Option<String> },
     /// Project > Level Resources: delay tasks so nobody is over-allocated.
@@ -137,6 +140,14 @@ pub enum RepeatEdit {
     MonthlyOnDay { every: u32, day: u8 },
     /// `week`: 1–4, or 5 for the last.
     MonthlyOnWeekday { every: u32, week: u8, weekday: u8 },
+}
+
+/// Days off from one date to another, inclusive (`YYYY-MM-DD`).
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[ts(export)]
+pub struct DayOffRange {
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
@@ -500,6 +511,32 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
             paste_with_label(p, &clip, tops.last().copied(), "Duplicate")
         }
         Edit::PasteText { after_id, text } => paste_text(p, units, after_id.as_deref().map(task_id).transpose()?, &text),
+        Edit::SetAvailability { id, off_weekdays, days_off } => {
+            let rid = ResourceId(Uuid::parse_str(&id).map_err(|_| err("this resource no longer exists"))?);
+            let r = p.resources.get(&rid).ok_or_else(|| err("this resource no longer exists"))?;
+            let mut a = pm_core::Availability::default();
+            for (k, off) in off_weekdays.iter().take(7).enumerate() {
+                a.off_weekdays[k] = *off;
+            }
+            if !a.off_weekdays.contains(&false) {
+                return Err(err("choose at least one day of the week they work"));
+            }
+            for range in &days_off {
+                let from = day_start(&range.from)?.day();
+                let to = day_start(if range.to.trim().is_empty() { &range.from } else { &range.to })?.day();
+                if to < from {
+                    return Err(err("a day-off period ends before it starts"));
+                }
+                if to - from > 3660 {
+                    return Err(err("a day-off period can be at most ten years"));
+                }
+                a.days_off.extend(from..=to);
+            }
+            if a == r.availability {
+                return Ok(None);
+            }
+            plain(Command::SetResource { id: rid, change: ResourceChange::Availability(a) })
+        }
         Edit::MoveUnder { id, parent_id } => {
             let id = task_id(&id)?;
             let t = task(p, id)?;
@@ -623,6 +660,7 @@ fn new_resource(name: &str, sort_key: SortKey) -> Resource {
         material_label: String::new(),
         rate: Money(0),
         notes: String::new(),
+        availability: Default::default(),
     }
 }
 
@@ -1663,6 +1701,26 @@ mod tests {
         assert_eq!(link(&p), (50, pm_core::LagFormat::Percent));
         run(&mut p, Edit::SetPredecessors { id: b, text: "1+2ed".into() });
         assert_eq!(link(&p), (2 * 1440, pm_core::LagFormat::Elapsed));
+    }
+
+    #[test]
+    fn a_persons_working_time_is_set_from_weekdays_and_ranges() {
+        let (mut p, _) = project(&[("A", 0)]);
+        run(&mut p, Edit::AddResource { after_id: None, name: "Sam".into() });
+        let sam = p.resources.keys().next().unwrap().0.to_string();
+        let edit = |weekdays: Vec<bool>, ranges: &[(&str, &str)]| Edit::SetAvailability {
+            id: sam.clone(),
+            off_weekdays: weekdays,
+            days_off: ranges.iter().map(|(f, t)| DayOffRange { from: (*f).into(), to: (*t).into() }).collect(),
+        };
+        run(&mut p, edit(vec![false, false, false, false, true, false, false], &[("2026-12-24", "2026-12-26"), ("2027-01-04", "")]));
+        let a = &p.resources.values().next().unwrap().availability;
+        assert_eq!(a.off_weekdays[4], true);
+        assert_eq!(a.days_off.len(), 4);
+        let e = plan(&p, None, &Units::default(), edit(vec![true; 7], &[])).err().unwrap();
+        assert_eq!(e.message, "choose at least one day of the week they work");
+        let e = plan(&p, None, &Units::default(), edit(vec![false; 7], &[("2026-12-26", "2026-12-24")])).err().unwrap();
+        assert_eq!(e.message, "a day-off period ends before it starts");
     }
 
     #[test]

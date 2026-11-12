@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::model::{Constraint, Dependency, DependencyId, LagFormat, LinkType, Project, Task, TaskId};
+use crate::calendar::Calendar;
 use crate::time::Moment;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,9 +75,13 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
     let cal = &project.calendar;
     let n = g.tasks.len();
     let start = cal.next_working(project.start);
-    let snap = |m: Moment| cal.next_working(m);
+    // Each task's working time (R38): the project calendar less the days the people on it do
+    // not work. Tasks without such people use the project calendar.
+    let task_calendars = task_calendars(project, &g.tasks);
+    let tcal = |i: usize| task_calendars[i].as_ref().unwrap_or(cal);
+    let snap = |i: usize, m: Moment| tcal(i).next_working(m);
     // A task's duration from a moment: working time, or every minute for an elapsed task (R36).
-    let span = |i: usize, from: Moment, d: i64| if g.tasks[i].elapsed { Moment(from.0 + d) } else { cal.add_working(from, d) };
+    let span = |i: usize, from: Moment, d: i64| if g.tasks[i].elapsed { Moment(from.0 + d) } else { tcal(i).add_working(from, d) };
     // A link's lag from a moment (R37): working time, clock time, or a share of the
     // predecessor's duration. `sign` -1 goes backwards (the late pass).
     let lag = |link: &Dependency, from: Moment, sign: i64| match link.lag_format {
@@ -118,7 +123,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         if summary {
             // A summary's own constraint holds back everything inside it.
             if let Constraint::StartNoEarlierThan(d) | Constraint::MustStartOn(d) = task.constraint {
-                es = es.max(snap(d));
+                es = es.max(snap(i, d));
             }
             early[node] = (es, es);
             continue;
@@ -126,7 +131,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         // Milestones keep a finish-type instant such as 17:00 (R14); tasks with work
         // start at the next working minute (R5).
         if dur > 0 {
-            es = snap(es);
+            es = snap(i, es);
         }
         // Actuals are facts (R35): a started task starts when it did, a finished one ends when
         // it did, whatever its links, constraints or leveling say.
@@ -137,7 +142,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         }
         // Manually scheduled (R34): the typed start wins; broken links are reported.
         if let Some(m) = task.manual_start {
-            let target = if dur > 0 { snap(m) } else { m };
+            let target = if dur > 0 { snap(i, m) } else { m };
             if es > target {
                 conflicts.push(ConstraintConflict { task: task.id, constraint_start: target, link_driven_start: es, manual: true });
             }
@@ -147,17 +152,17 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         // Leveling waits after everything else that drives the start (R30).
         let delay = task.leveling_delay.get();
         if delay > 0 && !task.constraint.is_fixed() {
-            es = cal.add_working(es.max(match task.constraint {
-                Constraint::StartNoEarlierThan(d) => snap(d),
+            es = tcal(i).add_working(es.max(match task.constraint {
+                Constraint::StartNoEarlierThan(d) => snap(i, d),
                 _ => es,
             }), delay);
             if dur > 0 {
-                es = snap(es);
+                es = snap(i, es);
             }
         }
         // Constraints (R15 to R18, R32). Limits that the links would break are honoured anyway
         // and reported as conflicts, so the problem is visible (negative slack), never hidden.
-        let finish_on = |d: Moment| if dur > 0 { cal.prev_working_end(d) } else { d };
+        let finish_on = |d: Moment| if dur > 0 { tcal(i).prev_working_end(d) } else { d };
         let start_for_finish = |f: Moment| span(i, f, -dur);
         let mut honour = |target: Moment, es: &mut Moment| {
             if *es > target {
@@ -167,13 +172,13 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         };
         match task.constraint {
             Constraint::AsSoonAsPossible | Constraint::AsLateAsPossible => {}
-            Constraint::StartNoEarlierThan(d) => es = es.max(snap(d)),
+            Constraint::StartNoEarlierThan(d) => es = es.max(snap(i, d)),
             Constraint::FinishNoEarlierThan(d) => es = es.max(start_for_finish(finish_on(d))),
-            Constraint::MustStartOn(d) => honour(snap(d), &mut es),
+            Constraint::MustStartOn(d) => honour(snap(i, d), &mut es),
             Constraint::MustFinishOn(d) => honour(start_for_finish(finish_on(d)), &mut es),
             Constraint::StartNoLaterThan(d) => {
-                if es > snap(d) {
-                    honour(snap(d), &mut es);
+                if es > snap(i, d) {
+                    honour(snap(i, d), &mut es);
                 }
             }
             Constraint::FinishNoLaterThan(d) => {
@@ -213,7 +218,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
                 });
             }
             if dur > 0 {
-                finish = cal.prev_working_end(finish);
+                finish = tcal(i).prev_working_end(finish);
             }
             let es = span(i, finish, -dur);
             if es > early[i].0 {
@@ -272,17 +277,17 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
             lf = lf.min(span(i, start_ceiling, dur));
         }
         if dur > 0 {
-            lf = cal.prev_working_end(lf);
+            lf = tcal(i).prev_working_end(lf);
         }
-        let finish_on = |d: Moment| if dur > 0 { cal.prev_working_end(d) } else { d };
+        let finish_on = |d: Moment| if dur > 0 { tcal(i).prev_working_end(d) } else { d };
         if g.tasks[i].manual_start.is_some() || g.tasks[i].actual.start().is_some() {
             // Manual tasks and tasks already under way have fixed dates, like Must Start On.
             lf = early[i].1;
         }
         match g.tasks[i].constraint {
-            Constraint::MustStartOn(d) => lf = span(i, snap(d), dur),
+            Constraint::MustStartOn(d) => lf = span(i, snap(i, d), dur),
             Constraint::MustFinishOn(d) => lf = finish_on(d),
-            Constraint::StartNoLaterThan(d) => lf = lf.min(span(i, snap(d), dur)),
+            Constraint::StartNoLaterThan(d) => lf = lf.min(span(i, snap(i, d), dur)),
             Constraint::FinishNoLaterThan(d) => lf = lf.min(finish_on(d)),
             _ => {}
         }
@@ -292,7 +297,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
     let mut result = vec![None; n];
     for i in (0..n).filter(|&i| g.children[i].is_empty()) {
         let ((es, ef), (ls, lf)) = (early[i], late[i]);
-        let total_slack = cal.working_between(ef, lf);
+        let total_slack = tcal(i).working_between(ef, lf);
         // Finished work cannot delay anything any more, so it is never critical.
         let done = g.tasks[i].actual.finish().is_some();
         result[i] = Some(TaskSchedule {
@@ -336,6 +341,43 @@ pub fn check(project: &Project) -> Result<(), ScheduleError> {
 
 /// Tasks indexed in id order. Node `i` is task `i` (a leaf, or a summary's entry); node
 /// `n + i` is summary `i`'s exit.
+/// The calendar a task is scheduled on (R38), when the people on it have their own working
+/// time; `None` means the project calendar.
+pub fn task_calendar(p: &Project, task: TaskId) -> Option<Calendar> {
+    let list: Vec<&crate::Availability> = p
+        .assignments
+        .values()
+        .filter(|a| a.task == task)
+        .filter_map(|a| p.resources.get(&a.resource))
+        .filter(|r| r.kind == crate::ResourceKind::Work && !r.availability.is_full())
+        .map(|r| &r.availability)
+        .collect();
+    (!list.is_empty()).then(|| list.iter().fold(p.calendar.clone(), |cal, a| cal.with_availability(a).unwrap_or(cal)))
+}
+
+/// Per task: its calendar when people on it have their own working time (R38), else `None`.
+fn task_calendars(p: &Project, tasks: &[&Task]) -> Vec<Option<Calendar>> {
+    let mut people: HashMap<TaskId, Vec<&crate::Availability>> = HashMap::new();
+    for a in p.assignments.values() {
+        if let Some(r) = p.resources.get(&a.resource).filter(|r| r.kind == crate::ResourceKind::Work && !r.availability.is_full()) {
+            people.entry(a.task).or_default().push(&r.availability);
+        }
+    }
+    tasks
+        .iter()
+        .map(|t| {
+            let list = people.get(&t.id)?;
+            let mut cal = p.calendar.clone();
+            for a in list {
+                if let Some(c) = cal.with_availability(a) {
+                    cal = c;
+                }
+            }
+            Some(cal)
+        })
+        .collect()
+}
+
 struct Graph<'a> {
     tasks: Vec<&'a Task>,
     parent: Vec<Option<usize>>,
@@ -666,6 +708,45 @@ mod tests {
         // Two working days would wait until Wednesday.
         let w = P::new().task(1, 5 * DAY).task(2, DAY).link(1, 2, FinishToStart, 2 * DAY).run();
         assert_eq!(dates(&w, 2), (at(14, 8, 0), at(14, 17, 0)));
+    }
+
+    /// Puts a person with this availability on task `n`.
+    fn staffed(mut p: P, n: u128, off_weekdays: [bool; 7], days_off: &[i64]) -> P {
+        let rid = crate::ResourceId(Uuid::from_u128(500 + n));
+        p.0.resources.insert(
+            rid,
+            crate::Resource {
+                id: rid,
+                sort_key: SortKey("a".into()),
+                name: format!("R{n}"),
+                initials: String::new(),
+                kind: crate::ResourceKind::Work,
+                max_units: crate::ResourceUnits(100),
+                material_label: String::new(),
+                rate: Money(0),
+                notes: String::new(),
+                availability: crate::Availability { off_weekdays, days_off: days_off.iter().copied().collect() },
+            },
+        );
+        let aid = crate::AssignmentId(Uuid::from_u128(600 + n));
+        p.0.assignments.insert(aid, crate::Assignment { id: aid, task: tid(n), resource: rid, units: crate::ResourceUnits(100) });
+        p
+    }
+
+    #[test]
+    fn r38_a_persons_days_off_hold_their_task() {
+        // Off Wednesday 7 and Thursday 8 October: a 3-day task runs Mon, Tue, then Fri.
+        let off = [crate::time::day_number(jiff::civil::date(2026, 10, 7)), crate::time::day_number(jiff::civil::date(2026, 10, 8))];
+        let s = staffed(P::new().task(1, 3 * DAY).task(2, 3 * DAY), 1, [false; 7], &off).run();
+        assert_eq!(dates(&s, 1), (at(5, 8, 0), at(9, 17, 0)));
+        assert_eq!(dates(&s, 2), (at(5, 8, 0), at(7, 17, 0)), "a task without them keeps the project calendar");
+    }
+
+    #[test]
+    fn r38_a_part_timer_works_their_days_only() {
+        // Works Monday to Wednesday: 4 days are Mon 5, Tue 6, Wed 7 and Mon 12.
+        let s = staffed(P::new().task(1, 4 * DAY), 1, [false, false, false, true, true, true, true], &[]).run();
+        assert_eq!(dates(&s, 1), (at(5, 8, 0), at(12, 17, 0)));
     }
 
     #[test]

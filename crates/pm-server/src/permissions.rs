@@ -200,6 +200,7 @@ mod tests {
             material_label: String::new(),
             rate: Money(0),
             notes: String::new(),
+            availability: Default::default(),
         };
         let a = Assignment { id: AssignmentId(Uuid::from_u128(80)), task: tid(2), resource: r.id, units: ResourceUnits(100) };
         p.resources.insert(r.id, r);

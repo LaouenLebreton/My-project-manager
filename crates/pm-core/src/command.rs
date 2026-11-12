@@ -85,6 +85,8 @@ pub enum ResourceChange {
     Notes(String),
     Position(SortKey),
     Rate(Money),
+    /// The weekdays and days they do not work (R38).
+    Availability(crate::Availability),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +210,7 @@ impl Command {
                 ResourceChange::Notes(_) => "Edit Resource Notes",
                 ResourceChange::Position(_) => "Move Resource",
                 ResourceChange::Rate(_) => "Change Rate",
+                ResourceChange::Availability(_) => "Change Working Time",
             }
             .into(),
             Command::InsertAssignment { .. } => "Assign Resource".into(),
@@ -312,6 +315,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
                 ResourceChange::Notes(v) => ResourceChange::Notes(std::mem::replace(&mut r.notes, v.clone())),
                 ResourceChange::Position(v) => ResourceChange::Position(std::mem::replace(&mut r.sort_key, v.clone())),
                 ResourceChange::Rate(v) => ResourceChange::Rate(std::mem::replace(&mut r.rate, *v)),
+                ResourceChange::Availability(v) => ResourceChange::Availability(std::mem::replace(&mut r.availability, v.clone())),
             };
             Ok(Command::SetResource { id: *id, change: old })
         }
@@ -784,6 +788,7 @@ mod tests {
             material_label: String::new(),
             rate: Money(0),
             notes: String::new(),
+            availability: Default::default(),
         }
     }
 

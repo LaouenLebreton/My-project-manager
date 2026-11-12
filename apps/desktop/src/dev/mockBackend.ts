@@ -159,6 +159,8 @@ export function install() {
     ],
     rateCents: 4_550,
     costCents: 182_000,
+    offWeekdays: [false, false, false, false, false, false, false],
+    daysOff: overloaded ? [{ from: "2026-12-24", to: "2026-12-31" }] : [],
     overloads: overloaded ? [{ start: "2026-10-06T08:00:00", finish: "2026-10-07T17:00:00", peakPercent: 200, tasks: ["Task 1", "Task 2"] }] : [],
   });
   const state = { edits: [] as Edit[], textEditing: [] as boolean[], ...generated, resources: [person("Alex", true), person("Sam", false)], baselineSavedAt: null as string | null, statusDate: null as string | null, team: null as { server: string; pending: number; projectId: string; access: import("../bindings/MyAccess").MyAccess | null } | null, account: null as { server: string; name: string; email: string } | null };

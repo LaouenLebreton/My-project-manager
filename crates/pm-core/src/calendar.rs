@@ -172,6 +172,29 @@ impl Calendar {
     }
 
     /// The working pattern that applies on a given day number.
+    /// This calendar less a person's weekdays and days off (R38), or `None` if that leaves no
+    /// working day in the week (they never work: their tasks keep the project calendar).
+    pub fn with_availability(&self, a: &crate::Availability) -> Option<Calendar> {
+        if a.is_full() {
+            return Some(self.clone());
+        }
+        let mut week = self.week.clone();
+        for (d, off) in a.off_weekdays.iter().enumerate() {
+            if *off {
+                week[d] = DayPattern::default();
+            }
+        }
+        let mut cal = Calendar::new(week).ok()?;
+        for (day, p) in &self.exceptions {
+            let off = a.off_weekdays[weekday_index(*day)];
+            cal.exceptions.insert(*day, if off { DayPattern::default() } else { p.clone() });
+        }
+        for day in &a.days_off {
+            cal.exceptions.insert(*day, DayPattern::default());
+        }
+        Some(cal)
+    }
+
     pub fn pattern(&self, day: i64) -> &DayPattern {
         self.exceptions.get(&day).unwrap_or(&self.week[weekday_index(day)])
     }

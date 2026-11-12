@@ -148,6 +148,11 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     let mut names: Vec<(&str, u32)> = p.resources.values().map(|r| (r.name.as_str(), r.max_units.0)).collect();
     names.sort();
     assert_eq!(names, [("Alex", 50), ("Paper", 0), ("Sam", 100)]);
+    // Sam's own calendar (R38): Fridays off and two days of leave.
+    let sam = p.resources.values().find(|r| r.name == "Sam").unwrap();
+    assert_eq!(sam.availability.off_weekdays, [false, false, false, false, true, false, false]);
+    let leave: Vec<String> = sam.availability.days_off.iter().map(|d| time::date_from_day_number(*d).to_string()).collect();
+    assert_eq!(leave, ["2026-10-21", "2026-10-22"]);
     let assigned: Vec<(String, String, u32)> = {
         let mut v: Vec<_> = p.assignments.values().map(|a| (p.tasks[&a.task].name.clone(), p.resources[&a.resource].name.clone(), a.units.0)).collect();
         v.sort();
@@ -171,7 +176,6 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
         "Cost resources",
         "Overtime rates and cost per use",
         "Assignments that Super PM cannot hold (resources work on the tasks inside a summary",
-        "Other calendars",
         "Recurring calendar exceptions",
         "Alternative work weeks",
         "Project options Super PM does not use",
@@ -308,6 +312,7 @@ fn random_project() -> impl Strategy<Value = Project> {
                 material_label: if material { "tons".into() } else { String::new() },
                 rate: Money(0),
                 notes: String::new(),
+                availability: Default::default(),
             });
         }
         for (r, rate) in resources.iter_mut().zip(&rates) {

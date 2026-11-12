@@ -95,3 +95,15 @@ then starts at the next working minute), or a percentage of the predecessor's du
 ("+50%": that share of its working time). Project XML: LinkLag in tenths of a minute, or of
 a percent with LagFormat 19.
 
+## R38 People's own working time (iteration 5)
+
+A work resource can have weekdays they do not work (part-time) and days off (holidays, leave).
+Their hours on the days they work are the project's. A task with such people on it is
+scheduled in the time all of them can work: the project calendar less their days (a common
+simplification of Microsoft Project, which schedules each assignment on its resource's
+calendar). Lags stay on the project calendar. If someone's settings leave no working weekday,
+their task keeps the project calendar. Workload counts their days off as zero capacity, and an
+assignment's work is spread over the task's own calendar. Project XML: a resource's calendar
+(based on the project's) gives its non-working weekdays and non-working exceptions; different
+hours are reported as approximated.
+

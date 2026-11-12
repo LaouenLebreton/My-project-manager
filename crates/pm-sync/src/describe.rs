@@ -214,6 +214,11 @@ fn one(p: &Project, cmd: &Command) -> Vec<String> {
                 ResourceChange::Notes(_) => format!("edited the notes of {n}"),
                 ResourceChange::Position(_) => format!("moved {n} in the Resource Sheet"),
                 ResourceChange::Rate(m) => format!("set the rate of {n} to {}", money(p, m.0)),
+                ResourceChange::Availability(a) => {
+                    let days = a.days_off.len();
+                    let weekdays = a.off_weekdays.iter().filter(|o| **o).count();
+                    format!("changed when {n} works ({days} day{} off, {weekdays} weekday{} not worked)", if days == 1 { "" } else { "s" }, if weekdays == 1 { "" } else { "s" })
+                }
             }
         }
         Command::InsertAssignment { assignment: a } => {

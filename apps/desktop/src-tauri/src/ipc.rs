@@ -93,6 +93,9 @@ pub struct ResourceRow {
     /// Workload view: work asked of the resource on each day it has any, and per task.
     pub days: Vec<DayWork>,
     pub assignments: Vec<AssignmentWork>,
+    /// Their own working time (R38): weekdays not worked (Monday first) and days off as ranges.
+    pub off_weekdays: Vec<bool>,
+    pub days_off: Vec<crate::edits::DayOffRange>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -425,6 +428,17 @@ fn resource_rows(doc: &Document) -> Vec<ResourceRow> {
                             .collect()
                     })
                     .unwrap_or_default(),
+                off_weekdays: r.availability.off_weekdays.to_vec(),
+                days_off: {
+                    let mut ranges: Vec<(i64, i64)> = Vec::new();
+                    for &d in &r.availability.days_off {
+                        match ranges.last_mut() {
+                            Some((_, to)) if *to + 1 == d => *to = d,
+                            _ => ranges.push((d, d)),
+                        }
+                    }
+                    ranges.into_iter().map(|(f, t)| crate::edits::DayOffRange { from: date(f), to: date(t) }).collect()
+                },
             }
         })
         .collect()

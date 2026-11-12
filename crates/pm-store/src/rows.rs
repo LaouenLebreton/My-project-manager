@@ -141,9 +141,20 @@ pub fn upsert_resource(conn: &Connection, r: &Resource) -> Result<(), StoreError
         ResourceKind::Material => "material",
     };
     conn.execute(
-        "INSERT OR REPLACE INTO resource (id, sort_key, name, initials, kind, max_units, material_label, notes, rate_cents)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![r.id.0.to_string(), r.sort_key.0, r.name, r.initials, kind, r.max_units.0, r.material_label, r.notes, r.rate.0],
+        "INSERT OR REPLACE INTO resource (id, sort_key, name, initials, kind, max_units, material_label, notes, rate_cents, availability)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            r.id.0.to_string(),
+            r.sort_key.0,
+            r.name,
+            r.initials,
+            kind,
+            r.max_units.0,
+            r.material_label,
+            r.notes,
+            r.rate.0,
+            if r.availability.is_full() { String::new() } else { serde_json::to_string(&r.availability).expect("availability serializes") }
+        ],
     )?;
     Ok(())
 }
@@ -240,7 +251,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
     }
 
     let mut resources = BTreeMap::new();
-    let mut stmt = conn.prepare("SELECT id, sort_key, name, initials, kind, max_units, material_label, notes, rate_cents FROM resource")?;
+    let mut stmt = conn.prepare("SELECT id, sort_key, name, initials, kind, max_units, material_label, notes, rate_cents, availability FROM resource")?;
     let mut q = stmt.query([])?;
     while let Some(r) = q.next()? {
         let kind = match r.get::<_, String>(4)?.as_str() {
@@ -258,6 +269,10 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
             material_label: r.get(6)?,
             rate: Money(r.get(8)?),
             notes: r.get(7)?,
+            availability: match r.get::<_, String>(9)? {
+                text if text.is_empty() => Default::default(),
+                text => serde_json::from_str(&text).map_err(|e| StoreError::Damaged(format!("working time of a resource: {e}")))?,
+            },
         };
         resources.insert(res.id, res);
     }

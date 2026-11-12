@@ -2367,3 +2367,25 @@ dialog.status-report {
   margin-left: auto;
   text-align: right;
 }
+
+/* Resource Sheet: a person's working time. */
+.working-time {
+  padding: 8px 16px 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.days-off {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.day-off {
+  background: var(--header-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1px 4px 1px 8px;
+}

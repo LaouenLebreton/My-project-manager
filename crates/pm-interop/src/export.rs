@@ -129,6 +129,55 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         close(&mut w, "Exceptions");
     }
     close(&mut w, "Calendar");
+    // People's own working time (R38): a calendar based on the project's, with the weekdays
+    // they do not work and their days off. UID 100 + their resource UID.
+    let mut people: Vec<&pm_core::Resource> = p.resources.values().collect();
+    people.sort_by(|a, b| a.sort_key.cmp(&b.sort_key).then(a.id.cmp(&b.id)));
+    for (i, r) in people.iter().enumerate().filter(|(_, r)| !r.availability.is_full()) {
+        open(&mut w, "Calendar");
+        leaf(&mut w, "UID", &(101 + i).to_string());
+        leaf(&mut w, "Name", &r.name);
+        leaf(&mut w, "IsBaseCalendar", "0");
+        leaf(&mut w, "BaseCalendarUID", "1");
+        if r.availability.off_weekdays.contains(&true) {
+            open(&mut w, "WeekDays");
+            for day_type in 1..=7 {
+                if r.availability.off_weekdays[((day_type + 5) % 7) as usize] {
+                    open(&mut w, "WeekDay");
+                    leaf(&mut w, "DayType", &day_type.to_string());
+                    leaf(&mut w, "DayWorking", "0");
+                    close(&mut w, "WeekDay");
+                }
+            }
+            close(&mut w, "WeekDays");
+        }
+        // Consecutive days off become one exception.
+        let mut ranges: Vec<(i64, i64)> = Vec::new();
+        for &d in &r.availability.days_off {
+            match ranges.last_mut() {
+                Some((_, to)) if *to + 1 == d => *to = d,
+                _ => ranges.push((d, d)),
+            }
+        }
+        if !ranges.is_empty() {
+            open(&mut w, "Exceptions");
+            for (from, to) in ranges {
+                open(&mut w, "Exception");
+                leaf(&mut w, "EnteredByOccurrences", "0");
+                open(&mut w, "TimePeriod");
+                leaf(&mut w, "FromDate", &format!("{}T00:00:00", pm_core::time::date_from_day_number(from)));
+                leaf(&mut w, "ToDate", &format!("{}T23:59:00", pm_core::time::date_from_day_number(to)));
+                close(&mut w, "TimePeriod");
+                leaf(&mut w, "Occurrences", "1");
+                leaf(&mut w, "Name", "Day off");
+                leaf(&mut w, "Type", "1");
+                leaf(&mut w, "DayWorking", "0");
+                close(&mut w, "Exception");
+            }
+            close(&mut w, "Exceptions");
+        }
+        close(&mut w, "Calendar");
+    }
     close(&mut w, "Calendars");
 
     // Tasks in outline order. UIDs are row numbers; 0 is the project summary.
@@ -278,6 +327,9 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
             if r.rate.0 != 0 {
                 leaf(&mut w, "StandardRate", &cents(r.rate.0));
                 leaf(&mut w, "StandardRateFormat", "2"); // per hour
+            }
+            if !r.availability.is_full() {
+                leaf(&mut w, "CalendarUID", &(100 + i + 1).to_string());
             }
             if !r.notes.is_empty() {
                 leaf(&mut w, "Notes", &r.notes);

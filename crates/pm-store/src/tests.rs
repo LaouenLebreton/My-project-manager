@@ -102,6 +102,7 @@ fn staff(p: &mut Project) {
         max_units: ResourceUnits(150),
         material_label: String::new(),
         notes: "Part-time Fridays".into(),
+        availability: Default::default(),
         rate: Money(4_550),
     };
     let m = Resource {
@@ -114,6 +115,7 @@ fn staff(p: &mut Project) {
         material_label: "tons".into(),
         rate: Money(0),
         notes: String::new(),
+        availability: Default::default(),
     };
     let a = Assignment { id: AssignmentId(Uuid::from_u128(80)), task: tid(4), resource: r.id, units: ResourceUnits(50) };
     let b = Assignment { id: AssignmentId(Uuid::from_u128(81)), task: tid(4), resource: m.id, units: ResourceUnits(250) };
@@ -195,6 +197,7 @@ fn version_1_files_are_upgraded() {
         material_label: String::new(),
         rate: Money(0),
         notes: String::new(),
+        availability: Default::default(),
     };
     s.apply(&mut loaded, &Command::InsertResources { resources: vec![r], assignments: vec![] }, &meta(1)).unwrap();
 }
@@ -491,4 +494,19 @@ fn elapsed_durations_and_lag_formats_are_saved() {
     drop(Store::create(&path, &p).unwrap());
     let (_, again) = Store::open(&path).unwrap();
     assert_eq!(again, p);
+}
+
+#[test]
+fn a_persons_working_time_is_saved() {
+    let path = temp_dir().join("w.pmproj");
+    let mut p = rich_project();
+    staff(&mut p);
+    let id = *p.resources.keys().next().unwrap();
+    let a = pm_core::Availability { off_weekdays: [false, false, false, false, true, false, false], days_off: [20_400, 20_401].into_iter().collect() };
+    drop(Store::create(&path, &p).unwrap());
+    let (mut s, mut loaded) = Store::open(&path).unwrap();
+    s.apply(&mut loaded, &Command::SetResource { id, change: pm_core::ResourceChange::Availability(a.clone()) }, &meta(1)).unwrap();
+    drop(s);
+    let (_, again) = Store::open(&path).unwrap();
+    assert_eq!(again.resources[&id].availability, a);
 }

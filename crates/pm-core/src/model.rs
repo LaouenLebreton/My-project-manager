@@ -265,6 +265,28 @@ pub struct Resource {
     #[serde(default)]
     pub rate: Money,
     pub notes: String,
+    /// When this person does not work, beyond the project calendar (R38).
+    #[serde(default)]
+    pub availability: Availability,
+}
+
+/// A person's own working time (R38): weekdays they do not work (part-time) and days off
+/// (holidays, leave). Their working hours on the days they work are the project's.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Availability {
+    /// Monday first: true where they do not work.
+    #[serde(default)]
+    pub off_weekdays: [bool; 7],
+    /// Days off, as day numbers (days since 1970-01-01).
+    #[serde(default)]
+    pub days_off: std::collections::BTreeSet<i64>,
+}
+
+impl Availability {
+    /// Works whenever the project does.
+    pub fn is_full(&self) -> bool {
+        !self.off_weekdays.contains(&true) && self.days_off.is_empty()
+    }
 }
 
 /// A resource working on (or used by) a task.
