@@ -46,6 +46,8 @@ export interface GridHandle {
   insertTask: () => void;
   /** A new task inside the active one. */
   addSubtask: () => void;
+  /** The right-click menu for row `row` (0-based), e.g. from its bar in the chart. */
+  openRowMenu: (e: React.MouseEvent, row: number) => void;
   deleteSelection: () => void;
   /** The task under the cursor, for Task Info. */
   activeRow: () => Row | undefined;
@@ -180,6 +182,13 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       if (selection.length) void send({ kind: "DeleteTasks", ids: selection.map((r) => r.id) });
     },
     activeRow: () => current,
+    openRowMenu: (e: React.MouseEvent, i: number) => {
+      const r = rows[i];
+      if (!r) return;
+      const inSelection = selectedIds.has(r.id) && selection.length > 1;
+      if (!inSelection) moveTo(i, active.col);
+      openMenu(e, rowMenu(r, inSelection ? selection : [r]));
+    },
     findNext: (text: string, fromCurrent = false) => {
       const needle = text.trim().toLocaleLowerCase();
       if (!needle) return false;

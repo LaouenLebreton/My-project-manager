@@ -5,6 +5,7 @@ import type { Row } from "./bindings/Row";
 import { formatDate } from "./format";
 import { GLOSSARY } from "./help";
 import { blocked } from "./permissions";
+import { useContextMenu } from "./ContextMenu";
 
 /** Microsoft Project's Task Board columns, tied to % complete as it does. */
 const COLUMNS = [
@@ -23,7 +24,18 @@ const PAGE = 200;
  * Board: work tasks as cards in Not started / In progress / Done. Dragging a card (or its
  * arrow buttons) sets % complete, which records the actual dates as the task list does.
  */
-export function Board({ snapshot, onEdit, onShowTask }: { snapshot: Snapshot; onEdit: (edit: Edit) => Promise<EditResult>; onShowTask: (row: number) => void }) {
+export function Board({
+  snapshot,
+  onEdit,
+  onShowTask,
+  onTaskInfo,
+}: {
+  snapshot: Snapshot;
+  onEdit: (edit: Edit) => Promise<EditResult>;
+  onShowTask: (row: number) => void;
+  onTaskInfo?: (r: Row) => void;
+}) {
+  const openMenu = useContextMenu();
   const [phase, setPhase] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   // Dragging uses pointer events: the webview's own drag and drop is reserved for files.
@@ -155,13 +167,24 @@ export function Board({ snapshot, onEdit, onShowTask }: { snapshot: Snapshot; on
                         window.addEventListener("pointerup", onUp);
                         window.addEventListener("pointercancel", onUp);
                       }}
+                      onContextMenu={(e) =>
+                        openMenu(e, [
+                          ...COLUMNS.map((c) => ({ label: `Move to ${c.title}`, checked: c.key === col.key, run: () => move(r, c.key) })),
+                          { separator: true },
+                          { label: "Show in Gantt Chart", run: () => onShowTask(rowNumber.get(r.id) ?? 1) },
+                          { label: "Task Info…", run: () => onTaskInfo?.(r) },
+                          { separator: true },
+                          { label: "Delete Task", danger: true, run: () => void onEdit({ kind: "DeleteTasks", ids: [r.id] }).catch((err) => setError(errorMessage(err))) },
+                        ])
+                      }
+                      onDoubleClick={() => onTaskInfo?.(r)}
                       onClickCapture={(e) => {
                         // A drag ends with a click on the card; it should not open the task.
                         if (justDragged.current) e.stopPropagation();
                         justDragged.current = false;
                       }}
                     >
-                      <button className="link card-name" onClick={() => onShowTask(rowNumber.get(r.id) ?? 1)} title="Show in the task list">
+                      <button className="link card-name" onClick={() => onShowTask(rowNumber.get(r.id) ?? 1)} title="Show in the Gantt Chart">
                         {r.isMilestone && "◆ "}
                         {r.name}
                       </button>

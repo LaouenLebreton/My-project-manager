@@ -559,7 +559,7 @@ export function App() {
       ) : view === "history" && snapshot.project.team ? (
         <HistoryView snapshot={snapshot} onShowTask={showTask} onConfirm={confirm} />
       ) : view === "board" ? (
-        <Board snapshot={snapshot} onEdit={edit} onShowTask={showTask} />
+        <Board snapshot={snapshot} onEdit={edit} onShowTask={showTask} onTaskInfo={setInfoRow} />
       ) : view === "calendar" ? (
         <CalendarView snapshot={snapshot} onShowTask={showTask} />
       ) : view === "workload" ? (
@@ -630,6 +630,8 @@ export function App() {
             selectedIds={selectedIds}
             onEdit={edit}
             onSelectRow={(r) => gridRef.current?.selectRow(r)}
+            onRowMenu={(e, r) => gridRef.current?.openRowMenu(e, r)}
+            onRowInfo={(r) => setInfoRow(shown!.rows[r] ?? null)}
             onScrollBy={(dy) => gridRef.current?.scrollBy(dy)}
             onMessage={setMessage}
             ref={ganttRef}

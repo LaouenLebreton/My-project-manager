@@ -72,6 +72,10 @@ export interface GanttProps {
   onMessage: (message: string | null) => void;
   /** Asks before a drag changes the critical path; resolves true to go ahead. */
   onConfirm: (title: string, message: string, action: string) => Promise<boolean>;
+  /** Right-click on a row: its menu (the same as in the task list). */
+  onRowMenu?: (e: React.MouseEvent, row: number) => void;
+  /** Double-click on a bar: Task Info. */
+  onRowInfo?: (row: number) => void;
 }
 
 /**
@@ -84,7 +88,7 @@ export interface GanttHandle {
 }
 
 export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
-  { snapshot, scrollTop, selectedIds, onEdit, onSelectRow, onScrollBy, onMessage, onConfirm },
+  { snapshot, scrollTop, selectedIds, onEdit, onSelectRow, onScrollBy, onMessage, onConfirm, onRowMenu, onRowInfo },
   handle,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -630,6 +634,14 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={() => !drag && setHover(null)}
+        onContextMenu={(e) => {
+          const h = hit(e);
+          if (h.row >= 0 && h.row < rows.length) onRowMenu?.(e, h.row);
+        }}
+        onDoubleClick={(e) => {
+          const h = hit(e);
+          if (h.zone && h.row >= 0 && h.row < rows.length) onRowInfo?.(h.row);
+        }}
       />
       <div className="gantt-zoom" role="group" aria-label="Zoom">
         <button aria-label="Zoom out" onClick={() => setPxPerDay((p) => Math.max(2, p / 1.5))}>
