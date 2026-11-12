@@ -106,7 +106,6 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
     file_tasks.sort_by_key(|t| t.int_of("ID").unwrap_or(i64::MAX));
     let mut by_uid: HashMap<i64, TaskId> = HashMap::new();
     let mut baseline: BTreeMap<TaskId, pm_core::BaselineTask> = BTreeMap::new();
-    let mut durations: HashMap<TaskId, i64> = HashMap::new();
     let mut parents: Vec<(i64, TaskId)> = Vec::new(); // (outline level, id)
     let mut last_key: HashMap<Option<TaskId>, SortKey> = HashMap::new();
     let mut tasks_imported = 0;
@@ -134,11 +133,9 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
         last_key.insert(parent, key.clone());
 
         let format = t.int_of("DurationFormat").unwrap_or(7);
-        let mut minutes = t.text_of("Duration").and_then(parse_iso_duration).unwrap_or(0);
-        if ELAPSED_FORMATS.contains(&format) {
-            minutes = minutes * minutes_per_day / (24 * 60);
-            r.approximated("Elapsed durations (counted in calendar days) were converted to working time", Some(&label));
-        }
+        let minutes = t.text_of("Duration").and_then(parse_iso_duration).unwrap_or(0);
+        // Elapsed durations count clock time (R36); the file gives them as clock time too.
+        let elapsed = ELAPSED_FORMATS.contains(&format);
         let is_milestone = t.flag("Milestone");
         if is_milestone && minutes > 0 {
             r.approximated("Milestones with a duration became zero-duration milestones", Some(&label));
@@ -172,12 +169,12 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
                 fixed_cost: Money(money(t.text_of("FixedCost"))),
                 manual_start,
                 deadline: t.text_of("Deadline").and_then(parse_datetime),
+                elapsed,
                 actual,
                 notes: t.raw_of("Notes").unwrap_or("").to_owned(),
             },
         );
         by_uid.insert(uid, id);
-        durations.insert(id, minutes);
         for b in t.children("Baseline") {
             if b.int_of("Number").unwrap_or(0) != 0 {
                 r.ignored("Baselines 1 to 10 (Super PM keeps the main baseline, Baseline 0)", Some(&label));
@@ -238,16 +235,15 @@ pub fn import_mspdi(input: &str, new_id: &mut dyn FnMut() -> Uuid) -> Result<(Pr
             };
             let lag_format = link.int_of("LagFormat").unwrap_or(7);
             let raw = link.int_of("LinkLag").unwrap_or(0);
-            let lag = if PERCENT_FORMATS.contains(&lag_format) {
-                r.approximated("Lags given as a percentage of the predecessor were converted to a fixed working time", Some(&succ_name));
-                durations.get(&predecessor).copied().unwrap_or(0) * raw / 1000
+            // LinkLag is in tenths: of a minute, or of a percent for percentage lags (R37).
+            let (lag, format) = if PERCENT_FORMATS.contains(&lag_format) {
+                ((raw as f64 / 10.0).round() as i64, pm_core::LagFormat::Percent)
             } else if ELAPSED_FORMATS.contains(&lag_format) {
-                r.approximated("Elapsed lags (counted in calendar days) were converted to working time", Some(&succ_name));
-                raw / 10 * minutes_per_day / (24 * 60)
+                (raw / 10, pm_core::LagFormat::Elapsed)
             } else {
-                raw / 10 // tenths of a minute
+                (raw / 10, pm_core::LagFormat::Working)
             };
-            let dependency = Dependency { id: DependencyId(new_id()), predecessor, successor, kind, lag };
+            let dependency = Dependency { id: DependencyId(new_id()), predecessor, successor, kind, lag, lag_format: format };
             match apply(&mut project, &Command::InsertLink { dependency }) {
                 Ok(_) => links_imported += 1,
                 Err(e) => r.ignored(&format!("Links that Super PM cannot hold yet ({e})"), Some(&succ_name)),

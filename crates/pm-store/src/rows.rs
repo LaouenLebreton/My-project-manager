@@ -92,8 +92,8 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
     let cdate = t.constraint.date().map(|m| m.0);
     conn.execute(
         "INSERT OR REPLACE INTO task
-         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+         (id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min, elapsed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             t.id.0.to_string(),
             t.parent.map(|p| p.0.to_string()),
@@ -111,6 +111,7 @@ pub fn upsert_task(conn: &Connection, t: &Task) -> Result<(), StoreError> {
             t.actual.start().map(|m| m.0),
             t.actual.finish().map(|m| m.0),
             t.deadline.map(|m| m.0),
+            t.elapsed,
         ],
     )?;
     Ok(())
@@ -123,8 +124,8 @@ pub fn delete_task(conn: &Connection, id: TaskId) -> Result<(), StoreError> {
 
 pub fn upsert_dependency(conn: &Connection, d: &Dependency) -> Result<(), StoreError> {
     conn.execute(
-        "INSERT OR REPLACE INTO dependency (id, predecessor_id, successor_id, kind, lag_min) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![d.id.0.to_string(), d.predecessor.0.to_string(), d.successor.0.to_string(), link_code(d.kind), d.lag],
+        "INSERT OR REPLACE INTO dependency (id, predecessor_id, successor_id, kind, lag_min, lag_format) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![d.id.0.to_string(), d.predecessor.0.to_string(), d.successor.0.to_string(), link_code(d.kind), d.lag, lag_format_code(d.lag_format)],
     )?;
     Ok(())
 }
@@ -191,6 +192,7 @@ fn task_from_row(r: &Row) -> Result<Task, StoreError> {
         fixed_cost: Money(r.get(11)?),
         manual_start: r.get::<_, Option<i64>>(12)?.map(Moment),
         deadline: r.get::<_, Option<i64>>(15)?.map(Moment),
+        elapsed: r.get(16)?,
         actual: match (r.get::<_, Option<i64>>(13)?, r.get::<_, Option<i64>>(14)?) {
             (None, None) => Actual::NotStarted,
             (Some(s), None) => Actual::Started { start: Moment(s) },
@@ -214,7 +216,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
 
     let mut tasks = BTreeMap::new();
     let mut stmt = conn.prepare(
-        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min FROM task",
+        "SELECT id, parent_id, sort_key, name, duration_min, is_milestone, constraint_type, constraint_min, percent_complete, notes, leveling_delay_min, fixed_cost_cents, manual_start_min, actual_start_min, actual_finish_min, deadline_min, elapsed FROM task",
     )?;
     let mut q = stmt.query([])?;
     while let Some(r) = q.next()? {
@@ -223,7 +225,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
     }
 
     let mut dependencies = BTreeMap::new();
-    let mut stmt = conn.prepare("SELECT id, predecessor_id, successor_id, kind, lag_min FROM dependency")?;
+    let mut stmt = conn.prepare("SELECT id, predecessor_id, successor_id, kind, lag_min, lag_format FROM dependency")?;
     let mut q = stmt.query([])?;
     while let Some(r) = q.next()? {
         let d = Dependency {
@@ -232,6 +234,7 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
             successor: TaskId(uuid(r.get(2)?)?),
             kind: link_type(&r.get::<_, String>(3)?)?,
             lag: r.get(4)?,
+            lag_format: lag_format_of(&r.get::<_, String>(5)?)?,
         };
         dependencies.insert(d.id, d);
     }
@@ -286,4 +289,21 @@ pub fn read_project(conn: &Connection) -> Result<Project, StoreError> {
         baseline: read_baseline(conn)?,
         status_date: status_date.map(Moment),
     })
+}
+
+fn lag_format_code(f: pm_core::LagFormat) -> &'static str {
+    match f {
+        pm_core::LagFormat::Working => "working",
+        pm_core::LagFormat::Elapsed => "elapsed",
+        pm_core::LagFormat::Percent => "percent",
+    }
+}
+
+fn lag_format_of(code: &str) -> Result<pm_core::LagFormat, StoreError> {
+    match code {
+        "working" => Ok(pm_core::LagFormat::Working),
+        "elapsed" => Ok(pm_core::LagFormat::Elapsed),
+        "percent" => Ok(pm_core::LagFormat::Percent),
+        other => Err(StoreError::Damaged(format!("lag format {other}"))),
+    }
 }

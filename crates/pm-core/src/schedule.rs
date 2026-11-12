@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Constraint, Dependency, DependencyId, LinkType, Project, Task, TaskId};
+use crate::model::{Constraint, Dependency, DependencyId, LagFormat, LinkType, Project, Task, TaskId};
 use crate::time::Moment;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +75,18 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
     let n = g.tasks.len();
     let start = cal.next_working(project.start);
     let snap = |m: Moment| cal.next_working(m);
+    // A task's duration from a moment: working time, or every minute for an elapsed task (R36).
+    let span = |i: usize, from: Moment, d: i64| if g.tasks[i].elapsed { Moment(from.0 + d) } else { cal.add_working(from, d) };
+    // A link's lag from a moment (R37): working time, clock time, or a share of the
+    // predecessor's duration. `sign` -1 goes backwards (the late pass).
+    let lag = |link: &Dependency, from: Moment, sign: i64| match link.lag_format {
+        LagFormat::Working => cal.add_working(from, sign * link.lag),
+        LagFormat::Elapsed => Moment(from.0 + sign * link.lag),
+        LagFormat::Percent => {
+            let pred = project.tasks.get(&link.predecessor).map_or(0, |t| if t.is_milestone { 0 } else { t.duration.get() });
+            cal.add_working(from, sign * pred * link.lag / 100)
+        }
+    };
 
     // Forward pass (R10 to R18, R25). Per node: a leaf's (ES, EF); a summary entry's floor
     // (the earliest any task inside may start); a summary exit's rolled-up (ES, EF).
@@ -96,10 +108,10 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         for &(from, link) in &g.preds[node] {
             let (pes, pef) = early[from];
             let candidate = match link.kind {
-                LinkType::FinishToStart => cal.add_working(pef, link.lag),
-                LinkType::StartToStart => cal.add_working(pes, link.lag),
-                LinkType::FinishToFinish => cal.add_working(cal.add_working(pef, link.lag), -dur),
-                LinkType::StartToFinish => cal.add_working(cal.add_working(pes, link.lag), -dur),
+                LinkType::FinishToStart => lag(link, pef, 1),
+                LinkType::StartToStart => lag(link, pes, 1),
+                LinkType::FinishToFinish => span(i, lag(link, pef, 1), -dur),
+                LinkType::StartToFinish => span(i, lag(link, pes, 1), -dur),
             };
             es = es.max(candidate);
         }
@@ -119,7 +131,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         // Actuals are facts (R35): a started task starts when it did, a finished one ends when
         // it did, whatever its links, constraints or leveling say.
         if let Some(actual_start) = task.actual.start() {
-            let finish = task.actual.finish().unwrap_or_else(|| cal.add_working(actual_start, dur));
+            let finish = task.actual.finish().unwrap_or_else(|| span(i, actual_start, dur));
             early[node] = (actual_start, finish.max(actual_start));
             continue;
         }
@@ -129,7 +141,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
             if es > target {
                 conflicts.push(ConstraintConflict { task: task.id, constraint_start: target, link_driven_start: es, manual: true });
             }
-            early[node] = (target, cal.add_working(target, dur));
+            early[node] = (target, span(i, target, dur));
             continue;
         }
         // Leveling waits after everything else that drives the start (R30).
@@ -146,7 +158,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         // Constraints (R15 to R18, R32). Limits that the links would break are honoured anyway
         // and reported as conflicts, so the problem is visible (negative slack), never hidden.
         let finish_on = |d: Moment| if dur > 0 { cal.prev_working_end(d) } else { d };
-        let start_for_finish = |f: Moment| cal.add_working(f, -dur);
+        let start_for_finish = |f: Moment| span(i, f, -dur);
         let mut honour = |target: Moment, es: &mut Moment| {
             if *es > target {
                 conflicts.push(ConstraintConflict { task: task.id, constraint_start: target, link_driven_start: *es, manual: false });
@@ -171,7 +183,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
                 }
             }
         }
-        early[node] = (es, cal.add_working(es, dur));
+        early[node] = (es, span(i, es, dur));
     }
 
     let project_finish = (0..n).filter(|&i| g.children[i].is_empty()).map(|i| early[i].1).max().unwrap_or(start);
@@ -194,16 +206,16 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
                 // A successor summary starts when its first task does.
                 let (ses, sef) = if g.children[to].is_empty() { early[to] } else { early[n + to] };
                 finish = finish.min(match link.kind {
-                    LinkType::FinishToStart => cal.add_working(ses, -link.lag),
-                    LinkType::FinishToFinish => cal.add_working(sef, -link.lag),
-                    LinkType::StartToStart => cal.add_working(cal.add_working(ses, -link.lag), dur),
-                    LinkType::StartToFinish => cal.add_working(cal.add_working(sef, -link.lag), dur),
+                    LinkType::FinishToStart => lag(link, ses, -1),
+                    LinkType::FinishToFinish => lag(link, sef, -1),
+                    LinkType::StartToStart => span(i, lag(link, ses, -1), dur),
+                    LinkType::StartToFinish => span(i, lag(link, sef, -1), dur),
                 });
             }
             if dur > 0 {
                 finish = cal.prev_working_end(finish);
             }
-            let es = cal.add_working(finish, -dur);
+            let es = span(i, finish, -dur);
             if es > early[i].0 {
                 early[i] = (es, finish);
             }
@@ -246,10 +258,10 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
         for &(to, link) in &g.succs[node] {
             let (sls, slf) = late[to];
             match link.kind {
-                LinkType::FinishToStart => lf = lf.min(cal.add_working(sls, -link.lag)),
-                LinkType::FinishToFinish => lf = lf.min(cal.add_working(slf, -link.lag)),
-                LinkType::StartToStart => start_ceiling = start_ceiling.min(cal.add_working(sls, -link.lag)),
-                LinkType::StartToFinish => start_ceiling = start_ceiling.min(cal.add_working(slf, -link.lag)),
+                LinkType::FinishToStart => lf = lf.min(lag(link, sls, -1)),
+                LinkType::FinishToFinish => lf = lf.min(lag(link, slf, -1)),
+                LinkType::StartToStart => start_ceiling = start_ceiling.min(lag(link, sls, -1)),
+                LinkType::StartToFinish => start_ceiling = start_ceiling.min(lag(link, slf, -1)),
             }
         }
         if summary {
@@ -257,7 +269,7 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
             continue;
         }
         if start_ceiling != NEVER {
-            lf = lf.min(cal.add_working(start_ceiling, dur));
+            lf = lf.min(span(i, start_ceiling, dur));
         }
         if dur > 0 {
             lf = cal.prev_working_end(lf);
@@ -268,13 +280,13 @@ pub fn schedule(project: &Project) -> Result<Schedule, ScheduleError> {
             lf = early[i].1;
         }
         match g.tasks[i].constraint {
-            Constraint::MustStartOn(d) => lf = cal.add_working(snap(d), dur),
+            Constraint::MustStartOn(d) => lf = span(i, snap(d), dur),
             Constraint::MustFinishOn(d) => lf = finish_on(d),
-            Constraint::StartNoLaterThan(d) => lf = lf.min(cal.add_working(snap(d), dur)),
+            Constraint::StartNoLaterThan(d) => lf = lf.min(span(i, snap(d), dur)),
             Constraint::FinishNoLaterThan(d) => lf = lf.min(finish_on(d)),
             _ => {}
         }
-        late[node] = (cal.add_working(lf, -dur), lf);
+        late[node] = (span(i, lf, -dur), lf);
     }
 
     let mut result = vec![None; n];
@@ -541,6 +553,7 @@ mod tests {
                     fixed_cost: Money(0),
                     manual_start: None,
                     deadline: None,
+                    elapsed: false,
                     actual: Actual::default(),
                     notes: String::new(),
                 },
@@ -568,8 +581,15 @@ mod tests {
             let id = DependencyId(Uuid::from_u128(1_000_000 + self.0.dependencies.len() as u128));
             self.0.dependencies.insert(
                 id,
-                Dependency { id, predecessor: tid(pred), successor: tid(succ), kind, lag },
+                Dependency { id, predecessor: tid(pred), successor: tid(succ), kind, lag, lag_format: crate::LagFormat::Working },
             );
+            self
+        }
+
+        fn link_as(mut self, pred: u128, succ: u128, kind: LinkType, lag: i64, lag_format: LagFormat) -> Self {
+            self = self.link(pred, succ, kind, lag);
+            let last = *self.0.dependencies.keys().last().unwrap();
+            self.0.dependencies.get_mut(&last).unwrap().lag_format = lag_format;
             self
         }
 
@@ -619,6 +639,33 @@ mod tests {
     fn r11_finish_to_start_with_lag() {
         let s = P::new().task(1, DAY).task(2, DAY).link(1, 2, FinishToStart, DAY).run();
         assert_eq!(dates(&s, 2), (at(7, 8, 0), at(7, 17, 0)));
+    }
+
+    #[test]
+    fn r36_elapsed_duration_counts_nights_and_weekends() {
+        let mut p = P::new().task(1, 4 * DAY).task(2, 3 * 1440).task(3, DAY).fs(1, 2).fs(2, 3);
+        p.0.tasks.get_mut(&tid(2)).unwrap().elapsed = true;
+        let s = p.run();
+        // T1 Mon–Thu; T2 starts Friday 08:00 and 72 hours later it is Monday 08:00.
+        assert_eq!(dates(&s, 2), (at(9, 8, 0), at(12, 8, 0)));
+        assert_eq!(dates(&s, 3), (at(12, 8, 0), at(12, 17, 0)));
+    }
+
+    #[test]
+    fn r37_percent_lag_waits_part_of_the_predecessor() {
+        // 50% of a 4-day task = 2 working days after Thursday 17:00: Monday 17:00, so Tuesday.
+        let s = P::new().task(1, 4 * DAY).task(2, DAY).link_as(1, 2, FinishToStart, 50, LagFormat::Percent).run();
+        assert_eq!(dates(&s, 2), (at(13, 8, 0), at(13, 17, 0)));
+    }
+
+    #[test]
+    fn r37_elapsed_lag_counts_the_weekend() {
+        // Friday 17:00 + 48 hours = Sunday 17:00, so Monday 08:00.
+        let s = P::new().task(1, 5 * DAY).task(2, DAY).link_as(1, 2, FinishToStart, 2 * 1440, LagFormat::Elapsed).run();
+        assert_eq!(dates(&s, 2), (at(12, 8, 0), at(12, 17, 0)));
+        // Two working days would wait until Wednesday.
+        let w = P::new().task(1, 5 * DAY).task(2, DAY).link(1, 2, FinishToStart, 2 * DAY).run();
+        assert_eq!(dates(&w, 2), (at(14, 8, 0), at(14, 17, 0)));
     }
 
     #[test]

@@ -130,6 +130,7 @@ mod tests {
             fixed_cost: Money(cost),
             manual_start: None,
             deadline: None,
+            elapsed: false,
             actual: Actual::default(),
             notes: String::new(),
         }
@@ -153,7 +154,7 @@ mod tests {
         };
         // Phase 1 holds 2 (4 days, 1000) then 3 (4 days, 2000).
         let tasks = vec![task(1, None, 1, 0), task(2, Some(1), 4, 1000), task(3, Some(1), 4, 2000)];
-        let link = Dependency { id: DependencyId(Uuid::from_u128(9)), predecessor: tid(2), successor: tid(3), kind: LinkType::FinishToStart, lag: 0 };
+        let link = Dependency { id: DependencyId(Uuid::from_u128(9)), predecessor: tid(2), successor: tid(3), kind: LinkType::FinishToStart, lag: 0, lag_format: crate::LagFormat::Working };
         apply(&mut p, &Command::InsertTasks { tasks, dependencies: vec![link] }).unwrap();
         let s = schedule(&p).unwrap();
         p.baseline = Some(capture_baseline(&p, &s, &loads(&p, &s), "t"));

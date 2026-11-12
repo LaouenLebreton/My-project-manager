@@ -20,7 +20,7 @@ its own, test-first, in this order.
 7. **[Done]** **Deadlines:** a date a task should finish by, without constraining it; a flag when it
    finishes later; read and written in Project XML.
 8. **[Done]** **Exports:** CSV of the task list; a printable status report.
-9. **Elapsed durations and percentage lags** (`3ed`, `50%`), read from Project XML exactly.
+9. **[Done]** **Elapsed durations and percentage lags** (`3ed`, `50%`), read from Project XML exactly.
 10. **Resource calendars:** each person's days off and part-time weeks.
 11. **Task types:** fixed units, fixed work, fixed duration, and effort-driven.
 

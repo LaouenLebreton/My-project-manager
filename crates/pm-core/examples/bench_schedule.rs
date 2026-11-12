@@ -45,6 +45,7 @@ fn generate(n: usize) -> Project {
                 fixed_cost: Money(0),
                 manual_start: None,
                 deadline: None,
+                elapsed: false,
                 actual: Actual::default(),
                 notes: String::new(),
             },
@@ -70,7 +71,7 @@ fn generate(n: usize) -> Project {
             let d = DependencyId(Uuid::from_u128(1 << 64 | dependencies.len() as u128));
             let kind = if next(4) == 0 { kinds[next(4) as usize] } else { LinkType::FinishToStart };
             let lag = next(5) as i64 * 240 - 480;
-            dependencies.insert(d, Dependency { id: d, predecessor: id(leaves[from]), successor: id(leaves[w]), kind, lag });
+            dependencies.insert(d, Dependency { id: d, predecessor: id(leaves[from]), successor: id(leaves[w]), kind, lag, lag_format: crate::LagFormat::Working });
         }
     }
     Project {

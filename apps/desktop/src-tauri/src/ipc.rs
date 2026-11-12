@@ -455,7 +455,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
     let mut incoming: HashMap<TaskId, Vec<PredecessorEntry>> = HashMap::new();
     for d in p.dependencies.values() {
         if let Some(&row) = row_number.get(&d.predecessor) {
-            incoming.entry(d.successor).or_default().push(PredecessorEntry { row, kind: d.kind, lag: d.lag });
+            incoming.entry(d.successor).or_default().push(PredecessorEntry { row, kind: d.kind, lag: d.lag, lag_format: d.lag_format });
         }
     }
     let mut counters: Vec<usize> = Vec::new();
@@ -490,7 +490,7 @@ pub fn snapshot(doc: &Document) -> Snapshot {
                 total_slack_minutes: s.map(|s| s.total_slack),
                 critical: s.is_some_and(|s| s.critical),
                 percent_complete: t.percent_complete.get(),
-                duration_text: UNITS.format(duration_minutes),
+                duration_text: if t.elapsed && !r.has_children { UNITS.format_elapsed(duration_minutes) } else { UNITS.format(duration_minutes) },
                 predecessors: incoming
                     .get_mut(&r.id)
                     .map(|list| {

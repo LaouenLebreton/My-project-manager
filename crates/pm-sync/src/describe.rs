@@ -153,6 +153,8 @@ fn one(p: &Project, cmd: &Command) -> Vec<String> {
                 TaskChange::ManualStart(None) => format!("scheduled {n} automatically again"),
                 TaskChange::Deadline(Some(m)) => format!("set the deadline of {n} to {}", date(*m)),
                 TaskChange::Deadline(None) => format!("removed the deadline of {n}"),
+                TaskChange::Elapsed(true) => format!("made {n}'s duration count nights and weekends (elapsed)"),
+                TaskChange::Elapsed(false) => format!("made {n}'s duration count working time only"),
                 TaskChange::Actual(Actual::NotStarted) => format!("cleared the actual dates of {n}"),
                 TaskChange::Actual(Actual::Started { start }) => format!("recorded that {n} started on {}", date(*start)),
                 TaskChange::Actual(Actual::Finished { finish, .. }) => format!("recorded that {n} finished on {}", date(*finish)),
@@ -172,6 +174,14 @@ fn one(p: &Project, cmd: &Command) -> Vec<String> {
                 LinkChange::Kind(k) => format!("made {what} {}", link_kind(*k)),
                 LinkChange::Lag(l) if *l < 0 => format!("set a lead of {} on {what}", duration(-l)),
                 LinkChange::Lag(l) => format!("set a lag of {} on {what}", duration(*l)),
+                LinkChange::LagFormat(f) => format!(
+                    "made the lag on {what} {}",
+                    match f {
+                        pm_core::LagFormat::Working => "working time",
+                        pm_core::LagFormat::Elapsed => "elapsed time (nights and weekends count)",
+                        pm_core::LagFormat::Percent => "a percentage of the first task's duration",
+                    }
+                ),
             }
         }
         Command::SetProject { change } => match change {
@@ -261,6 +271,7 @@ mod tests {
             fixed_cost: Money(0),
             manual_start: None,
             deadline: None,
+            elapsed: false,
             actual: Actual::default(),
             notes: String::new(),
         };
@@ -281,7 +292,7 @@ mod tests {
         assert_eq!(summary(&p, &set(pack, TaskChange::FixedCost(Money(120_050)))), "changed the fixed cost of “Pack” to €1200.50 (was €0.00)");
         let monday = Moment::from_datetime(jiff::civil::date(2026, 10, 12).at(8, 0, 0, 0));
         assert_eq!(summary(&p, &set(pack, TaskChange::Constraint(Constraint::StartNoEarlierThan(monday)))), "set “Pack” to start no earlier than Mon 12 Oct 2026 (was as soon as possible)");
-        let link = Command::InsertLink { dependency: Dependency { id: DependencyId(Uuid::from_u128(50)), predecessor: survey, successor: pack, kind: LinkType::FinishToStart, lag: 0 } };
+        let link = Command::InsertLink { dependency: Dependency { id: DependencyId(Uuid::from_u128(50)), predecessor: survey, successor: pack, kind: LinkType::FinishToStart, lag: 0, lag_format: pm_core::LagFormat::Working } };
         assert_eq!(summary(&p, &link), "linked “Survey” to “Pack” (finish-to-start)");
         assert_eq!(summary(&p, &Command::DeleteTasks { ids: vec![pack] }), "deleted the task “Pack”");
     }

@@ -1,7 +1,7 @@
 //! Typing durations and predecessors as text, as in Microsoft Project: `3d`, `4h`,
 //! `2, 3SS+1d`. One implementation for the grid now and file import later.
 
-use crate::model::LinkType;
+use crate::model::{LagFormat, LinkType};
 
 /// Unit sizes in working minutes. Days and weeks follow the calendar's settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +134,61 @@ impl Units {
         Ok(minutes as i64)
     }
 
+    /// Like [`Units::parse_signed`], and also elapsed units (R36): `3ed`, `4eh`, `30em`, `2ew`
+    /// count clock time, nights and weekends included. Returns the minutes and whether elapsed.
+    pub fn parse_signed_spec(&self, text: &str) -> Result<(i64, bool), TextError> {
+        let s = text.trim().to_lowercase();
+        let digits_end = s.trim_start_matches(['+', '-']).find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ',' || c == ' ')).map(|k| k + (s.len() - s.trim_start_matches(['+', '-']).len()));
+        if let Some(k) = digits_end {
+            let unit = s[k..].trim();
+            let per = match unit {
+                "ed" | "eday" | "edays" => Some(1440),
+                "eh" | "ehr" | "ehrs" | "ehour" | "ehours" => Some(60),
+                "em" | "emin" | "emins" => Some(1),
+                "ew" | "ewk" | "ewks" | "eweek" | "eweeks" => Some(10_080),
+                _ => None,
+            };
+            if let Some(per) = per {
+                let (sign, number) = match s[..k].trim().strip_prefix('-') {
+                    Some(r) => (-1.0, r.to_owned()),
+                    None => (1.0, s[..k].trim().trim_start_matches('+').to_owned()),
+                };
+                let value: f64 = number.trim().replace(',', ".").parse().map_err(|_| TextError::BadDuration)?;
+                let minutes = (sign * value * per as f64).round();
+                if !minutes.is_finite() || minutes.abs() > 1e12 {
+                    return Err(TextError::BadDuration);
+                }
+                return Ok((minutes as i64, true));
+            }
+        }
+        Ok((self.parse_signed(text)?, false))
+    }
+
+    /// A duration as typed: minutes and whether it is elapsed; never negative.
+    pub fn parse_duration_spec(&self, text: &str) -> Result<(i64, bool), TextError> {
+        match self.parse_signed_spec(text)? {
+            (m, _) if m < 0 => Err(TextError::NegativeDuration),
+            ok => Ok(ok),
+        }
+    }
+
+    /// Elapsed minutes as typed: `3ed`, `1.5ed`, `4eh`, `30em`.
+    pub fn format_elapsed(&self, minutes: i64) -> String {
+        let decimal = |num: i64, den: i64, unit: &str| {
+            let s = format!("{:.2}", num as f64 / den as f64);
+            format!("{}{unit}", s.trim_end_matches('0').trim_end_matches('.'))
+        };
+        if minutes == 0 {
+            "0ed".into()
+        } else if (minutes * 100) % 1440 == 0 {
+            decimal(minutes, 1440, "ed")
+        } else if (minutes * 100) % 60 == 0 {
+            decimal(minutes, 60, "eh")
+        } else {
+            format!("{minutes}em")
+        }
+    }
+
     /// Like [`Units::parse_signed`] but rejects negative values.
     pub fn parse_duration(&self, text: &str) -> Result<i64, TextError> {
         match self.parse_signed(text)? {
@@ -179,14 +234,21 @@ impl Units {
                     _ => (LinkType::FinishToStart, rest),
                 };
                 let rest = rest.trim();
-                let lag = if rest.is_empty() {
-                    0
-                } else if rest.starts_with(['+', '-']) {
-                    self.parse_signed(rest).map_err(|_| TextError::BadPredecessor)?
-                } else {
+                let (lag, lag_format) = if rest.is_empty() {
+                    (0, LagFormat::Working)
+                } else if !rest.starts_with(['+', '-']) {
                     return Err(TextError::BadPredecessor);
+                } else if let Some(p) = rest.strip_suffix('%') {
+                    // A share of the predecessor's duration (R37): `+50%`.
+                    let v: f64 = p.trim().trim_start_matches('+').replace(',', ".").parse().map_err(|_| TextError::BadPredecessor)?;
+                    (v.round() as i64, LagFormat::Percent)
+                } else {
+                    match self.parse_signed_spec(rest).map_err(|_| TextError::BadPredecessor)? {
+                        (m, true) => (m, LagFormat::Elapsed),
+                        (m, false) => (m, LagFormat::Working),
+                    }
                 };
-                Ok(PredecessorEntry { row, kind, lag })
+                Ok(PredecessorEntry { row, kind, lag, lag_format })
             })
             .collect()
     }
@@ -199,10 +261,15 @@ impl Units {
             LinkType::FinishToFinish => "FF",
             LinkType::StartToFinish => "SF",
         };
+        let amount = |lag: i64| match e.lag_format {
+            LagFormat::Working => self.format(lag),
+            LagFormat::Elapsed => self.format_elapsed(lag),
+            LagFormat::Percent => format!("{lag}%"),
+        };
         match (e.kind, e.lag) {
             (LinkType::FinishToStart, 0) => e.row.to_string(),
             (_, 0) => format!("{}{kind}", e.row),
-            (_, lag) => format!("{}{kind}{}{}", e.row, if lag > 0 { "+" } else { "-" }, self.format(lag.abs())),
+            (_, lag) => format!("{}{kind}{}{}", e.row, if lag > 0 { "+" } else { "-" }, amount(lag.abs())),
         }
     }
 }
@@ -213,6 +280,7 @@ pub struct PredecessorEntry {
     pub row: usize,
     pub kind: LinkType,
     pub lag: i64,
+    pub lag_format: LagFormat,
 }
 
 #[cfg(test)]
@@ -266,13 +334,13 @@ mod tests {
         assert_eq!(
             u.parse_predecessors("2, 3ss+1d; 7FF -4h,9sf"),
             Ok(vec![
-                PredecessorEntry { row: 2, kind: FinishToStart, lag: 0 },
-                PredecessorEntry { row: 3, kind: StartToStart, lag: 480 },
-                PredecessorEntry { row: 7, kind: FinishToFinish, lag: -240 },
-                PredecessorEntry { row: 9, kind: StartToFinish, lag: 0 },
+                PredecessorEntry { row: 2, kind: FinishToStart, lag: 0, lag_format: LagFormat::Working },
+                PredecessorEntry { row: 3, kind: StartToStart, lag: 480, lag_format: LagFormat::Working },
+                PredecessorEntry { row: 7, kind: FinishToFinish, lag: -240, lag_format: LagFormat::Working },
+                PredecessorEntry { row: 9, kind: StartToFinish, lag: 0, lag_format: LagFormat::Working },
             ])
         );
-        assert_eq!(u.parse_predecessors("4+2d"), Ok(vec![PredecessorEntry { row: 4, kind: FinishToStart, lag: 960 }]));
+        assert_eq!(u.parse_predecessors("4+2d"), Ok(vec![PredecessorEntry { row: 4, kind: FinishToStart, lag: 960, lag_format: LagFormat::Working }]));
         for bad in ["x", "3XX", "3SS 2d", "SS", "3SS+q"] {
             assert_eq!(u.parse_predecessors(bad), Err(TextError::BadPredecessor), "{bad:?}");
         }
@@ -332,9 +400,27 @@ mod tests {
         fn predecessor_text_roundtrips(row in 1usize..10_000, k in 0usize..4, lag_minutes in -100_000i64..100_000) {
             let u = Units::default();
             let kind = [FinishToStart, StartToStart, FinishToFinish, StartToFinish][k];
-            let e = PredecessorEntry { row, kind, lag: lag_minutes };
+            let e = PredecessorEntry { row, kind, lag: lag_minutes, lag_format: LagFormat::Working };
             let text = u.format_predecessor(&e);
             prop_assert_eq!(u.parse_predecessors(&text), Ok(vec![e]), "{}", text);
         }
+    }
+
+    #[test]
+    fn elapsed_durations_and_percentage_lags() {
+        let u = Units::default();
+        assert_eq!(u.parse_duration_spec("3ed"), Ok((3 * 1440, true)));
+        assert_eq!(u.parse_duration_spec("2 ew"), Ok((2 * 10_080, true)));
+        assert_eq!(u.parse_duration_spec("1.5eh"), Ok((90, true)));
+        assert_eq!(u.parse_duration_spec("4h"), Ok((240, false)));
+        assert_eq!(u.parse_duration_spec("-1ed"), Err(TextError::NegativeDuration));
+        assert_eq!(u.format_elapsed(3 * 1440), "3ed");
+        assert_eq!(u.format_elapsed(90), "1.5eh");
+        let p = u.parse_predecessors("2FS+50%, 3SS+2ed, 4-1d").unwrap();
+        assert_eq!((p[0].lag, p[0].lag_format), (50, LagFormat::Percent));
+        assert_eq!((p[1].lag, p[1].lag_format), (2 * 1440, LagFormat::Elapsed));
+        assert_eq!((p[2].lag, p[2].lag_format), (-480, LagFormat::Working));
+        let back: Vec<String> = p.iter().map(|e| u.format_predecessor(e)).collect();
+        assert_eq!(back, ["2FS+50%", "3SS+2ed", "4FS-1d"]);
     }
 }

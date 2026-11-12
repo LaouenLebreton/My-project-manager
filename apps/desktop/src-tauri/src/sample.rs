@@ -31,6 +31,7 @@ pub fn office_move(start: Moment) -> Project {
                 fixed_cost: Money(0),
                 manual_start: None,
                 deadline: None,
+                elapsed: false,
                 actual: Actual::default(),
                 notes: String::new(),
             },
@@ -56,7 +57,7 @@ pub fn office_move(start: Moment) -> Project {
 
     let mut link = |predecessor, successor, kind, lag| {
         let id = DependencyId(new_id());
-        dependencies.insert(id, Dependency { id, predecessor, successor, kind, lag });
+        dependencies.insert(id, Dependency { id, predecessor, successor, kind, lag, lag_format: pm_core::LagFormat::Working });
     };
     use LinkType::*;
     link(requirements, choose, FinishToStart, 0);
@@ -133,6 +134,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
                 fixed_cost: Money(0),
                 manual_start: None,
                 deadline: None,
+                elapsed: false,
                 actual: Actual::default(),
                 notes: String::new(),
             },
@@ -156,7 +158,7 @@ pub fn generated(n: usize, start: Moment) -> Project {
             let id = DependencyId(new_id());
             let kind = if next(4) == 0 { kinds[next(4) as usize] } else { LinkType::FinishToStart };
             let lag = next(5) as i64 * 240 - 480;
-            dependencies.insert(id, Dependency { id, predecessor: leaves[from], successor: leaves[w], kind, lag });
+            dependencies.insert(id, Dependency { id, predecessor: leaves[from], successor: leaves[w], kind, lag, lag_format: pm_core::LagFormat::Working });
         }
     }
     Project {

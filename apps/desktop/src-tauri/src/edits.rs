@@ -253,6 +253,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     fixed_cost: Money(0),
                     manual_start: None,
                     deadline: None,
+                    elapsed: false,
                     actual: Actual::default(),
                     notes: String::new(),
                 }],
@@ -278,6 +279,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 successor: task_id(&successor_id)?,
                 kind: LinkType::FinishToStart,
                 lag: 0,
+                lag_format: pm_core::LagFormat::Working,
             },
         }),
         Edit::Indent { ids } => Ok(indent(p, &parse_ids(&ids)?).map(|command| Planned { command, created: None, message: None })),
@@ -480,6 +482,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                     fixed_cost: Money(0),
                     manual_start: None,
                     deadline: None,
+                    elapsed: false,
                     actual: Actual::default(),
                 }],
                 dependencies: vec![],
@@ -975,6 +978,7 @@ fn add_recurring(p: &Project, units: &Units, edit: Edit) -> Result<Option<Planne
         fixed_cost: Money(0),
         manual_start: None,
         deadline: None,
+        elapsed: false,
         actual: Actual::default(),
         notes: String::new(),
     };
@@ -1016,8 +1020,19 @@ fn set_duration(p: &Project, units: &Units, id: TaskId, text: &str) -> Result<Op
     if is_summary(p, id) {
         return Err(err("a summary task's duration comes from the tasks inside it"));
     }
-    let minutes = units.parse_duration(text)?;
+    let (minutes, elapsed) = units.parse_duration_spec(text)?;
     let set = |c: TaskChange| Command::SetTask { id, change: c };
+    // Typing "3ed" makes the duration elapsed (R36); "3d" makes it working time again.
+    if minutes > 0 && elapsed != t.elapsed {
+        let mut commands = vec![set(TaskChange::Elapsed(elapsed))];
+        if t.is_milestone {
+            commands.push(set(TaskChange::Milestone(false)));
+        }
+        if minutes != t.duration.get() {
+            commands.push(set(TaskChange::Duration(Duration::minutes(minutes)?)));
+        }
+        return Ok(Some(Planned { command: Command::Batch { label: "Change Duration".into(), commands }, created: None, message: None }));
+    }
     let command = match (minutes, t.is_milestone) {
         // Zero duration means milestone, as in Microsoft Project. The stored duration is
         // kept so that turning it back into a task restores it.
@@ -1036,13 +1051,13 @@ fn set_duration(p: &Project, units: &Units, id: TaskId, text: &str) -> Result<Op
 /// Replaces the task's incoming links with the ones typed, changing only what differs.
 fn set_predecessors(p: &Project, units: &Units, id: TaskId, text: &str) -> Result<Option<Planned>, IpcError> {
     let rows = outline(p);
-    let mut wanted: BTreeMap<TaskId, (LinkType, i64)> = BTreeMap::new();
+    let mut wanted: BTreeMap<TaskId, (LinkType, i64, pm_core::LagFormat)> = BTreeMap::new();
     for e in units.parse_predecessors(text)? {
         let pred = rows.get(e.row.wrapping_sub(1)).ok_or_else(|| err(format!("there is no task {}", e.row)))?.id;
         if pred == id {
             return Err(err("a task cannot be linked to itself"));
         }
-        if wanted.insert(pred, (e.kind, e.lag)).is_some() {
+        if wanted.insert(pred, (e.kind, e.lag, e.lag_format)).is_some() {
             return Err(err(format!("task {} is listed twice", e.row)));
         }
     }
@@ -1054,7 +1069,7 @@ fn set_predecessors(p: &Project, units: &Units, id: TaskId, text: &str) -> Resul
             commands.push(Command::DeleteLink { id: d.id });
         }
     }
-    for (pred, (kind, lag)) in wanted {
+    for (pred, (kind, lag, lag_format)) in wanted {
         match existing.iter().find(|d| d.predecessor == pred) {
             Some(d) => {
                 if d.kind != kind {
@@ -1063,9 +1078,12 @@ fn set_predecessors(p: &Project, units: &Units, id: TaskId, text: &str) -> Resul
                 if d.lag != lag {
                     commands.push(Command::SetLink { id: d.id, change: LinkChange::Lag(lag) });
                 }
+                if d.lag_format != lag_format {
+                    commands.push(Command::SetLink { id: d.id, change: LinkChange::LagFormat(lag_format) });
+                }
             }
             None => commands.push(Command::InsertLink {
-                dependency: Dependency { id: DependencyId(new_id()), predecessor: pred, successor: id, kind, lag },
+                dependency: Dependency { id: DependencyId(new_id()), predecessor: pred, successor: id, kind, lag, lag_format },
             }),
         }
     }
@@ -1170,7 +1188,7 @@ fn paste_with_label(p: &Project, clip: &TaskClip, after: Option<TaskId>, label: 
     let dependencies = clip
         .links
         .iter()
-        .map(|d| Dependency { id: DependencyId(new_id()), predecessor: new_ids[&d.predecessor], successor: new_ids[&d.successor], kind: d.kind, lag: d.lag })
+        .map(|d| Dependency { id: DependencyId(new_id()), predecessor: new_ids[&d.predecessor], successor: new_ids[&d.successor], kind: d.kind, lag: d.lag, lag_format: d.lag_format })
         .collect();
     // People: the same resource in the same project; elsewhere one with the same name, or a
     // copy of theirs added to the pool.
@@ -1236,6 +1254,7 @@ fn paste_text(p: &Project, units: &Units, after: Option<TaskId>, text: &str) -> 
                 fixed_cost: Money(0),
                 manual_start: None,
                 deadline: None,
+                elapsed: false,
                 actual: Actual::default(),
                 notes: String::new(),
             }
@@ -1445,6 +1464,7 @@ mod tests {
                     fixed_cost: Money(0),
                     manual_start: None,
                     deadline: None,
+                    elapsed: false,
                     actual: Actual::default(),
                     notes: String::new(),
                 },
@@ -1628,6 +1648,21 @@ mod tests {
         assert_eq!(p.tasks[&id[0]].deadline.map(|m| m.to_datetime().to_string()), Some("2026-11-20T17:00:00".into()));
         run(&mut p, info(""));
         assert_eq!(p.tasks[&id[0]].deadline, None);
+    }
+
+    #[test]
+    fn typed_elapsed_durations_and_lag_formats() {
+        let (mut p, id) = project(&[("A", 0), ("B", 0)]);
+        let b = id[1].0.to_string();
+        run(&mut p, Edit::SetDuration { id: b.clone(), text: "3ed".into() });
+        assert_eq!((p.tasks[&id[1]].duration.get(), p.tasks[&id[1]].elapsed), (3 * 1440, true));
+        run(&mut p, Edit::SetDuration { id: b.clone(), text: "2d".into() });
+        assert_eq!((p.tasks[&id[1]].duration.get(), p.tasks[&id[1]].elapsed), (960, false));
+        run(&mut p, Edit::SetPredecessors { id: b.clone(), text: "1FS+50%".into() });
+        let link = |p: &Project| p.dependencies.values().next().map(|d| (d.lag, d.lag_format)).unwrap();
+        assert_eq!(link(&p), (50, pm_core::LagFormat::Percent));
+        run(&mut p, Edit::SetPredecessors { id: b, text: "1+2ed".into() });
+        assert_eq!(link(&p), (2 * 1440, pm_core::LagFormat::Elapsed));
     }
 
     #[test]

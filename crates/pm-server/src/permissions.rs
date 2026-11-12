@@ -184,6 +184,7 @@ mod tests {
                 fixed_cost: Money(0),
                 manual_start: None,
                 deadline: None,
+                elapsed: false,
                 actual: Actual::default(),
                 notes: String::new(),
             };

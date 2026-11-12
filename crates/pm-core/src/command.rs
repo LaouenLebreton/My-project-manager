@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::calendar::Calendar;
 use crate::schedule::ScheduleError;
 use crate::model::{
+    LagFormat,
     Actual, Baseline, Money, Assignment, AssignmentId, Constraint, Dependency, DependencyId, Duration, LinkType, Percent, Project, Resource,
     ResourceId, ResourceKind, ResourceUnits, SortKey, Task, TaskId,
 };
@@ -60,6 +61,8 @@ pub enum TaskChange {
     Actual(Actual),
     /// The date it should be finished by, or none.
     Deadline(Option<Moment>),
+    /// Whether the duration counts every minute (elapsed) or working time only.
+    Elapsed(bool),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +70,8 @@ pub enum TaskChange {
 pub enum LinkChange {
     Kind(LinkType),
     Lag(i64),
+    /// Working, elapsed or a percentage of the predecessor's duration.
+    LagFormat(LagFormat),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,13 +177,14 @@ impl Command {
                 TaskChange::ManualStart(None) => "Schedule Automatically",
                 TaskChange::Deadline(Some(_)) => "Set Deadline",
                 TaskChange::Deadline(None) => "Clear Deadline",
+                TaskChange::Elapsed(_) => "Change Duration",
                 TaskChange::Actual(_) => "Update Progress",
             }
             .into(),
             Command::InsertLink { .. } => "Add Link".into(),
             Command::DeleteLink { .. } => "Delete Link".into(),
             Command::SetLink { change: LinkChange::Kind(_), .. } => "Change Link Type".into(),
-            Command::SetLink { change: LinkChange::Lag(_), .. } => "Change Lag".into(),
+            Command::SetLink { change: LinkChange::Lag(_) | LinkChange::LagFormat(_), .. } => "Change Lag".into(),
             Command::SetProject { change } => match change {
                 ProjectChange::Name(_) => "Rename Project",
                 ProjectChange::Start(_) => "Change Project Start",
@@ -274,6 +280,7 @@ pub fn apply(p: &mut Project, cmd: &Command) -> Result<Command, CommandError> {
             let old = match change {
                 LinkChange::Kind(k) => LinkChange::Kind(std::mem::replace(&mut link.kind, *k)),
                 LinkChange::Lag(l) => LinkChange::Lag(std::mem::replace(&mut link.lag, *l)),
+                LinkChange::LagFormat(f) => LinkChange::LagFormat(std::mem::replace(&mut link.lag_format, *f)),
             };
             if let Err(e) = validate(p) {
                 apply(p, &Command::SetLink { id: *id, change: old }).expect("restoring the old value");
@@ -558,6 +565,7 @@ fn set_task(p: &mut Project, id: TaskId, change: &TaskChange) -> Result<Command,
         TaskChange::FixedCost(v) => TaskChange::FixedCost(std::mem::replace(&mut t.fixed_cost, *v)),
         TaskChange::ManualStart(v) => TaskChange::ManualStart(std::mem::replace(&mut t.manual_start, *v)),
         TaskChange::Deadline(v) => TaskChange::Deadline(std::mem::replace(&mut t.deadline, *v)),
+        TaskChange::Elapsed(v) => TaskChange::Elapsed(std::mem::replace(&mut t.elapsed, *v)),
         TaskChange::Actual(v) => TaskChange::Actual(std::mem::replace(&mut t.actual, *v)),
         TaskChange::Position { parent, sort_key } => TaskChange::Position {
             parent: std::mem::replace(&mut t.parent, *parent),
@@ -604,13 +612,14 @@ mod tests {
             fixed_cost: Money(0),
             manual_start: None,
             deadline: None,
+            elapsed: false,
             actual: Actual::default(),
             notes: String::new(),
         }
     }
 
     fn link(n: u128, a: u128, b: u128) -> Dependency {
-        Dependency { id: lid(n), predecessor: tid(a), successor: tid(b), kind: LinkType::FinishToStart, lag: 0 }
+        Dependency { id: lid(n), predecessor: tid(a), successor: tid(b), kind: LinkType::FinishToStart, lag: 0, lag_format: crate::LagFormat::Working }
     }
 
     fn project() -> Project {

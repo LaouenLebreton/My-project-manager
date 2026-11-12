@@ -157,6 +157,7 @@ mod tests {
             fixed_cost: Money(100),
             manual_start: None,
             deadline: None,
+            elapsed: false,
             actual: Actual::default(),
             notes: String::new(),
         }
@@ -179,7 +180,7 @@ mod tests {
             status_date: None,
         };
         let tasks = vec![task(1, 2, false), task(2, 2, false), task(3, 0, true)];
-        let link = |n: u128, a: u128, b: u128| Dependency { id: DependencyId(Uuid::from_u128(n)), predecessor: TaskId(Uuid::from_u128(a)), successor: TaskId(Uuid::from_u128(b)), kind: LinkType::FinishToStart, lag: 0 };
+        let link = |n: u128, a: u128, b: u128| Dependency { id: DependencyId(Uuid::from_u128(n)), predecessor: TaskId(Uuid::from_u128(a)), successor: TaskId(Uuid::from_u128(b)), kind: LinkType::FinishToStart, lag: 0, lag_format: crate::LagFormat::Working };
         apply(&mut p, &Command::InsertTasks { tasks, dependencies: vec![link(10, 1, 2), link(11, 2, 3)] }).unwrap();
         p
     }

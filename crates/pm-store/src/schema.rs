@@ -147,6 +147,11 @@ pub const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE task ADD COLUMN deadline_min INTEGER;
     "#,
+    // 9 -> 10: elapsed durations and lag formats (iteration 5).
+    r#"
+    ALTER TABLE task ADD COLUMN elapsed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE dependency ADD COLUMN lag_format TEXT NOT NULL DEFAULT 'working' CHECK (lag_format IN ('working', 'elapsed', 'percent'));
+    "#,
 ];
 
 pub const CURRENT_VERSION: i64 = MIGRATIONS.len() as i64;

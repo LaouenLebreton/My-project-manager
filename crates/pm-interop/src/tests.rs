@@ -121,7 +121,7 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     assert_eq!(task("Wireframes & sitemap").duration.get(), 2400);
     assert_eq!(task("Wireframes & sitemap").percent_complete.get(), 60);
     assert_eq!(task("Wireframes & sitemap").notes, "Agree with marketing first.");
-    assert_eq!(task("Visual design").duration.get(), 960, "2 elapsed days → 2 working days");
+    assert_eq!((task("Visual design").duration.get(), task("Visual design").elapsed), (2 * 1440, true), "2 elapsed days, kept as elapsed (R36)");
     assert!(task("Go live 🚀").is_milestone);
     assert!(matches!(task("Go live 🚀").constraint, Constraint::MustStartOn(_)));
     assert!(matches!(task("Templates").constraint, Constraint::StartNoEarlierThan(_)));
@@ -137,12 +137,12 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
     assert!(!p.calendar.pattern(day(2026, 12, 26)).is_working());
     assert_eq!(p.calendar.pattern(day(2026, 10, 24)).working_minutes(), 240);
 
-    // Links: percentage lag 50% of 2 days = 1 day; FF −1 day; elapsed 1 day → 1 working day.
+    // Links: a 50% lag stays a percentage, an elapsed day stays elapsed (R37); FF −1 day.
     let link = |a: &str, b: &str| p.dependencies.values().find(|d| p.tasks[&d.predecessor].name == a && p.tasks[&d.successor].name == b);
     assert_eq!(link("Wireframes & sitemap", "Visual design").map(|d| (d.kind, d.lag)), Some((LinkType::FinishToStart, 240)));
-    assert_eq!(link("Visual design", "Templates").map(|d| (d.kind, d.lag)), Some((LinkType::StartToStart, 480)));
+    assert_eq!(link("Visual design", "Templates").map(|d| (d.kind, d.lag, d.lag_format)), Some((LinkType::StartToStart, 50, pm_core::LagFormat::Percent)));
     assert_eq!(link("Templates", "Content migration").map(|d| (d.kind, d.lag)), Some((LinkType::FinishToFinish, -480)));
-    assert_eq!(link("Wireframes & sitemap", "Content migration").map(|d| d.lag), Some(480));
+    assert_eq!(link("Wireframes & sitemap", "Content migration").map(|d| (d.lag, d.lag_format)), Some((1440, pm_core::LagFormat::Elapsed)));
     // Resources and assignments (iteration 2): Sam and Alex work, Paper is a material; the
     // cost resource and the assignment on the "Build" summary are reported instead.
     let mut names: Vec<(&str, u32)> = p.resources.values().map(|r| (r.name.as_str(), r.max_units.0)).collect();
@@ -162,10 +162,7 @@ fn fixture_imports_what_it_can_and_reports_the_rest() {
 
     let reported = lines(&report).join("\n");
     for expected in [
-        "Elapsed durations",
         "Milestones with a duration",
-        "Lags given as a percentage",
-        "Elapsed lags",
         "Links to tasks in other projects",
         "Blank rows",
         "Custom fields",
@@ -278,6 +275,7 @@ fn random_project() -> impl Strategy<Value = Project> {
                 fixed_cost: Money(0),
                 manual_start: None,
                 deadline: (k % 4 == 1).then_some(date),
+                elapsed: k % 5 == 2,
                 actual: Actual::default(),
                 notes: if k % 3 == 0 { format!("Note {k}: <b>&amp;</b>\nline two") } else { String::new() },
             };
@@ -289,7 +287,7 @@ fn random_project() -> impl Strategy<Value = Project> {
         let kinds = [LinkType::FinishToStart, LinkType::StartToStart, LinkType::FinishToFinish, LinkType::StartToFinish];
         for (a, b, kind, lag) in links {
             let (Some(&(pa, _)), Some(&(pb, _))) = (created.get(a), created.get(b)) else { continue };
-            let dependency = Dependency { id: DependencyId(next()), predecessor: pa, successor: pb, kind: kinds[kind], lag };
+            let dependency = Dependency { id: DependencyId(next()), predecessor: pa, successor: pb, kind: kinds[kind], lag, lag_format: [pm_core::LagFormat::Working, pm_core::LagFormat::Elapsed, pm_core::LagFormat::Percent][kind % 3] };
             let _ = apply(&mut p, &Command::InsertLink { dependency });
         }
         let mut resources = Vec::new();

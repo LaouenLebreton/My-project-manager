@@ -38,6 +38,7 @@ fn task(n: u128) -> Task {
         fixed_cost: Money(0),
         manual_start: None,
         deadline: None,
+        elapsed: false,
         actual: Actual::default(),
         notes: String::new(),
     }
@@ -86,7 +87,7 @@ fn rich_project() -> Project {
     for t in [summary, child, milestone, late, deadline] {
         p.tasks.insert(t.id, t);
     }
-    let d = Dependency { id: DependencyId(Uuid::from_u128(50)), predecessor: tid(2), successor: tid(3), kind: LinkType::StartToFinish, lag: -240 };
+    let d = Dependency { id: DependencyId(Uuid::from_u128(50)), predecessor: tid(2), successor: tid(3), kind: LinkType::StartToFinish, lag: -240, lag_format: pm_core::LagFormat::Working };
     p.dependencies.insert(d.id, d);
     p
 }
@@ -166,7 +167,7 @@ fn version_1_files_are_upgraded() {
     drop(Store::create(&path, &p).unwrap());
     // Turn it back into a version 1 file, as an iteration 1 build would have written it.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; ALTER TABLE task DROP COLUMN actual_start_min; ALTER TABLE task DROP COLUMN actual_finish_min; ALTER TABLE project DROP COLUMN status_date_min; ALTER TABLE task DROP COLUMN deadline_min; PRAGMA user_version = 1;").unwrap();
+    conn.execute_batch("DROP TABLE assignment; DROP TABLE resource; ALTER TABLE task DROP COLUMN leveling_delay_min; ALTER TABLE task DROP COLUMN fixed_cost_cents; ALTER TABLE project DROP COLUMN currency; ALTER TABLE task DROP COLUMN manual_start_min; ALTER TABLE project DROP COLUMN baseline_saved_at; DROP TABLE baseline_task; ALTER TABLE task DROP COLUMN actual_start_min; ALTER TABLE task DROP COLUMN actual_finish_min; ALTER TABLE project DROP COLUMN status_date_min; ALTER TABLE task DROP COLUMN deadline_min; ALTER TABLE task DROP COLUMN elapsed; ALTER TABLE dependency DROP COLUMN lag_format; PRAGMA user_version = 1;").unwrap();
     drop(conn);
     let (mut s, mut loaded) = Store::open(&path).unwrap();
     // Version 1 had no leveling delays; they come back as zero.
@@ -299,7 +300,7 @@ fn refused_command_changes_nothing() {
     let mut p = rich_project();
     let mut s = Store::create(&path, &p).unwrap();
     let before = (p.clone(), s.last_seq().unwrap());
-    let loop_link = Dependency { id: DependencyId(Uuid::from_u128(51)), predecessor: tid(3), successor: tid(2), kind: LinkType::FinishToStart, lag: 0 };
+    let loop_link = Dependency { id: DependencyId(Uuid::from_u128(51)), predecessor: tid(3), successor: tid(2), kind: LinkType::FinishToStart, lag: 0, lag_format: pm_core::LagFormat::Working };
     let err = s.apply(&mut p, &Command::InsertLink { dependency: loop_link }, &meta(1)).unwrap_err();
     assert!(matches!(err, StoreError::Command(CommandError::DuplicateLink { .. })), "{err}");
     assert_eq!((p.clone(), s.last_seq().unwrap()), before);
@@ -475,4 +476,19 @@ fn deadlines_are_saved() {
     drop(s);
     let (_, again) = Store::open(&path).unwrap();
     assert_eq!(again.tasks[&id].deadline, Some(Moment(29_000_000)));
+}
+
+#[test]
+fn elapsed_durations_and_lag_formats_are_saved() {
+    let path = temp_dir().join("e.pmproj");
+    let mut p = rich_project();
+    for t in p.tasks.values_mut() {
+        t.elapsed = true;
+    }
+    for d in p.dependencies.values_mut() {
+        d.lag_format = pm_core::LagFormat::Percent;
+    }
+    drop(Store::create(&path, &p).unwrap());
+    let (_, again) = Store::open(&path).unwrap();
+    assert_eq!(again, p);
 }

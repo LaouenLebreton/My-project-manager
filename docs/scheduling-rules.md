@@ -79,3 +79,19 @@ Rules marked *verify* must be checked against the owner's Microsoft Project refe
 - Lag calendar (R11), finish-time snapping (R6), negative lag at project start (R13), milestone placement (R14).
 - Percentage lags (e.g. `FS+50%`): MS Project supports them; not in spec. Proposed: import as approximated working minutes and list in the import report.
 - Elapsed durations and lags (`ed`, `elapsed days`): proposed same treatment.
+
+## R36 Elapsed durations (iteration 5)
+
+A task's duration can be elapsed ("3ed", "4eh", "2ew"): it counts every minute, nights and
+weekends included, from its start (a concrete cure, a delivery in transit). Its start still
+snaps to working time like any task (R5); its finish is the start plus the clock time.
+Typing a working unit ("3d") makes it working time again. Project XML's elapsed formats (4, 6,
+8, 10, 12) are read and written as such.
+
+## R37 Lag formats (iteration 5)
+
+A link's lag is working time (as before), elapsed time ("+2ed": clock time, the successor
+then starts at the next working minute), or a percentage of the predecessor's duration
+("+50%": that share of its working time). Project XML: LinkLag in tenths of a minute, or of
+a percent with LagFormat 19.
+

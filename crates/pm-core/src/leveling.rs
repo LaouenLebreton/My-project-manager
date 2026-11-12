@@ -159,6 +159,7 @@ mod tests {
                 fixed_cost: Money(0),
                 manual_start: None,
                 deadline: None,
+                elapsed: false,
                 actual: Actual::default(),
             };
             apply(&mut self.0, &Command::InsertTasks { tasks: vec![t], dependencies: vec![] }).unwrap();
@@ -167,7 +168,7 @@ mod tests {
 
         fn fs(mut self, a: u128, b: u128) -> Self {
             self.1 += 1;
-            let d = Dependency { id: DependencyId(Uuid::from_u128(self.1)), predecessor: tid(a), successor: tid(b), kind: LinkType::FinishToStart, lag: 0 };
+            let d = Dependency { id: DependencyId(Uuid::from_u128(self.1)), predecessor: tid(a), successor: tid(b), kind: LinkType::FinishToStart, lag: 0, lag_format: crate::LagFormat::Working };
             apply(&mut self.0, &Command::InsertLink { dependency: d }).unwrap();
             self
         }

@@ -20,6 +20,7 @@ fn task(id: TaskId, key: &str, name: &str) -> Task {
         fixed_cost: Money(0),
         manual_start: None,
         deadline: None,
+        elapsed: false,
         actual: Actual::default(),
         notes: String::new(),
     }
@@ -134,7 +135,7 @@ fn edit(p: &Project, kind: u8, a: usize, b: usize, fresh: &mut u128) -> Option<C
             if x == y || p.dependencies.values().any(|d| (d.predecessor, d.successor) == (x, y)) {
                 return None;
             }
-            Command::InsertLink { dependency: Dependency { id: DependencyId(Uuid::from_u128(5000 + *fresh)), predecessor: x, successor: y, kind: LinkType::FinishToStart, lag: 0 } }
+            Command::InsertLink { dependency: Dependency { id: DependencyId(Uuid::from_u128(5000 + *fresh)), predecessor: x, successor: y, kind: LinkType::FinishToStart, lag: 0, lag_format: pm_core::LagFormat::Working } }
         }
         _ => Command::Batch {
             label: "Change Task Info".into(),

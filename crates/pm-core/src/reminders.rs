@@ -94,12 +94,13 @@ mod tests {
                 fixed_cost: Money(0),
                 manual_start: None,
                 deadline: None,
+                elapsed: false,
                 actual: Actual::default(),
                 notes: String::new(),
             })
             .collect();
         let links = (1..names.len())
-            .map(|i| Dependency { id: DependencyId(Uuid::from_u128(100 + i as u128)), predecessor: id(i - 1), successor: id(i), kind: LinkType::FinishToStart, lag: 0 })
+            .map(|i| Dependency { id: DependencyId(Uuid::from_u128(100 + i as u128)), predecessor: id(i - 1), successor: id(i), kind: LinkType::FinishToStart, lag: 0, lag_format: crate::LagFormat::Working })
             .collect();
         apply(&mut p, &Command::InsertTasks { tasks, dependencies: links }).unwrap();
         p

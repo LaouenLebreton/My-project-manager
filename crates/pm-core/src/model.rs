@@ -158,6 +158,10 @@ pub struct Task {
     /// not move the task; a later finish is flagged.
     #[serde(default)]
     pub deadline: Option<Moment>,
+    /// The duration counts every minute, nights and weekends included (Microsoft Project's
+    /// elapsed duration, "3ed"); otherwise only working time.
+    #[serde(default)]
+    pub elapsed: bool,
     /// What really happened (R35): once a task has started, its dates are facts.
     #[serde(default)]
     pub actual: Actual,
@@ -209,8 +213,23 @@ pub struct Dependency {
     pub predecessor: TaskId,
     pub successor: TaskId,
     pub kind: LinkType,
-    /// Working minutes; negative lag overlaps the tasks (R13).
+    /// Working minutes; negative lag overlaps the tasks (R13). With `lag_format` Elapsed,
+    /// clock minutes; with Percent, a percentage of the predecessor's duration (50 = 50%).
     pub lag: i64,
+    #[serde(default)]
+    pub lag_format: LagFormat,
+}
+
+/// How a link's lag is measured, as in Microsoft Project (R37).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LagFormat {
+    /// Working time (the usual: "+2d").
+    #[default]
+    Working,
+    /// Clock time, nights and weekends included ("+2ed").
+    Elapsed,
+    /// A share of the predecessor's duration ("+50%").
+    Percent,
 }
 
 /// People and machines work for a share of their time; materials are used up by quantity.

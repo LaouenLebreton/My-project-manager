@@ -167,7 +167,15 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
         let summary_duration = sched.filter(|_| row.has_children).map(|s| p.calendar.working_between(s.early_start, s.early_finish));
         let written = summary_duration.unwrap_or(duration);
         leaf(&mut w, "Duration", &iso_duration(written));
-        leaf(&mut w, "DurationFormat", if written % 480 == 0 { "7" } else { "5" });
+        // Microsoft Project's codes: 7 days, 5 hours; elapsed 8 days, 6 hours, 4 minutes.
+        let format = if t.elapsed && !row.has_children {
+            if written % 1440 == 0 { "8" } else if written % 60 == 0 { "6" } else { "4" }
+        } else if written % 480 == 0 {
+            "7"
+        } else {
+            "5"
+        };
+        leaf(&mut w, "DurationFormat", format);
         leaf(&mut w, "Manual", if t.manual_start.is_some() && !row.has_children { "1" } else { "0" });
         if let Some(m) = t.manual_start.filter(|_| !row.has_children) {
             leaf(&mut w, "ManualStart", &datetime(m));
@@ -230,8 +238,14 @@ pub fn export_mspdi(p: &Project, schedule: Option<&Schedule>) -> String {
             };
             leaf(&mut w, "Type", kind);
             leaf(&mut w, "CrossProject", "0");
-            leaf(&mut w, "LinkLag", &(d.lag * 10).to_string()); // tenths of a minute
-            leaf(&mut w, "LagFormat", if d.lag % 480 == 0 { "7" } else { "5" });
+            // Tenths of a minute, or of a percent (format 19).
+            leaf(&mut w, "LinkLag", &(d.lag * 10).to_string());
+            let format = match d.lag_format {
+                pm_core::LagFormat::Percent => "19",
+                pm_core::LagFormat::Elapsed => if d.lag % 1440 == 0 { "8" } else { "4" },
+                pm_core::LagFormat::Working => if d.lag % 480 == 0 { "7" } else { "5" },
+            };
+            leaf(&mut w, "LagFormat", format);
             close(&mut w, "PredecessorLink");
         }
         close(&mut w, "Task");
