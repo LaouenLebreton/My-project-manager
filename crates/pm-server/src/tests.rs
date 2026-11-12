@@ -640,3 +640,25 @@ async fn invites_are_checked_before_any_work_and_capped() {
     let (status, _) = call(&app, "POST", &format!("/api/teams/{team}/invites"), Some(&p[1].0), Some(json!({ "emails": ["x@example.com"] }))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "not in the team");
 }
+
+#[tokio::test]
+async fn portfolio_groups_are_shared_by_the_team() {
+    let app = server();
+    let p = people(&app).await;
+    let (id, _) = shared(&app, &p).await;
+    let path = format!("/api/projects/{id}/group");
+    let (status, _) = call(&app, "PUT", &path, Some(&p[1].0), Some(json!({ "group": "  Clients " }))).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "any member of the team can group it");
+    let (_, list) = call(&app, "GET", "/api/projects", Some(&p[2].0), None).await;
+    assert_eq!(list[0]["portfolioGroup"], "Clients", "everyone in the team sees it");
+    call(&app, "PUT", &path, Some(&p[0].0), Some(json!({ "group": "" }))).await;
+    let (_, list) = call(&app, "GET", "/api/projects", Some(&p[2].0), None).await;
+    assert!(list[0]["portfolioGroup"].is_null());
+
+    // Someone outside the team cannot.
+    let (_, outsider) = call(&app, "POST", "/api/users", Some(&p[0].0), Some(account("Kim", "kim@example.com"))).await;
+    let _ = outsider;
+    let (_, s) = call(&app, "POST", "/api/sessions", None, Some(json!({ "email": "kim@example.com", "password": "a long enough password" }))).await;
+    let (status, _) = call(&app, "PUT", &path, Some(s["token"].as_str().unwrap()), Some(json!({ "group": "Mine" }))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

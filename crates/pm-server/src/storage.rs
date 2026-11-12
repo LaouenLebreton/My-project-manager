@@ -65,6 +65,9 @@ pub struct ProjectRecord {
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
+    /// The portfolio group the team put it in ("Clients"), if any (iteration 5).
+    #[serde(default)]
+    pub portfolio_group: Option<String>,
 }
 
 /// A chat channel in a team (General, a team project's channel, or one people made).
@@ -205,6 +208,8 @@ pub trait Storage: Send + Sync + 'static {
     /// Every project that has rules.
     fn all_rules(&self) -> Result<Vec<(Uuid, StoredRules)>>;
     fn set_last_summary(&self, project: Uuid, day: &str) -> Result<()>;
+    /// The portfolio group of a project, for the whole team; `None` takes it out.
+    fn set_portfolio_group(&self, project: Uuid, group: Option<&str>) -> Result<()>;
     /// The chat channel that belongs to a team project.
     fn project_channel(&self, project: Uuid) -> Result<Option<Channel>>;
 }
@@ -344,6 +349,10 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE session ADD COLUMN last_used TEXT;
     UPDATE session SET last_used = created_at;
     "#,
+    // 9 -> 10: portfolio groups shared by the team (iteration 5).
+    r#"
+    ALTER TABLE project ADD COLUMN portfolio_group TEXT;
+    "#,
 ];
 
 /// A session nobody has used for this long ends; the person signs in again.
@@ -407,7 +416,7 @@ fn team_role_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<TeamRole> {
     Ok(if s == "owner" { TeamRole::Owner } else { TeamRole::Member })
 }
 
-const PROJECT_COLUMNS: &str = "p.id, p.team_id, p.name, p.owner_id, p.version, p.created_at, p.updated_at";
+const PROJECT_COLUMNS: &str = "p.id, p.team_id, p.name, p.owner_id, p.version, p.created_at, p.updated_at, p.portfolio_group";
 
 fn project_from_row(r: &rusqlite::Row) -> rusqlite::Result<ProjectRecord> {
     Ok(ProjectRecord {
@@ -418,6 +427,7 @@ fn project_from_row(r: &rusqlite::Row) -> rusqlite::Result<ProjectRecord> {
         version: r.get(4)?,
         created_at: r.get(5)?,
         updated_at: r.get(6)?,
+        portfolio_group: r.get(7)?,
     })
 }
 
@@ -642,7 +652,7 @@ impl Storage for SqliteStorage {
     fn project(&self, id: Uuid) -> Result<Option<(ProjectRecord, String)>> {
         Ok(self
             .conn()
-            .query_row(&format!("SELECT {PROJECT_COLUMNS}, p.data FROM project p WHERE p.id = ?1"), [id.to_string()], |r| Ok((project_from_row(r)?, r.get(7)?)))
+            .query_row(&format!("SELECT {PROJECT_COLUMNS}, p.data FROM project p WHERE p.id = ?1"), [id.to_string()], |r| Ok((project_from_row(r)?, r.get(8)?)))
             .optional()?)
     }
 
@@ -880,6 +890,11 @@ impl Storage for SqliteStorage {
 
     fn set_last_summary(&self, project: Uuid, day: &str) -> Result<()> {
         self.conn().execute("UPDATE project_rules SET last_summary = ?2 WHERE project_id = ?1", params![project.to_string(), day])?;
+        Ok(())
+    }
+
+    fn set_portfolio_group(&self, project: Uuid, group: Option<&str>) -> Result<()> {
+        self.conn().execute("UPDATE project SET portfolio_group = ?2 WHERE id = ?1", params![project.to_string(), group])?;
         Ok(())
     }
 

@@ -149,7 +149,8 @@ pub enum RepeatEdit {
     MonthlyOnWeekday { every: u32, week: u8, weekday: u8 },
 }
 
-/// Microsoft Project's task types (R39), as the UI sends them.
+/// Microsoft Project's task types (R39), as the UI sends them (Project's own names).
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
 #[ts(export)]
 pub enum TaskTypeEdit {

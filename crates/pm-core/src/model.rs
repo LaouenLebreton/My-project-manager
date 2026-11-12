@@ -228,6 +228,7 @@ pub struct Dependency {
 
 /// Microsoft Project's task types (R39): work = duration × units, and the type says which one
 /// stays when another is changed.
+#[allow(clippy::enum_variant_names)] // Microsoft Project's own names
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskType {
     /// Units stay: a new duration changes the work; new units or work change the duration.

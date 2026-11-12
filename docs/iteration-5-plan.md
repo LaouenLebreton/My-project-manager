@@ -26,7 +26,7 @@ its own, test-first, in this order.
 
 ## C. Teams
 
-12. **Portfolio groups shared by the team** (stored on the team server).
+12. **[Done]** **Portfolio groups shared by the team** (stored on the team server).
 13. **More automation:** when a task becomes late, when a milestone is reached.
 14. **Invitations by email:** the server sends them when it has a mail account (SMTP settings);
     without one, invites are copied and sent by hand as now.

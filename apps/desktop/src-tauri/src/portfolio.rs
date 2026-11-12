@@ -206,6 +206,8 @@ struct Source {
     loaded: Result<(Project, bool), String>,
     team: Option<String>,
     on_this_mac: bool,
+    /// For a team project: its group as the team set it (shared), instead of this Mac's.
+    team_group: Option<Option<String>>,
 }
 
 const TEAM_KEY: &str = "team:";
@@ -216,6 +218,7 @@ fn add_team(sources: &mut Vec<Source>, entries: Vec<crate::team::TeamEntry>, rem
     for e in entries {
         if let Some(s) = sources.iter_mut().find(|s| s.key == e.local) {
             s.team = Some(e.team);
+            s.team_group = Some(e.group);
             continue;
         }
         let key = PathBuf::from(format!("{TEAM_KEY}{}", e.id));
@@ -223,7 +226,7 @@ fn add_team(sources: &mut Vec<Source>, entries: Vec<crate::team::TeamEntry>, rem
             continue;
         }
         let Some(project) = e.project else { continue };
-        sources.push(Source { key, fallback_name: project.name.clone(), loaded: Ok((project, true)), team: Some(e.team), on_this_mac: false });
+        sources.push(Source { key, fallback_name: project.name.clone(), loaded: Ok((project, true)), team: Some(e.team), on_this_mac: false, team_group: Some(e.group) });
     }
 }
 
@@ -241,6 +244,7 @@ pub async fn portfolio_data(app: AppHandle) -> PortfolioView {
             key: path,
             team: None,
             on_this_mac: true,
+            team_group: None,
         })
         .collect();
     let team_note = match remote {
@@ -261,14 +265,15 @@ pub async fn portfolio_data(app: AppHandle) -> PortfolioView {
     let mut people: BTreeMap<String, Person> = BTreeMap::new();
     let (mut first_day, mut last_day) = (i64::MAX, i64::MIN);
 
-    for Source { key: path, fallback_name: file_name, loaded, team, on_this_mac } in sources {
+    for Source { key: path, fallback_name: file_name, loaded, team, on_this_mac, team_group } in sources {
+        let group = team_group.unwrap_or_else(|| chosen.groups.get(&path).cloned());
         let blank = |name: String, status: &str, reason: String| PortfolioRow {
             path: path.display().to_string(),
             name,
             shared: false,
             team: team.clone(),
             on_this_mac,
-            group: chosen.groups.get(&path).cloned(),
+            group: group.clone(),
             status: status.into(),
             reasons: vec![reason],
             start: None,
@@ -314,7 +319,7 @@ pub async fn portfolio_data(app: AppHandle) -> PortfolioView {
             shared,
             team: team.clone(),
             on_this_mac,
-            group: chosen.groups.get(&path).cloned(),
+            group: group.clone(),
             status: status_code(sum.status).into(),
             reasons: sum.reasons,
             start: Some(iso(sum.start)),
@@ -379,7 +384,9 @@ pub async fn portfolio_data(app: AppHandle) -> PortfolioView {
             PortfolioPerson { name: p.name, weeks: weeks_out, project_count: projects_seen.len() as u32 }
         })
         .collect();
-    PortfolioView { projects, weeks: weeks.into_iter().map(date).collect(), people, today: iso(today), groups: chosen.group_names(), team_note }
+    // Every group in use: this Mac's and the teams' (shared ones arrive with their projects).
+    let groups: Vec<String> = projects.iter().filter_map(|p| p.group.clone()).chain(chosen.group_names()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    PortfolioView { projects, weeks: weeks.into_iter().map(date).collect(), people, today: iso(today), groups, team_note }
 }
 
 /// Adds a project file chosen in a dialog.
@@ -409,12 +416,18 @@ pub fn portfolio_remove(app: AppHandle, path: String) {
     save_choices(&app, &c);
 }
 
-/// Puts a project in a group ("Clients"); a blank name takes it out.
+/// Puts a project in a group ("Clients"); a blank name takes it out. A team project's group is
+/// kept on the team server, for everyone in the team; a local project's on this Mac.
 #[tauri::command]
-pub fn portfolio_set_group(app: AppHandle, path: String, group: String) {
+pub async fn portfolio_set_group(app: AppHandle, path: String, group: String) -> Result<(), IpcError> {
+    let key = PathBuf::from(&path);
+    if let Some(id) = crate::team::team_project_of(&app, &key) {
+        return crate::team::set_portfolio_group(&app, &id, &group).await;
+    }
     let mut c = choices(&app);
-    c.set_group(PathBuf::from(path), &group);
+    c.set_group(key, &group);
     save_choices(&app, &c);
+    Ok(())
 }
 
 /// Opens a project from the portfolio in its own tab; a team project not on this Mac is
@@ -471,12 +484,12 @@ mod tests {
     use super::*;
 
     fn entry(id: &str, local: &str, project: Option<Project>) -> crate::team::TeamEntry {
-        crate::team::TeamEntry { id: id.into(), team: "Office".into(), local: local.into(), project }
+        crate::team::TeamEntry { id: id.into(), team: "Office".into(), local: local.into(), project, group: Some("Clients".into()) }
     }
 
     #[test]
     fn team_projects_join_without_duplicates() {
-        let mut sources = vec![Source { key: "/Shared/a.pmproj".into(), fallback_name: "a".into(), loaded: Err("x".into()), team: None, on_this_mac: true }];
+        let mut sources = vec![Source { key: "/Shared/a.pmproj".into(), fallback_name: "a".into(), loaded: Err("x".into()), team: None, on_this_mac: true, team_group: None }];
         let named = |n: &str| {
             let mut p = crate::files::empty_project(Path::new("/x.pmproj"));
             p.name = n.into();
@@ -490,6 +503,7 @@ mod tests {
         add_team(&mut sources, entries, &[PathBuf::from("team:c")]);
         assert_eq!(sources.len(), 2, "a is not added twice; c was taken out");
         assert_eq!(sources[0].team.as_deref(), Some("Office"));
+        assert_eq!(sources[0].team_group, Some(Some("Clients".into())), "a team project uses the team's group");
         assert!(sources[0].on_this_mac);
         assert_eq!(sources[1].key, PathBuf::from("team:b"));
         assert_eq!(sources[1].fallback_name, "Bravo");

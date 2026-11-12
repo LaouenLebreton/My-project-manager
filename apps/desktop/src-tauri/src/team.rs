@@ -117,6 +117,9 @@ pub struct SharedProject {
     #[ts(type = "number")]
     pub version: i64,
     pub updated_at: String,
+    /// The portfolio group the team put it in, if any.
+    #[serde(default)]
+    pub portfolio_group: Option<String>,
 }
 
 fn account_file(app: &AppHandle) -> Option<PathBuf> {
@@ -841,6 +844,24 @@ pub struct TeamEntry {
     pub local: PathBuf,
     /// The project from the server, when there is no copy on this Mac yet.
     pub project: Option<Project>,
+    /// The portfolio group the team put it in.
+    pub group: Option<String>,
+}
+
+/// Puts a team project in a portfolio group for the whole team (blank: none).
+pub async fn set_portfolio_group(app: &AppHandle, project_id: &str, group: &str) -> Result<(), IpcError> {
+    let a = signed_in(app)?;
+    let _: serde_json::Value = call(reqwest::Method::PUT, &a.server, &format!("/api/projects/{project_id}/group"), Some(&a.token), Some(serde_json::json!({ "group": group }))).await?;
+    Ok(())
+}
+
+/// The team project a portfolio entry stands for: `team:<id>`, or a copy in the Shared folder.
+pub fn team_project_of(app: &AppHandle, key: &std::path::Path) -> Option<String> {
+    if let Some(id) = key.to_str().and_then(|k| k.strip_prefix("team:")) {
+        return Some(id.to_owned());
+    }
+    let shared = shared_path(app, "x").ok()?.parent()?.to_path_buf();
+    (key.parent() == Some(shared.as_path())).then(|| key.file_stem()?.to_str().map(str::to_owned)).flatten()
 }
 
 /// Every project of the user's teams. Not signed in: none. Signed in but the team cannot be
@@ -862,7 +883,7 @@ pub async fn portfolio_entries(app: &AppHandle) -> Result<Vec<TeamEntry>, String
                 Err(_) => continue,
             }
         };
-        out.push(TeamEntry { team: teams.get(&p.team_id).cloned().unwrap_or_default(), id: p.id, local, project });
+        out.push(TeamEntry { team: teams.get(&p.team_id).cloned().unwrap_or_default(), id: p.id, local, project, group: p.portfolio_group });
     }
     Ok(out)
 }

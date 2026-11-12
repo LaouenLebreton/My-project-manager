@@ -23,6 +23,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/projects", get(my_projects).post(share_project))
         .route("/api/projects/{id}", get(open_project))
         .route("/api/projects/{id}/members", get(project_members))
+        .route("/api/projects/{id}/group", put(set_group))
         .route("/api/projects/{id}/access", get(my_access))
         .route("/api/projects/{id}/members/{user}", put(set_project_member))
 }
@@ -176,6 +177,23 @@ async fn remove_team_member(State(state): State<AppState>, Auth(me): Auth, Path(
     }
 }
 
+#[derive(Deserialize)]
+pub struct GroupRequest {
+    pub group: String,
+}
+
+/// Portfolio groups (iteration 5): anyone in the project's team puts it in a group ("Clients")
+/// that the whole team sees; a blank name takes it out.
+async fn set_group(State(state): State<AppState>, Auth(me): Auth, Path(id): Path<Uuid>, Json(req): Json<GroupRequest>) -> Result<StatusCode, ApiError> {
+    access(&state, id, me.id).await?;
+    let group = req.group.trim().to_owned();
+    if group.chars().count() > 80 {
+        return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "a group name can be at most 80 characters"));
+    }
+    db(&state, move |s| s.set_portfolio_group(id, (!group.is_empty()).then_some(group.as_str()))).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Most people in one invite request.
 const MAX_INVITES: usize = 100;
 
@@ -279,6 +297,7 @@ async fn share_project(State(state): State<AppState>, Auth(me): Auth, Json(req):
         version: 0,
         created_at: at.clone(),
         updated_at: at,
+        portfolio_group: None,
     };
     let data = serde_json::to_string(&req.project).map_err(|e| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
     let stored = record.clone();
