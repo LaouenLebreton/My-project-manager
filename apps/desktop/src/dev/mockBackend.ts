@@ -240,11 +240,15 @@ export function install() {
         state.account
           ? { server: state.account.server, hostedHere: state.account.server === "this Mac", user: { id: "u1", name: state.account.name, email: state.account.email, isAdmin: true } }
           : { server: null, user: null, hostedHere: false };
+      const mailServer = new URLSearchParams(location.search).has("mail");
       const mockInvites = (emails: string[]) =>
         emails.map((email) =>
           email.includes("@")
-            ? { email, invite: `SuperPM-Invite|http://192.168.1.20:7878|${email}|3f9c2a7b1d4e5f60`, note: null }
-            : { email, invite: null, note: "Could not be invited: type an email address such as alex@example.com." },
+            ? // ?mail: a team server with a mail account, which emails the invites.
+              mailServer
+              ? { email, invite: `SuperPM-Invite|https://pm.example.com|${email}|3f9c2a7b1d4e5f60`, note: "Invite sent by email.", emailed: true }
+              : { email, invite: `SuperPM-Invite|http://192.168.1.20:7878|${email}|3f9c2a7b1d4e5f60`, note: null, emailed: false }
+            : { email, invite: null, note: "Could not be invited: type an email address such as alex@example.com.", emailed: false },
         );
       switch (cmd) {
         case "portfolio_data": {

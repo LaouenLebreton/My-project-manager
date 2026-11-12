@@ -214,6 +214,8 @@ pub struct InviteResult {
     pub note: Option<String>,
     /// The server address to put in the invite, when the server knows it.
     pub server: Option<String>,
+    /// The server emailed it (the invite, or the news they were added to the team).
+    pub emailed: bool,
 }
 
 /// A team's owners invite people by email. New people get an account with a one-time code;
@@ -251,7 +253,7 @@ async fn invite(State(state): State<AppState>, Auth(me): Auth, Path(team): Path<
         let mut out = Vec::new();
         for (email, code, hash) in prepared {
             if !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
-                out.push(InviteResult { email, code: None, note: Some("not an email address".into()), server: server.clone() });
+                out.push(InviteResult { email, code: None, note: Some("not an email address".into()), server: server.clone(), emailed: false });
                 continue;
             }
             let (user, code) = match s.user_by_email(&email)? {
@@ -264,16 +266,40 @@ async fn invite(State(state): State<AppState>, Auth(me): Auth, Path(team): Path<
             };
             s.set_team_member(team, user.id, s.team_role(team, user.id)?.unwrap_or(TeamRole::Member))?;
             let note = code.is_none().then(|| "already has an account; added to the team".to_owned());
-            out.push(InviteResult { email, code, note, server: server.clone() });
+            out.push(InviteResult { email, code, note, server: server.clone(), emailed: false });
         }
-        Ok(Ok(out))
+        let team_name = s.team(team)?.map(|t| t.name).unwrap_or_default();
+        Ok(Ok((out, team_name)))
     })
     .await?;
     match results {
-        Ok(list) => Ok(Json(list)),
+        Ok((list, team_name)) => Ok(Json(send_invites(&state, &me.name, &team_name, list).await)),
         Err("") => Err(not_found("team")),
         Err(m) => Err(forbidden(m)),
     }
+}
+
+/// Emails the invites when the server has a mail account. A message that cannot be sent leaves
+/// the invite to be copied by hand, and says so.
+async fn send_invites(state: &AppState, inviter: &str, team: &str, mut list: Vec<InviteResult>) -> Vec<InviteResult> {
+    let (Some(mailer), Some(server)) = (state.config.mailer.clone(), state.config.public_url.clone()) else { return list };
+    let (inviter, team) = (inviter.to_owned(), team.to_owned());
+    let outcome = tokio::task::spawn_blocking(move || {
+        for i in list.iter_mut().filter(|i| i.note.as_deref() != Some("not an email address")) {
+            let (subject, body) = match &i.code {
+                Some(code) => crate::mail::invite_text(&inviter, &team, &server, &i.email, code),
+                None => crate::mail::added_text(&inviter, &team),
+            };
+            match mailer.send(&i.email, &subject, &body) {
+                Ok(()) => i.emailed = true,
+                Err(e) if i.code.is_some() => i.note = Some(format!("the email could not be sent ({e}); send the invite yourself")),
+                Err(e) => i.note = Some(format!("already has an account; added to the team (the email could not be sent: {e})")),
+            }
+        }
+        list
+    })
+    .await;
+    outcome.unwrap_or_default()
 }
 
 #[derive(Deserialize)]

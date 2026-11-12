@@ -156,6 +156,7 @@ async fn import(State(state): State<AppState>, Auth(me): Auth, Json(mut bundle):
                 code: None,
                 note: Some("already has an account here; invite them to add them to the team".into()),
                 server: state.config.public_url.clone(),
+                emailed: false,
             });
         }
         keep
@@ -178,7 +179,7 @@ async fn import(State(state): State<AppState>, Auth(me): Auth, Json(mut bundle):
         new_users.push((User { id: Uuid::now_v7(), name, email: email.clone(), is_admin: false, created_at: now() }, hash));
         let member = bundle.members.iter().any(|m| m.email == email);
         if member {
-            invites.push(crate::sharing::InviteResult { email, code: Some(code), note: None, server: state.config.public_url.clone() });
+            invites.push(crate::sharing::InviteResult { email, code: Some(code), note: None, server: state.config.public_url.clone(), emailed: false });
         }
     }
     let team_id = db(&state, move |s| s.import_team(&bundle, me.id, &new_users)).await?;

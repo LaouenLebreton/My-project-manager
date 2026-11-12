@@ -17,6 +17,7 @@ argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
 axum = { version = "0.8.9", features = ["ws"] }
 getrandom = "0.4.3"
 hex = "0.4.3"
+lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "builder", "hostname", "rustls-tls"] }
 jiff = { version = "0.2.36", default-features = false, features = ["std"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde.workspace = true

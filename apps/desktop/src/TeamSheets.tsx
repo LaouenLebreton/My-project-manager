@@ -262,13 +262,20 @@ export function InvitesSheet({ invites, hostedHere, onClose }: { invites: Invite
     if (!i.invite) return;
     void navigator.clipboard.writeText(i.invite).then(() => setCopied(i.email));
   };
-  const toSend = invites.filter((i) => i.invite);
+  const toSend = invites.filter((i) => i.invite && !i.emailed);
+  const emailed = invites.filter((i) => i.invite && i.emailed);
   return (
     <Sheet title={invites.length ? "Invite your team" : "Team project created"} onClose={onClose}>
       {invites.length === 0 && <p>The project is now a team project. Add people any time with Team &gt; Invite People.</p>}
+      {emailed.length > 0 && (
+        <p>
+          The team server emailed {emailed.length === 1 ? "the invite" : `${emailed.length} invites`}: they open Super PM, choose <strong>Team &gt; Join a Team</strong>{" "}
+          and paste it. If one does not arrive, copy it here and send it yourself.
+        </p>
+      )}
       {toSend.length > 0 && (
         <p>
-          Send each person their invite (Messages, Mail, anything). They open Super PM, choose <strong>Team &gt; Join a Team</strong> and paste it.
+          Send {emailed.length > 0 ? "the others" : "each person"} their invite (Messages, Mail, anything). They open Super PM, choose <strong>Team &gt; Join a Team</strong> and paste it.
         </p>
       )}
       <ul className="shared-list">

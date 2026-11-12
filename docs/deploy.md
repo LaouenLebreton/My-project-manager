@@ -21,6 +21,31 @@ server online. It is one small program (`super-pm-server`) with one database fil
 | `SUPER_PM_OPEN_SIGNUP=1` | Anyone can create an account in the app (like an online service). Leave unset to admit people by invitation only. |
 | `SUPER_PM_DATA` | Where data is kept (`/data` in the container). |
 | `SUPER_PM_LISTEN` | Address and port (`0.0.0.0:8080` in the container). |
+| `SUPER_PM_SMTP_URL` | Optional: a mail account to email invites with (see below). |
+| `SUPER_PM_MAIL_FROM` | The sender of those emails, e.g. `Super PM <pm@yourcompany.com>`. |
+
+### Invites by email
+
+With a mail account, the server emails each invite itself (and tells people who already have an
+account that they were added to a team). Without one, the app shows the invites to copy and send
+by hand, as before. Either way the invite can still be copied in the app, and if an email cannot
+be sent the app says so next to that person.
+
+Set the account as one secret, never on the command line (it holds the password):
+
+- TLS from the start (port 465): `smtps://USER:PASSWORD@smtp.example.com`
+- STARTTLS (port 587): `smtp://USER:PASSWORD@smtp.example.com:587?tls=required`
+
+Special characters in the user or password must be URL-encoded (`@` is `%40`). Most mail
+providers (Postmark, Mailgun, Amazon SES, Fastmail, Google Workspace with an app password) give
+these settings. Email also needs `SUPER_PM_PUBLIC_URL`, since the address goes in the invite. On
+Fly.io:
+
+```sh
+fly secrets set SUPER_PM_SMTP_URL='smtps://USER:PASSWORD@smtp.example.com' SUPER_PM_MAIL_FROM='Super PM <pm@yourcompany.com>'
+```
+
+At start the server checks that the mail server answers and prints the result in its log.
 
 ## Fly.io, step by step
 

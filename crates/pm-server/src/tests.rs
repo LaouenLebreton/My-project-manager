@@ -399,11 +399,12 @@ async fn team_owners_invite_people_and_open_servers_take_sign_ups() {
     // Sign-ups: refused here, accepted on an open server.
     let (status, _) = call(&app, "POST", "/api/signup", None, Some(account("Kim", "kim@example.com"))).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let open = router(AppState::with_config(SqliteStorage::in_memory().unwrap(), Config { public_url: Some("https://pm.example.com".into()), open_signup: true }));
+    let open = router(AppState::with_config(SqliteStorage::in_memory().unwrap(), Config { public_url: Some("https://pm.example.com".into()), open_signup: true, ..Config::default() }));
     let (status, s) = call(&open, "POST", "/api/signup", None, Some(account("Kim", "kim@example.com"))).await;
     assert_eq!((status, s["user"]["isAdmin"].as_bool()), (StatusCode::OK, Some(false)));
     let (_, info) = call(&open, "GET", "/api/server", None, None).await;
-    assert_eq!(info, json!({ "openSignup": true, "publicUrl": "https://pm.example.com" }));
+    assert_eq!(info, json!({ "openSignup": true, "publicUrl": "https://pm.example.com", "sendsEmail": false }));
+    assert_eq!(invites[0]["emailed"], false, "no mail account: nothing emailed");
 }
 
 #[tokio::test]
@@ -458,7 +459,7 @@ async fn a_team_moves_to_another_server_with_its_history_and_chat() {
     assert_eq!(status, StatusCode::OK);
 
     // Target: an online server where only the owner has an account so far.
-    let target = router(AppState::with_config(SqliteStorage::in_memory().unwrap(), Config { public_url: Some("https://pm.example.com".into()), open_signup: true }));
+    let target = router(AppState::with_config(SqliteStorage::in_memory().unwrap(), Config { public_url: Some("https://pm.example.com".into()), open_signup: true, ..Config::default() }));
     let (_, me) = call(&target, "POST", "/api/signup", None, Some(account("Laouen", "laouen@example.com"))).await;
     let me = me["token"].as_str().unwrap().to_owned();
     let (status, imported) = call(&target, "POST", "/api/teams/import", Some(&me), Some(bundle.clone())).await;
@@ -695,4 +696,55 @@ async fn rules_post_when_a_task_becomes_late_and_when_a_milestone_is_reached() {
     call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(json!({ "type": "SetTask", "id": task, "change": { "field": "PercentComplete", "value": 100 } })))).await;
     let list = posts();
     assert_eq!(list[0].body, "◆ Milestone “Survey” reached (marked by Alex).");
+}
+
+/// A mail account that keeps what it is asked to send, and can be told to fail.
+#[derive(Default)]
+struct FakeMailer {
+    sent: std::sync::Mutex<Vec<(String, String, String)>>,
+    fail_for: Option<String>,
+}
+
+impl crate::mail::Mailer for FakeMailer {
+    fn send(&self, to: &str, subject: &str, body: &str) -> Result<(), String> {
+        if self.fail_for.as_deref() == Some(to) {
+            return Err("mailbox unavailable".into());
+        }
+        self.sent.lock().unwrap().push((to.to_owned(), subject.to_owned(), body.to_owned()));
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn with_a_mail_account_invites_are_sent_by_email() {
+    let mailer = Arc::new(FakeMailer { fail_for: Some("bounce@example.com".into()), ..FakeMailer::default() });
+    let config = Config { public_url: Some("https://pm.example.com".into()), open_signup: false, mailer: Some(mailer.clone()) };
+    let app = router(AppState::with_config(SqliteStorage::in_memory().unwrap(), config));
+    let p = people(&app).await;
+    let (_, team) = call(&app, "POST", "/api/teams", Some(&p[1].0), Some(json!({ "name": "Alex's team" }))).await;
+    let team_id = team["team"]["id"].as_str().unwrap().to_owned();
+    let (status, invites) = call(&app, "POST", &format!("/api/teams/{team_id}/invites"), Some(&p[1].0), Some(json!({ "emails": ["new.person@example.com", "sam@example.com", "bounce@example.com"] }))).await;
+    assert_eq!(status, StatusCode::OK, "{invites}");
+
+    // The new person gets the invite to paste, with their one-time code.
+    assert_eq!(invites[0]["emailed"], true);
+    let code = invites[0]["code"].as_str().unwrap();
+    let sent = mailer.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    let (to, subject, body) = &sent[0];
+    assert_eq!((to.as_str(), subject.as_str()), ("new.person@example.com", "Alex invited you to Alex's team in Super PM"));
+    assert!(body.contains(&format!("SuperPM-Invite|https://pm.example.com|new.person@example.com|{code}")), "{body}");
+    assert!(body.contains("Team > Join a Team"), "{body}");
+    // Someone with an account already is told they were added, without a code.
+    assert_eq!(invites[1]["emailed"], true);
+    assert_eq!(sent[1].1, "Alex added you to Alex's team in Super PM");
+    assert!(!sent[1].2.contains("SuperPM-Invite"));
+    // When the mail cannot be sent, the invite is still there to copy, and the owner is told.
+    assert_eq!(invites[2]["emailed"], false);
+    assert!(invites[2]["code"].is_string());
+    assert_eq!(invites[2]["note"], "the email could not be sent (mailbox unavailable); send the invite yourself");
+
+    // Without a mail account nothing is emailed (the first test above).
+    let (_, info) = call(&app, "GET", "/api/server", None, None).await;
+    assert_eq!(info["sendsEmail"], true);
 }

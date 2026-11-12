@@ -12,4 +12,8 @@ invite: string | null,
 /**
  * Anything to tell the user about this person, in plain words.
  */
-note: string | null, };
+note: string | null, 
+/**
+ * The team server emailed it to them (it has a mail account); the invite can still be copied.
+ */
+emailed: boolean, };

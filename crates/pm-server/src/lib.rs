@@ -7,6 +7,7 @@ pub mod access;
 pub mod auth;
 pub mod chat;
 pub mod live;
+pub mod mail;
 pub mod permissions;
 pub mod rules;
 pub mod sharing;
@@ -34,12 +35,27 @@ pub struct AppState {
 }
 
 /// How this server runs.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Config {
     /// The address people use to reach it, e.g. `https://pm.example.com` (for invites).
     pub public_url: Option<String>,
     /// Anyone may create an account (an online service); otherwise only by invitation.
     pub open_signup: bool,
+    /// A mail account to send invites with; needs `public_url` (the address goes in the invite).
+    pub mailer: Option<Arc<dyn mail::Mailer>>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config").field("public_url", &self.public_url).field("open_signup", &self.open_signup).field("mailer", &self.mailer.is_some()).finish()
+    }
+}
+
+impl Config {
+    /// Whether invites go out by email: a mail account, and an address to put in them.
+    pub fn sends_email(&self) -> bool {
+        self.mailer.is_some() && self.public_url.is_some()
+    }
 }
 
 impl AppState {
@@ -302,7 +318,7 @@ async fn create_user(State(state): State<AppState>, Auth(me): Auth, Json(a): Jso
 
 /// What the app needs to know about this server before signing in.
 async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "openSignup": state.config.open_signup, "publicUrl": state.config.public_url }))
+    Json(serde_json::json!({ "openSignup": state.config.open_signup, "publicUrl": state.config.public_url, "sendsEmail": state.config.sends_email() }))
 }
 
 /// Creating your own account, on servers that allow it (an online service).

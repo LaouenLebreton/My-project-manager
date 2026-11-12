@@ -75,6 +75,8 @@ pub struct Invite {
     pub invite: Option<String>,
     /// Anything to tell the user about this person, in plain words.
     pub note: Option<String>,
+    /// The team server emailed it to them (it has a mail account); the invite can still be copied.
+    pub emailed: bool,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]
@@ -335,6 +337,8 @@ async fn invite_people(a: &Account, team_id: &str, emails: &[String]) -> Vec<Inv
         code: Option<String>,
         note: Option<String>,
         server: Option<String>,
+        #[serde(default)]
+        emailed: bool,
     }
     let fallback = if a.server == LOCAL { hosting::invite_address() } else { a.server.clone() };
     let body = serde_json::json!({ "emails": emails });
@@ -344,11 +348,12 @@ async fn invite_people(a: &Account, team_id: &str, emails: &[String]) -> Vec<Inv
             .map(|r| {
                 // The server's public address when it has one; otherwise how we reach it.
                 let address = r.server.unwrap_or_else(|| fallback.clone());
-                Invite { invite: r.code.map(|code| format!("{INVITE_PREFIX}|{address}|{}|{code}", r.email)), note: r.note.map(|n| capitalized(&n)), email: r.email }
+                let note = r.note.or_else(|| r.emailed.then(|| if r.code.is_some() { "invite sent by email".to_owned() } else { "told by email".to_owned() }));
+                Invite { invite: r.code.map(|code| format!("{INVITE_PREFIX}|{address}|{}|{code}", r.email)), note: note.map(|n| capitalized(&n)), email: r.email, emailed: r.emailed }
             })
             .collect(),
         Err(CallError::Refused(m) | CallError::Offline(m)) => {
-            emails.iter().map(|e| Invite { email: e.trim().to_lowercase(), invite: None, note: Some(format!("Could not be invited: {m}.")) }).collect()
+            emails.iter().map(|e| Invite { email: e.trim().to_lowercase(), invite: None, note: Some(format!("Could not be invited: {m}.")), emailed: false }).collect()
         }
     }
 }
@@ -721,7 +726,7 @@ pub async fn team_move(app: AppHandle, server: String, email: String, password: 
                 continue;
             }
             let address = i.server.unwrap_or_else(|| target.clone());
-            invites.push(Invite { invite: i.code.map(|c| format!("{INVITE_PREFIX}|{address}|{}|{c}", i.email)), note: None, email: i.email });
+            invites.push(Invite { invite: i.code.map(|c| format!("{INVITE_PREFIX}|{address}|{}|{c}", i.email)), note: None, email: i.email, emailed: false });
         }
         moved.push(t.name.clone());
     }
