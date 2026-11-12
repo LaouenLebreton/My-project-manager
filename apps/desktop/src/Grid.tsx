@@ -3,112 +3,17 @@ import { keys } from "./platform";
 import { api, errorMessage, type Edit, type Snapshot } from "./api";
 import type { EditResult } from "./bindings/EditResult";
 import type { Row } from "./bindings/Row";
-import { formatDate, formatDateTime, formatDays, formatMoney } from "./format";
+import { formatDate } from "./format";
 import { GLOSSARY, type Term } from "./help";
-import { blocked, type Kind } from "./permissions";
+import { blocked } from "./permissions";
 import { CONSTRAINTS } from "./Sheets";
+import { ALL_COLUMNS, columnById, defaultColumns, loadLayout, moved, saveLayout, toggled, type Column, type Layout } from "./columns";
+import { useContextMenu, type MenuItem } from "./ContextMenu";
+import { isMac } from "./platform";
 
 import { HEADER_HEIGHT, ROW_HEIGHT } from "./Gantt";
 
 const OVERSCAN = 8;
-
-interface Column {
-  label: string;
-  width: string;
-  align?: "right";
-  /** Text shown in the cell. */
-  text: (r: Row, perDay: number, currency: string) => string;
-  /** Text placed in the editor, and the edit to send. Absent for read-only columns. */
-  edit?: { initial: (r: Row) => string; make: (r: Row, text: string) => Edit };
-  title?: (r: Row) => string;
-  /** "What does this mean?" for the header. */
-  help?: Term;
-  /** Anchor for the first-run tour. */
-  tour?: string;
-  /** What kind of change editing this column makes, for team limits. */
-  kind?: Kind;
-}
-
-const COLUMNS: Column[] = [
-  { label: "#", width: "44px", align: "right", text: () => "" },
-  { label: "", width: "40px", text: () => "" },
-  {
-    label: "Task Name",
-    width: "minmax(160px, 1fr)",
-    tour: "name",
-    text: (r) => r.name,
-    edit: { initial: (r) => r.name, make: (r, text) => ({ kind: "RenameTask", id: r.id, name: text }) },
-    kind: "schedule",
-  },
-  {
-    label: "Duration",
-    width: "84px",
-    align: "right",
-    help: "duration",
-    text: (r, perDay) => (r.isMilestone ? "0 days" : formatDays(r.durationMinutes, perDay)),
-    edit: { initial: (r) => r.durationText, make: (r, text) => ({ kind: "SetDuration", id: r.id, text }) },
-    kind: "schedule",
-  },
-  { label: "Start", width: "112px", text: (r) => formatDate(r.start), title: (r) => formatDateTime(r.start) },
-  { label: "Finish", width: "112px", text: (r) => formatDate(r.finish), title: (r) => formatDateTime(r.finish) },
-  {
-    label: "% Done",
-    width: "80px",
-    align: "right",
-    help: "progress",
-    text: (r) => `${r.percentComplete}%`,
-    title: (r) => (r.actualFinish ? `Finished ${formatDateTime(r.actualFinish)}` : r.actualStart ? `Started ${formatDateTime(r.actualStart)}` : "Not started"),
-    edit: { initial: (r) => String(r.percentComplete), make: (r, text) => ({ kind: "SetPercentComplete", ids: [r.id], percent: parsePercent(text) }) },
-    kind: "progress",
-  },
-  {
-    label: "Predecessors",
-    width: "116px",
-    help: "predecessors",
-    tour: "predecessors",
-    text: (r) => r.predecessors,
-    edit: { initial: (r) => r.predecessors, make: (r, text) => ({ kind: "SetPredecessors", id: r.id, text }) },
-    kind: "schedule",
-  },
-  {
-    label: "Resources",
-    width: "140px",
-    help: "resources",
-    text: (r) => r.resourceNames,
-    edit: { initial: (r) => r.resourceNames, make: (r, text) => ({ kind: "SetTaskResources", id: r.id, text }) },
-    kind: "resources",
-  },
-  { label: "Cost", width: "96px", align: "right", help: "cost", text: (r, _perDay, currency) => (r.costCents ? formatMoney(r.costCents, currency) : "") },
-  { label: "Slack", width: "76px", align: "right", help: "slack", text: (r, perDay) => formatDays(r.totalSlackMinutes, perDay) },
-];
-const NAME_COL = 2;
-
-/** "50", "50%" or " 50 % "; anything else becomes 255, which Rust rejects with a clear message. */
-function parsePercent(text: string): number {
-  const n = Math.round(Number(text.replace("%", "").trim()));
-  return text.trim() !== "" && Number.isFinite(n) && n >= 0 && n <= 100 ? n : 255;
-}
-
-/** Shown only once a baseline exists: how far each finish has moved since it was saved. */
-const VARIANCE_COLUMN: Column = {
-  label: "Finish Var.",
-  width: "92px",
-  align: "right",
-  help: "baseline",
-  text: (r, perDay) => {
-    const v = r.finishVarianceMinutes;
-    if (v === null) return "";
-    if (v === 0) return "on plan";
-    return `${v > 0 ? "+" : "−"}${formatDays(Math.abs(v), perDay)}`;
-  },
-};
-
-function columnsFor(hasBaseline: boolean): Column[] {
-  return hasBaseline ? [...COLUMNS, VARIANCE_COLUMN] : COLUMNS;
-}
-/** The columns' combined minimum width: rows and headers never get narrower, so a narrow
- * window scrolls sideways with headers and rows staying in line. */
-const minWidthOf = (cols: Column[]) => cols.reduce((sum, c) => sum + Number(/(\d+)px/.exec(c.width)?.[1] ?? 0), 0);
 
 export interface GridProps {
   snapshot: Snapshot;
@@ -122,6 +27,8 @@ export interface GridProps {
   onPaste: (afterId: string | null, text: string) => Promise<EditResult>;
   /** An edit the person may not make in this team project: why, for a notice. */
   onBlocked?: (reason: string) => void;
+  /** Task Info for a row (from its right-click menu). */
+  onTaskInfo?: (row: Row) => void;
 }
 
 /** What the Gantt chart can ask of the grid. */
@@ -160,14 +67,28 @@ interface Editing {
  * Only visible rows are rendered, so thousands of tasks scroll smoothly.
  */
 export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
-  { snapshot, onEdit, onPaste, onTextEditing, onScrollTop, onSelectionChange, onBlocked },
+  { snapshot, onEdit, onPaste, onTextEditing, onScrollTop, onSelectionChange, onBlocked, onTaskInfo },
   handle,
 ) {
   const rows = snapshot.rows;
   const hasBaseline = snapshot.project.baselineSavedAt !== null;
-  const cols = useMemo(() => columnsFor(hasBaseline), [hasBaseline]);
-  const template = cols.map((c) => c.width).join(" ");
-  const minWidth = minWidthOf(cols);
+  // Which columns, in what order and how wide: the person's choice, kept on this computer.
+  const [layout, setLayoutState] = useState<Layout | null>(loadLayout);
+  const setLayout = (l: Layout | null) => {
+    setLayoutState(l);
+    saveLayout(l);
+  };
+  const ids = layout?.ids ?? defaultColumns(hasBaseline);
+  const widths = layout?.widths ?? {};
+  const cols = useMemo(() => ids.map(columnById).filter((c): c is Column => c !== undefined), [ids.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const widthOf = (c: Column) => widths[c.id] ?? c.width;
+  // The Task Name takes any spare room; the list never gets narrower than its columns, so a
+  // narrow window scrolls sideways with headers and rows in line.
+  const template = cols.map((c) => (c.id === "name" ? `minmax(${widthOf(c)}px, 1fr)` : `${widthOf(c)}px`)).join(" ");
+  const minWidth = cols.reduce((sum, c) => sum + widthOf(c), 0);
+  const NAME_COL = Math.max(0, cols.findIndex((c) => c.id === "name"));
+  const openMenu = useContextMenu();
+  const changeColumns = (next: string[]) => setLayout({ ids: next, widths });
   const colCount = useRef(cols.length);
   colCount.current = cols.length;
   const rowCount = rows.length + 1; // plus the blank row for new tasks
@@ -530,6 +451,81 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
     }
   };
 
+  // Column headers: drag to reorder, drag the right edge to resize, right-click to choose.
+  const [dragCol, setDragCol] = useState<{ id: string; over: string | null } | null>(null);
+  const startResize = (e: React.MouseEvent, c: Column) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const start = widthOf(c);
+    let w = start;
+    const move = (ev: MouseEvent) => {
+      w = Math.max(36, Math.round(start + ev.clientX - startX));
+      setLayoutState({ ids, widths: { ...widths, [c.id]: w } });
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      setLayout({ ids, widths: { ...widths, [c.id]: w } });
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+  const GROUPS = ["General", "Schedule", "Progress", "Cost", "Baseline", "Advanced"] as const;
+  const chooserMenu = (): MenuItem[] => [
+    ...GROUPS.flatMap((g): MenuItem[] => [
+      { heading: g },
+      ...ALL_COLUMNS.filter((c) => c.group === g && !c.fixed).map((c) => ({ label: c.label, checked: ids.includes(c.id), run: () => changeColumns(toggled(ids, c.id)) })),
+    ]),
+    { separator: true },
+    { label: "Reset Columns", run: () => setLayout(null) },
+  ];
+  const columnMenu = (c: Column): MenuItem[] => [
+    ...(c.fixed ? [] : [{ label: `Hide “${c.label}”`, run: () => changeColumns(toggled(ids, c.id)) }, { separator: true } as MenuItem]),
+    ...(widths[c.id] ? [{ label: "Default Width", run: () => setLayout({ ids, widths: Object.fromEntries(Object.entries(widths).filter(([k]) => k !== c.id)) }) }, { separator: true } as MenuItem] : []),
+    ...chooserMenu(),
+  ];
+
+  /** The blank row: start typing a new task there. */
+  const startEditingAt = (i: number) => {
+    moveTo(i, NAME_COL);
+    setEditing({ text: "", error: null });
+  };
+  const mod = isMac ? "⌘" : "Ctrl+";
+  const rowMenu = (r: Row, sel: Row[]): MenuItem[] => {
+    const ids = sel.map((x) => x.id);
+    const one = sel.length === 1;
+    const index = rows.findIndex((x) => x.id === r.id);
+    const above = index > 0 ? rows[index - 1] : null;
+    return [
+      { label: "Insert Task Above", shortcut: isMac ? "⇧⌘↩" : "Ctrl+Shift+Enter", run: () => void send({ kind: "AddTask", afterId: r.id, name: "New task", place: "Above" }) },
+      { label: "Add Task Below", run: () => void send({ kind: "AddTask", afterId: r.id, name: "New task", place: "After" }) },
+      { label: "Add Subtask", run: () => void send({ kind: "AddSubtask", parentId: r.id, name: "New task" }) },
+      { separator: true },
+      { label: one ? "Task Info…" : "Task Info… (first selected)", shortcut: `${mod}I`, run: () => onTaskInfo?.(r) },
+      {
+        label: "Link to the Task Above",
+        disabled: !one || !above || r.isSummary,
+        run: () => {
+          const n = String(index); // row numbers are 1-based: the row above is `index`
+          const list = r.predecessors.trim() ? `${r.predecessors}, ${n}` : n;
+          void send({ kind: "SetPredecessors", id: r.id, text: list });
+        },
+      },
+      { separator: true },
+      { label: "Indent", shortcut: "Tab", run: () => void send({ kind: "Indent", ids }) },
+      { label: "Outdent", shortcut: "⇧Tab", run: () => void send({ kind: "Outdent", ids }) },
+      { label: "Move Up", shortcut: isMac ? "⌃⌘↑" : "Alt+Shift+↑", run: () => void reorder({ kind: "MoveTasks", ids, down: false }, ids) },
+      { label: "Move Down", shortcut: isMac ? "⌃⌘↓" : "Alt+Shift+↓", run: () => void reorder({ kind: "MoveTasks", ids, down: true }, ids) },
+      { separator: true },
+      { heading: "Mark complete" },
+      ...[0, 50, 100].map((n) => ({ label: `${n}%`, checked: one ? r.percentComplete === n : undefined, run: () => void send({ kind: "SetPercentComplete", ids, percent: n }) })),
+      { separator: true },
+      { label: "Duplicate", shortcut: `${mod}D`, run: () => void send({ kind: "DuplicateTasks", ids }) },
+      { label: one ? "Delete Task" : `Delete ${sel.length} Tasks`, shortcut: "⌫", danger: true, run: () => void send({ kind: "DeleteTasks", ids }) },
+    ];
+  };
+
   const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const last = Math.min(rowCount, Math.ceil((scrollTop + viewport) / ROW_HEIGHT) + OVERSCAN);
   const visible: number[] = [];
@@ -548,6 +544,18 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
       tabIndex={0}
       onKeyDown={onGridKey}
     >
+      <button
+        className="column-chooser"
+        title="Choose columns"
+        aria-label="Choose columns"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          openMenu({ clientX: r.left, clientY: r.bottom, preventDefault: () => {}, stopPropagation: () => {} }, chooserMenu());
+        }}
+      >
+        ⊕
+      </button>
       <div className="grid-header-wrap">
         <div
           className="grid-header"
@@ -556,9 +564,41 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
           style={{ gridTemplateColumns: template, height: HEADER_HEIGHT, minWidth: minWidth, transform: `translateX(${-scrollLeft}px)` }}
         >
           {cols.map((c, i) => (
-            <div key={i} role="columnheader" className={c.align === "right" ? "right" : undefined} data-tour={c.tour}>
+            <div
+              key={c.id}
+              role="columnheader"
+              className={[c.align === "right" ? "right" : "", dragCol && dragCol.over === c.id ? "drop-before" : ""].filter(Boolean).join(" ") || undefined}
+              data-tour={c.tour}
+              draggable={!c.fixed || c.id === "name"}
+              title={c.fixed && c.id !== "name" ? undefined : "Drag to move this column; right-click for more columns"}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", c.id);
+                setDragCol({ id: c.id, over: null });
+              }}
+              onDragOver={(e) => {
+                if (!dragCol || i < 2) return;
+                e.preventDefault();
+                if (dragCol.over !== c.id) setDragCol({ ...dragCol, over: c.id });
+              }}
+              onDragEnd={() => setDragCol(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragCol && dragCol.id !== c.id) changeColumns(moved(ids, dragCol.id, c.id));
+                setDragCol(null);
+              }}
+              onContextMenu={(e) => openMenu(e, columnMenu(c))}
+            >
               {c.label}
               {c.help && <HeaderHelp term={c.help} />}
+              {i > 0 && (
+                <span
+                  className="col-resize"
+                  aria-hidden
+                  onMouseDown={(e) => startResize(e, c)}
+                  onDoubleClick={() => setLayout({ ids, widths: Object.fromEntries(Object.entries(widths).filter(([k]) => k !== c.id)) })}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -602,7 +642,8 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                         if (editing && !isEditing) void commit();
                         // The row number is the handle for dragging rows (the whole selection
                         // when this row is part of it).
-                        if (ci === 0 && r && !e.shiftKey) {
+                        if (e.button !== 0) return; // right-click: the menu, keeping the selection
+                        if (c.id === "row" && r && !e.shiftKey) {
                           const ids = selectedIds.has(r.id) && selection.length > 1 ? selection.map((x) => x.id) : [r.id];
                           if (ids.length === 1) moveTo(i, ci);
                           startRowDrag(e.clientY, ids);
@@ -611,7 +652,12 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                         moveTo(i, ci, e.shiftKey);
                       }}
                       onDoubleClick={() => startEditing()}
-                      style={ci === NAME_COL && r ? { paddingLeft: 6 + r.depth * 18 } : undefined}
+                      onContextMenu={(e) => {
+                        if (!r) return openMenu(e, [{ label: "Add Task", run: () => startEditingAt(i) }]);
+                        if (!selectedIds.has(r.id)) moveTo(i, ci);
+                        openMenu(e, rowMenu(r, selectedIds.has(r.id) && selection.length > 1 ? selection : [r]));
+                      }}
+                      style={c.id === "name" && r ? { paddingLeft: 6 + r.depth * 18 } : undefined}
                     >
                       {isEditing ? (
                         <>
@@ -632,7 +678,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                           )}
                         </>
                       ) : (
-                        cellContent(r, i, ci, c, perDay, snapshot.project.currency)
+                        cellContent(r, i, c, perDay, snapshot.project.currency)
                       )}
                     </div>
                   );
@@ -646,12 +692,12 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
   );
 });
 
-function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDay: number, currency: string) {
+function cellContent(r: Row | undefined, i: number, c: Column, perDay: number, currency: string) {
   if (!r) {
-    return ci === NAME_COL ? <span className="placeholder">Type a task name</span> : null;
+    return c.id === "name" ? <span className="placeholder">Type a task name</span> : null;
   }
-  if (ci === 0) return <span className="secondary">{i + 1}</span>;
-  if (ci === 1) {
+  if (c.id === "row") return <span className="secondary">{i + 1}</span>;
+  if (c.id === "indicators") {
     // A marker and a label, not colour alone (spec 5.1.9). A constraint gets its own marker,
     // so a date the user fixed is never hidden.
     const constraint = r.constraint.kind === "ASAP" ? null : `${CONSTRAINTS[r.constraint.kind].label}${r.constraint.date ? ` ${formatDate(r.constraint.date)}` : ""}`;
@@ -685,7 +731,7 @@ function cellContent(r: Row | undefined, i: number, ci: number, c: Column, perDa
       </>
     );
   }
-  if (ci === NAME_COL && r.isMilestone) {
+  if (c.id === "name" && r.isMilestone) {
     return (
       <>
         <span aria-label="Milestone" title="Milestone">◆ </span>

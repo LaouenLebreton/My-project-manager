@@ -589,6 +589,7 @@ export function App() {
               onScrollTop={setScrollTop}
               onSelectionChange={setSelectedIds}
               onBlocked={setNotice}
+              onTaskInfo={setInfoRow}
             />
           </div>
           <div

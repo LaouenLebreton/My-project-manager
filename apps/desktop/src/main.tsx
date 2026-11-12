@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { PortfolioView } from "./PortfolioView";
+import { ContextMenuProvider } from "./ContextMenu";
 import "./styles.css";
 
 // In a plain browser during development, stand in for the Rust backend (see dev/mockBackend.ts).
@@ -16,4 +17,8 @@ function isPortfolioWindow(): boolean {
   return meta?.currentWindow?.label === "portfolio" || new URLSearchParams(location.search).has("portfolio");
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode>{isPortfolioWindow() ? <PortfolioView /> : <App />}</StrictMode>);
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <ContextMenuProvider>{isPortfolioWindow() ? <PortfolioView /> : <App />}</ContextMenuProvider>
+  </StrictMode>,
+);
