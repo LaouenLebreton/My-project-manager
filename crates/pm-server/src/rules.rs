@@ -33,6 +33,12 @@ pub struct Rules {
     /// A status summary in the project's channel every week.
     #[serde(default)]
     pub weekly_summary: Option<Weekly>,
+    /// Post when a task becomes late (due by now and not finished), once per task.
+    #[serde(default)]
+    pub post_when_late: bool,
+    /// Post when a milestone is reached (marked 100%).
+    #[serde(default)]
+    pub post_when_milestone: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,7 +107,7 @@ async fn post(state: &AppState, project: Uuid, set_by: Uuid, body: String) -> Re
 /// project posts when tasks are done.
 pub async fn watch_done(state: &AppState, project: Uuid, p: &Project) -> Option<BTreeSet<TaskId>> {
     match rules_of(state, project).await {
-        Ok(Some((r, _))) if r.post_when_done => Some(open_tasks(p)),
+        Ok(Some((r, _))) if r.post_when_done || r.post_when_milestone => Some(open_tasks(p)),
         _ => None,
     }
 }
@@ -111,22 +117,37 @@ fn open_tasks(p: &Project) -> BTreeSet<TaskId> {
     p.tasks.values().filter(|t| !parents.contains(&t.id) && t.percent_complete.get() < 100).map(|t| t.id).collect()
 }
 
-/// The sentence for tasks that were open before and are complete now, if any.
-pub fn done_text(p: &Project, open_before: &BTreeSet<TaskId>, by: &str) -> Option<String> {
+/// The post for tasks that were open before and are complete now, if any: milestones reached
+/// (with `milestones`) and other tasks done (with `tasks`).
+pub fn done_text(p: &Project, open_before: &BTreeSet<TaskId>, by: &str, tasks: bool, milestones: bool) -> Option<String> {
     let open_now = open_tasks(p);
-    let mut done: Vec<&str> = open_before.iter().filter(|id| !open_now.contains(id)).filter_map(|id| p.tasks.get(id)).map(|t| t.name.as_str()).collect();
-    done.sort_unstable();
-    match done.as_slice() {
-        [] => None,
-        [one] => Some(format!("✅ “{one}” is done (marked by {by}).")),
-        many => Some(format!("✅ {} tasks are done (marked by {by}): {}.", many.len(), quoted(many, 5))),
+    let finished: Vec<&pm_core::Task> = open_before.iter().filter(|id| !open_now.contains(id)).filter_map(|id| p.tasks.get(id)).collect();
+    fn names(list: Vec<&pm_core::Task>) -> Vec<&str> {
+        let mut v: Vec<&str> = list.into_iter().map(|t| t.name.as_str()).collect();
+        v.sort_unstable();
+        v
     }
+    let (reached, done): (Vec<&pm_core::Task>, Vec<&pm_core::Task>) = finished.into_iter().partition(|t| milestones && t.is_milestone);
+    let mut lines = Vec::new();
+    match names(reached).as_slice() {
+        [] => {}
+        [one] => lines.push(format!("◆ Milestone “{one}” reached (marked by {by}).")),
+        many => lines.push(format!("◆ {} milestones reached (marked by {by}): {}.", many.len(), quoted(many, 5))),
+    }
+    if tasks {
+        match names(done).as_slice() {
+            [] => {}
+            [one] => lines.push(format!("✅ “{one}” is done (marked by {by}).")),
+            many => lines.push(format!("✅ {} tasks are done (marked by {by}): {}.", many.len(), quoted(many, 5))),
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 /// After a change: posts about the tasks it completed.
 pub async fn after_change(state: &AppState, project: Uuid, p: &Project, open_before: &BTreeSet<TaskId>, by: &str) {
-    let Some(text) = done_text(p, open_before, by) else { return };
-    if let Ok(Some((_, set_by))) = rules_of(state, project).await {
+    let Ok(Some((rules, set_by))) = rules_of(state, project).await else { return };
+    if let Some(text) = done_text(p, open_before, by, rules.post_when_done, rules.post_when_milestone) {
         let _ = post(state, project, set_by, text).await;
     }
 }
@@ -199,6 +220,9 @@ pub async fn tick(state: &AppState, now: jiff::civil::DateTime) {
     let weekday = now.date().weekday().to_monday_zero_offset() as u8;
     for (project, stored) in all {
         let Ok(rules) = serde_json::from_str::<Rules>(&stored.rules) else { continue };
+        if rules.post_when_late {
+            late_check(state, project, &stored, now).await;
+        }
         let Some(w) = rules.weekly_summary else { continue };
         if w.weekday != weekday || (now.hour() as u8) < w.hour || stored.last_summary.as_deref() == Some(today.as_str()) {
             continue;
@@ -210,6 +234,54 @@ pub async fn tick(state: &AppState, now: jiff::civil::DateTime) {
             let _ = post(state, project, stored.set_by, text).await;
         }
     }
+}
+
+/// When a task becomes late: one post for the tasks that are newly late. The tasks already
+/// posted about are remembered; one that stops being late (finished, or moved) is forgotten, so
+/// it is posted about again if it becomes late again.
+async fn late_check(state: &AppState, project: Uuid, stored: &crate::storage::StoredRules, now: jiff::civil::DateTime) {
+    let at = Moment::from_datetime(now);
+    let Ok(late) = crate::live::with_live(state, project, |live| {
+        let p = &live.project;
+        let Ok(s) = pm_core::schedule(p) else { return Vec::new() };
+        let parents: BTreeSet<TaskId> = p.tasks.values().filter_map(|t| t.parent).collect();
+        let mut late: Vec<(String, String, Moment, String)> = p
+            .tasks
+            .values()
+            .filter(|t| !parents.contains(&t.id) && t.percent_complete.get() < 100)
+            .filter_map(|t| s.tasks.get(&t.id).filter(|ts| ts.early_finish <= at).map(|ts| (t, ts.early_finish)))
+            .map(|(t, finish)| {
+                let people: Vec<&str> = p.assignments.values().filter(|a| a.task == t.id).filter_map(|a| p.resources.get(&a.resource)).map(|r| r.name.as_str()).collect();
+                (t.id.0.to_string(), t.name.clone(), finish, people.join(", "))
+            })
+            .collect();
+        late.sort_by(|a, b| (a.2, &a.1).cmp(&(b.2, &b.1)));
+        late
+    })
+    .await
+    else {
+        return;
+    };
+    let notified: BTreeSet<String> = serde_json::from_str(&stored.late_notified).unwrap_or_default();
+    let current: BTreeSet<String> = late.iter().map(|x| x.0.clone()).collect();
+    let fresh: Vec<&(String, String, Moment, String)> = late.iter().filter(|x| !notified.contains(&x.0)).collect();
+    if current != notified {
+        let json = serde_json::to_string(&current).expect("ids serialize");
+        if db(state, move |s| s.set_late_notified(project, &json)).await.is_err() {
+            return; // not remembered: do not post, or it would be posted again
+        }
+    }
+    let who = |people: &str| if people.is_empty() { String::new() } else { format!(" ({people})") };
+    let text = match fresh.as_slice() {
+        [] => return,
+        [(_, name, finish, people)] => format!("⏰ “{name}” is late: it should have finished on {}{}.", short_date(*finish), who(people)),
+        many => {
+            let list: Vec<String> = many.iter().take(5).map(|(_, name, finish, _)| format!("“{name}” ({})", short_date(*finish))).collect();
+            let more = if many.len() > 5 { format!(", and {} more", many.len() - 5) } else { String::new() };
+            format!("⏰ {} tasks are late: {}{more}.", many.len(), list.join(", "))
+        }
+    };
+    let _ = post(state, project, stored.set_by, text).await;
 }
 
 /// Runs the weekly summaries: checks once a minute.

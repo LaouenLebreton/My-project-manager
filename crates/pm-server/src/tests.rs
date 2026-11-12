@@ -505,8 +505,8 @@ async fn rules_post_when_tasks_are_done_and_send_a_weekly_summary() {
 
     // No rules yet; only the owner sets them.
     let (status, none) = call(&app, "GET", &rules_path, Some(&p[1].0), None).await;
-    assert_eq!((status, none), (StatusCode::OK, json!({ "postWhenDone": false, "weeklySummary": null })));
-    let rules = json!({ "postWhenDone": true, "weeklySummary": { "weekday": 0, "hour": 9 } });
+    assert_eq!((status, none), (StatusCode::OK, json!({ "postWhenDone": false, "weeklySummary": null, "postWhenLate": false, "postWhenMilestone": false })));
+    let rules = json!({ "postWhenDone": true, "weeklySummary": { "weekday": 0, "hour": 9 }, "postWhenLate": false, "postWhenMilestone": false });
     let (status, body) = call(&app, "PUT", &rules_path, Some(&p[1].0), Some(rules.clone())).await;
     assert_eq!((status, body["message"].as_str()), (StatusCode::FORBIDDEN, Some("only the project's owner can change its rules")));
     let (status, _) = call(&app, "PUT", &rules_path, Some(&p[0].0), Some(json!({ "postWhenDone": true, "weeklySummary": { "weekday": 7, "hour": 9 } }))).await;
@@ -661,4 +661,38 @@ async fn portfolio_groups_are_shared_by_the_team() {
     let (_, s) = call(&app, "POST", "/api/sessions", None, Some(json!({ "email": "kim@example.com", "password": "a long enough password" }))).await;
     let (status, _) = call(&app, "PUT", &path, Some(s["token"].as_str().unwrap()), Some(json!({ "group": "Mine" }))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn rules_post_when_a_task_becomes_late_and_when_a_milestone_is_reached() {
+    let storage = Arc::new(SqliteStorage::in_memory().unwrap());
+    let state = AppState { storage: storage.clone(), hub: Arc::default(), config: Arc::default() };
+    let app = router(state.clone());
+    let p = people(&app).await;
+    let (id, task) = shared(&app, &p).await;
+    let pid: uuid::Uuid = id.parse().unwrap();
+    let rules = json!({ "postWhenDone": false, "weeklySummary": null, "postWhenLate": true, "postWhenMilestone": true });
+    let (status, saved) = call(&app, "PUT", &format!("/api/projects/{id}/rules"), Some(&p[0].0), Some(rules.clone())).await;
+    assert_eq!((status, saved), (StatusCode::OK, rules));
+    let channel = storage.project_channel(pid).unwrap().unwrap();
+    let posts = || storage.posts(channel.id, None, 50).unwrap();
+    let before = posts().len();
+
+    // "Survey" (2 days from Monday 5 October) should have finished on Tuesday 6 October.
+    let at = |d: i8, h: i8| jiff::civil::date(2026, 10, d).at(h, 0, 0, 0);
+    rules::tick(&state, at(6, 12)).await;
+    assert_eq!(posts().len(), before, "not late yet");
+    rules::tick(&state, at(7, 9)).await;
+    let list = posts();
+    assert_eq!(list.len(), before + 1);
+    assert!(list[0].body.starts_with("⏰ “Survey” is late"), "{}", list[0].body);
+    rules::tick(&state, at(7, 10)).await;
+    assert_eq!(posts().len(), before + 1, "once");
+
+    // As a milestone, marking it done says the milestone is reached.
+    let edit = |command: Value| json!({ "clientChange": uuid::Uuid::now_v7().to_string(), "command": command });
+    call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(json!({ "type": "SetTask", "id": task, "change": { "field": "Milestone", "value": true } })))).await;
+    call(&app, "POST", &format!("/api/projects/{id}/changes"), Some(&p[1].0), Some(edit(json!({ "type": "SetTask", "id": task, "change": { "field": "PercentComplete", "value": 100 } })))).await;
+    let list = posts();
+    assert_eq!(list[0].body, "◆ Milestone “Survey” reached (marked by Alex).");
 }

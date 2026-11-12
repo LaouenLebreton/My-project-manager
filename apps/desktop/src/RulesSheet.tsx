@@ -64,6 +64,20 @@ export function RulesSheet({ snapshot, onClose }: { snapshot: Snapshot; onClose:
           </span>
         </label>
         <label className="rule">
+          <input type="checkbox" checked={rules.postWhenMilestone} onChange={(e) => set({ postWhenMilestone: e.target.checked })} />
+          <span>
+            <strong>When a milestone is reached</strong>
+            <span className="secondary small">When a milestone is marked 100%, post for example: ◆ Milestone “Design approved” reached (marked by Alex).</span>
+          </span>
+        </label>
+        <label className="rule">
+          <input type="checkbox" checked={rules.postWhenLate} onChange={(e) => set({ postWhenLate: e.target.checked })} />
+          <span>
+            <strong>When a task becomes late</strong>
+            <span className="secondary small">Once per task, when its finish date passes before it is done: ⏰ “Survey” is late: it should have finished on 7 Oct (Sam).</span>
+          </span>
+        </label>
+        <label className="rule">
           <input type="checkbox" checked={weekly !== null} onChange={(e) => set({ weeklySummary: e.target.checked ? { weekday: 0, hour: 9 } : null })} />
           <span>
             <strong>Weekly status summary</strong>

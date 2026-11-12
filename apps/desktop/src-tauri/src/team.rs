@@ -609,6 +609,12 @@ pub struct ProjectRules {
     pub post_when_done: bool,
     /// A status summary in the project's channel every week.
     pub weekly_summary: Option<WeeklySummary>,
+    /// Post once when a task becomes late (due by now and not finished).
+    #[serde(default)]
+    pub post_when_late: bool,
+    /// Post when a milestone is reached (marked 100%).
+    #[serde(default)]
+    pub post_when_milestone: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]

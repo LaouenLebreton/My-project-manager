@@ -208,6 +208,7 @@ pub trait Storage: Send + Sync + 'static {
     /// Every project that has rules.
     fn all_rules(&self) -> Result<Vec<(Uuid, StoredRules)>>;
     fn set_last_summary(&self, project: Uuid, day: &str) -> Result<()>;
+    fn set_late_notified(&self, project: Uuid, ids: &str) -> Result<()>;
     /// The portfolio group of a project, for the whole team; `None` takes it out.
     fn set_portfolio_group(&self, project: Uuid, group: Option<&str>) -> Result<()>;
     /// The chat channel that belongs to a team project.
@@ -219,6 +220,8 @@ pub struct StoredRules {
     pub rules: String,
     pub set_by: Uuid,
     pub last_summary: Option<String>,
+    /// Task ids already posted about as late (JSON list).
+    pub late_notified: String,
 }
 
 /// Forward-only migrations; `PRAGMA user_version` holds the version.
@@ -352,6 +355,10 @@ const MIGRATIONS: &[&str] = &[
     // 9 -> 10: portfolio groups shared by the team (iteration 5).
     r#"
     ALTER TABLE project ADD COLUMN portfolio_group TEXT;
+    "#,
+    // 10 -> 11: tasks already posted about as late (the "when a task becomes late" rule).
+    r#"
+    ALTER TABLE project_rules ADD COLUMN late_notified TEXT NOT NULL DEFAULT '';
     "#,
 ];
 
@@ -866,8 +873,8 @@ impl Storage for SqliteStorage {
     fn rules(&self, project: Uuid) -> Result<Option<StoredRules>> {
         Ok(self
             .conn()
-            .query_row("SELECT rules, set_by, last_summary FROM project_rules WHERE project_id = ?1", [project.to_string()], |r| {
-                Ok(StoredRules { rules: r.get(0)?, set_by: uuid_at(r, 1)?, last_summary: r.get(2)? })
+            .query_row("SELECT rules, set_by, last_summary, late_notified FROM project_rules WHERE project_id = ?1", [project.to_string()], |r| {
+                Ok(StoredRules { rules: r.get(0)?, set_by: uuid_at(r, 1)?, last_summary: r.get(2)?, late_notified: r.get(3)? })
             })
             .optional()?)
     }
@@ -883,13 +890,18 @@ impl Storage for SqliteStorage {
 
     fn all_rules(&self) -> Result<Vec<(Uuid, StoredRules)>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT project_id, rules, set_by, last_summary FROM project_rules")?;
-        let rows = stmt.query_map([], |r| Ok((uuid_at(r, 0)?, StoredRules { rules: r.get(1)?, set_by: uuid_at(r, 2)?, last_summary: r.get(3)? })))?;
+        let mut stmt = conn.prepare("SELECT project_id, rules, set_by, last_summary, late_notified FROM project_rules")?;
+        let rows = stmt.query_map([], |r| Ok((uuid_at(r, 0)?, StoredRules { rules: r.get(1)?, set_by: uuid_at(r, 2)?, last_summary: r.get(3)?, late_notified: r.get(4)? })))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     fn set_last_summary(&self, project: Uuid, day: &str) -> Result<()> {
         self.conn().execute("UPDATE project_rules SET last_summary = ?2 WHERE project_id = ?1", params![project.to_string(), day])?;
+        Ok(())
+    }
+
+    fn set_late_notified(&self, project: Uuid, ids: &str) -> Result<()> {
+        self.conn().execute("UPDATE project_rules SET late_notified = ?2 WHERE project_id = ?1", params![project.to_string(), ids])?;
         Ok(())
     }
 

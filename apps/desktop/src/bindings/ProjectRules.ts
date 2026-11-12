@@ -12,4 +12,12 @@ postWhenDone: boolean,
 /**
  * A status summary in the project's channel every week.
  */
-weeklySummary: WeeklySummary | null, };
+weeklySummary: WeeklySummary | null, 
+/**
+ * Post once when a task becomes late (due by now and not finished).
+ */
+postWhenLate: boolean, 
+/**
+ * Post when a milestone is reached (marked 100%).
+ */
+postWhenMilestone: boolean, };

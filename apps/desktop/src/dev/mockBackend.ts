@@ -136,7 +136,12 @@ function sampleReport() {
 
 
 /** Automation rules of the mock team project. */
-let mockRules: { postWhenDone: boolean; weeklySummary: { weekday: number; hour: number } | null } = { postWhenDone: true, weeklySummary: null };
+let mockRules: { postWhenDone: boolean; weeklySummary: { weekday: number; hour: number } | null; postWhenLate: boolean; postWhenMilestone: boolean } = {
+  postWhenDone: true,
+  weeklySummary: null,
+  postWhenLate: true,
+  postWhenMilestone: false,
+};
 
 /** Portfolio groups chosen in this session. */
 const portfolioGroups: Record<string, string> = { "/Users/me/Office move.pmproj": "Clients", "/Users/me/Website relaunch.pmproj": "Clients" };

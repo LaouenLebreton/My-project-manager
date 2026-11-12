@@ -27,7 +27,7 @@ its own, test-first, in this order.
 ## C. Teams
 
 12. **[Done]** **Portfolio groups shared by the team** (stored on the team server).
-13. **More automation:** when a task becomes late, when a milestone is reached.
+13. **[Done]** **More automation:** when a task becomes late (once per task; posted again if it becomes late again after being fixed), when a milestone is reached. Server storage version 11.
 14. **Invitations by email:** the server sends them when it has a mail account (SMTP settings);
     without one, invites are copied and sent by hand as now.
 15. **Hosting the team server online:** needs the owner's hosting account (`docs/deploy.md`).
