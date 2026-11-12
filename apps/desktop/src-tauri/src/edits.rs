@@ -1715,7 +1715,7 @@ mod tests {
         };
         run(&mut p, edit(vec![false, false, false, false, true, false, false], &[("2026-12-24", "2026-12-26"), ("2027-01-04", "")]));
         let a = &p.resources.values().next().unwrap().availability;
-        assert_eq!(a.off_weekdays[4], true);
+        assert!(a.off_weekdays[4]);
         assert_eq!(a.days_off.len(), 4);
         let e = plan(&p, None, &Units::default(), edit(vec![true; 7], &[])).err().unwrap();
         assert_eq!(e.message, "choose at least one day of the week they work");
