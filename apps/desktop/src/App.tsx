@@ -175,6 +175,15 @@ export function App() {
     if (view === "chat") setChatUnread(0);
   }, [view]);
   const pendingRow = useRef<number | null>(null);
+  // A task-list command chosen from another view: it runs once the Gantt Chart is showing.
+  const pendingGrid = useRef<((g: GridHandle) => void) | null>(null);
+  const onGrid = useCallback((action: (g: GridHandle) => void) => {
+    if (viewRef.current === "tasks" && gridRef.current) action(gridRef.current);
+    else {
+      pendingGrid.current = action;
+      setView("tasks");
+    }
+  }, []);
   const showTask = useCallback((row: number) => {
     pendingRow.current = row - 1;
     setView("tasks");
@@ -184,6 +193,10 @@ export function App() {
     if (view === "tasks" && pendingRow.current !== null) {
       gridRef.current?.selectRow(pendingRow.current);
       pendingRow.current = null;
+    }
+    if (view === "tasks" && pendingGrid.current && gridRef.current) {
+      pendingGrid.current(gridRef.current);
+      pendingGrid.current = null;
     }
   }, [view]);
   const textEditing = useCallback((editing: boolean) => {
@@ -249,8 +262,8 @@ export function App() {
         if (e.payload === "view.history") setView("history");
         if (e.payload === "view.dashboard") setView("dashboard");
         if (e.payload === "view.chat") setView("chat");
-        if (e.payload === "task.insert") gridRef.current?.insertTask();
-        if (e.payload === "task.add_subtask") gridRef.current?.addSubtask();
+        if (e.payload === "task.insert") onGrid((g) => g.insertTask());
+        if (e.payload === "task.add_subtask") onGrid((g) => g.addSubtask());
         if (e.payload === "view.details") setDetailsOpenState((o) => {
           writeFlag(DETAILS_KEY, !o);
           return !o;
@@ -260,11 +273,11 @@ export function App() {
         if (e.payload === "edit.undo_history") setOverlay("undo");
         if (e.payload === "project.status_report") setOverlay("report");
         if (e.payload === "file.print") setOverlay("print");
-        if (e.payload === "task.indent") gridRef.current?.indent(false);
-        if (e.payload === "task.outdent") gridRef.current?.indent(true);
-        if (e.payload === "task.move_up") gridRef.current?.moveRows(false);
-        if (e.payload === "task.duplicate") gridRef.current?.duplicate();
-        if (e.payload === "task.move_down") gridRef.current?.moveRows(true);
+        if (e.payload === "task.indent") onGrid((g) => g.indent(false));
+        if (e.payload === "task.outdent") onGrid((g) => g.indent(true));
+        if (e.payload === "task.move_up") onGrid((g) => g.moveRows(false));
+        if (e.payload === "task.duplicate") onGrid((g) => g.duplicate());
+        if (e.payload === "task.move_down") onGrid((g) => g.moveRows(true));
         if (e.payload === "project.info") setOverlay("project");
         if (e.payload === "project.working_time") setOverlay("working");
         if (e.payload === "project.level") void editRef.current({ kind: "LevelResources" }).catch((err) => setError(errorMessage(err)));
@@ -321,9 +334,9 @@ export function App() {
       { name: "Open Portfolio (all projects)", shortcut: "⌘0", run: () => void openPortfolio() },
       { name: "New Tab (open or create another project)", shortcut: "⌘T", run: () => void openNewTab() },
       { name: "Home (start page)", run: () => void openHome() },
-      { name: "Add Task (below the selected one)", run: () => gridRef.current?.addTaskBelow() },
-      { name: "Insert Task (above the selected one)", shortcut: "⇧⌘↩", run: () => gridRef.current?.insertTask() },
-      { name: "Add Subtask (inside the selected task)", run: () => gridRef.current?.addSubtask() },
+      { name: "Add Task (below the selected one)", run: () => onGrid((g) => g.addTaskBelow()) },
+      { name: "Insert Task (above the selected one)", shortcut: "⇧⌘↩", run: () => onGrid((g) => g.insertTask()) },
+      { name: "Add Subtask (inside the selected task)", run: () => onGrid((g) => g.addSubtask()) },
       { name: "Find Task…", shortcut: "⌘F", run: () => setFinding(true) },
       { name: detailsOpen ? "Hide Task Details" : "Show Task Details (everything about the selected task)", shortcut: "⇧⌘D", run: () => setDetailsOpen(!detailsOpen) },
       { name: "Task Info…", shortcut: "⌘I", run: () => setInfoRow(gridRef.current?.activeRow() ?? null) },
