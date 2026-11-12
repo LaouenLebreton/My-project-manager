@@ -58,8 +58,15 @@ jobs:
             publisher: choose **More info → Run anyway**.
 
             **macOS (Apple silicon):** download the `.dmg`, open it and drag Super PM to Applications.
-            The app is not notarized yet: the first time, right-click it in Applications and choose **Open**.
+            The app is not notarized by Apple yet, so the first time macOS refuses to open it. Open
+            **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to
+            Super PM. (Or, in Terminal: `xattr -dr com.apple.quarantine "/Applications/Super PM.app"`.)
 
             Super PM is free software under the GNU AGPL 3.0.
           releaseDraft: false
           prerelease: true
+      # A Mac app whose signature does not cover the whole bundle is reported as "damaged" when
+      # downloaded: check it before people get it.
+      - name: Check the Mac app's signature
+        if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 "target/release/bundle/macos/Super PM.app"
