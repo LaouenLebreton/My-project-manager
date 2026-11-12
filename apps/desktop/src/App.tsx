@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Dashboard, ProgressBar } from "./Dashboard";
 import { StatusReport } from "./StatusReport";
 import { FirstSteps } from "./FirstSteps";
-import { FILTERS, filterRows, type TaskFilter } from "./filter";
+import { FILTERS, collapseRows, collapsedForLevels, filterRows, type TaskFilter } from "./filter";
 import { isMac, keys } from "./platform";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
@@ -50,7 +50,8 @@ export function App() {
   const selectedRef = useRef(selectedIds);
   selectedRef.current = selectedIds;
   const [message, setMessage] = useState<string | null>(null);
-  const [gridWidth, setGridWidth] = useState(720);
+  // The task list starts at about 40% of the window, leaving the chart room beside the details.
+  const [gridWidth, setGridWidth] = useState(() => Math.round(Math.max(420, Math.min(720, window.innerWidth * 0.4))));
   const [timing, setTiming] = useState<string | null>(null);
   const gridRef = useRef<GridHandle>(null);
 
@@ -61,7 +62,23 @@ export function App() {
   const [finding, setFinding] = useState(false);
   // The task list's filter; the chart shows the same rows.
   const [filter, setFilter] = useState<TaskFilter>("all");
-  const shown = useMemo(() => (snapshot && filter !== "all" ? { ...snapshot, rows: filterRows(snapshot.rows, filter) } : snapshot), [snapshot, filter]);
+  // Summaries whose tasks are hidden in the list and the chart (the outline).
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCollapsed = useCallback((id: string) => {
+    setCollapsed((c) => {
+      const next = new Set(c);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+  const shown = useMemo(() => {
+    if (!snapshot) return snapshot;
+    const filtered = filter !== "all" ? filterRows(snapshot.rows, filter) : snapshot.rows;
+    const rows = collapseRows(filtered, collapsed);
+    return rows === snapshot.rows ? snapshot : { ...snapshot, rows };
+  }, [snapshot, filter, collapsed]);
+  // Row numbers stay those of the whole project (predecessors refer to them), whatever is hidden.
+  const rowNumbers = useMemo(() => new Map(snapshot?.rows.map((r, i) => [r.id, i + 1]) ?? []), [snapshot]);
   const [view, setView] = useState<View>("tasks");
   // The task details panel beside the Gantt Chart and the WBS (remembered on this computer).
   const [detailsOpen, setDetailsOpenState] = useState(() => readFlag(DETAILS_KEY, true));
@@ -591,6 +608,26 @@ export function App() {
               )}
             </select>
           </label>
+          {snapshot.rows.some((r) => r.isSummary) && (
+            <label>
+              Levels{" "}
+              <select
+                aria-label="Outline levels shown"
+                value={collapsed.size === 0 ? "all" : ""}
+                onChange={(e) => setCollapsed(e.target.value === "all" ? new Set() : collapsedForLevels(snapshot.rows, Number(e.target.value)))}
+              >
+                <option value="all">All</option>
+                <option value="" disabled hidden>
+                  Some
+                </option>
+                {[1, 2, 3].filter((n) => snapshot.rows.some((r) => r.isSummary && r.depth >= n - 1)).map((n) => (
+                  <option key={n} value={n}>
+                    Level {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {filter !== "all" && (
             <>
               <span className="secondary small">
@@ -614,6 +651,9 @@ export function App() {
               onSelectionChange={setSelectedIds}
               onBlocked={setNotice}
               onTaskInfo={setInfoRow}
+              rowNumbers={rowNumbers}
+              collapsed={collapsed}
+              onToggleCollapsed={toggleCollapsed}
             />
           </div>
           <div

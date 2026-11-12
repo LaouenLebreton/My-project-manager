@@ -29,6 +29,11 @@ export interface GridProps {
   onBlocked?: (reason: string) => void;
   /** Task Info for a row (from its right-click menu). */
   onTaskInfo?: (row: Row) => void;
+  /** Each task's number in the whole project (rows may be hidden by a filter or the outline). */
+  rowNumbers?: Map<string, number>;
+  /** Summaries whose tasks are hidden, and showing or hiding them. */
+  collapsed?: ReadonlySet<string>;
+  onToggleCollapsed?: (id: string) => void;
 }
 
 /** What the Gantt chart can ask of the grid. */
@@ -69,7 +74,7 @@ interface Editing {
  * Only visible rows are rendered, so thousands of tasks scroll smoothly.
  */
 export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
-  { snapshot, onEdit, onPaste, onTextEditing, onScrollTop, onSelectionChange, onBlocked, onTaskInfo },
+  { snapshot, onEdit, onPaste, onTextEditing, onScrollTop, onSelectionChange, onBlocked, onTaskInfo, rowNumbers, collapsed, onToggleCollapsed },
   handle,
 ) {
   const rows = snapshot.rows;
@@ -397,9 +402,18 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
         moveTo(e.metaKey || e.ctrlKey ? rowCount - 1 : row + 1, active.col, shift);
         break;
       case "ArrowLeft":
+        // ⌥← hides a summary's tasks; ⌥→ shows them.
+        if (e.altKey && current?.isSummary) {
+          if (!collapsed?.has(current.id)) onToggleCollapsed?.(current.id);
+          break;
+        }
         moveTo(row, e.metaKey || e.ctrlKey ? 0 : active.col - 1);
         break;
       case "ArrowRight":
+        if (e.altKey && current?.isSummary) {
+          if (collapsed?.has(current.id)) onToggleCollapsed?.(current.id);
+          break;
+        }
         moveTo(row, e.metaKey || e.ctrlKey ? cols.length - 1 : active.col + 1);
         break;
       case "PageUp":
@@ -516,7 +530,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
         label: "Link to the Task Above",
         disabled: !one || !above || r.isSummary,
         run: () => {
-          const n = String(index); // row numbers are 1-based: the row above is `index`
+          const n = String(rowNumbers?.get(above!.id) ?? index); // the number shown in the # column
           const list = r.predecessors.trim() ? `${r.predecessors}, ${n}` : n;
           void send({ kind: "SetPredecessors", id: r.id, text: list });
         },
@@ -666,7 +680,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                         if (!selectedIds.has(r.id)) moveTo(i, ci);
                         openMenu(e, rowMenu(r, selectedIds.has(r.id) && selection.length > 1 ? selection : [r]));
                       }}
-                      style={c.id === "name" && r ? { paddingLeft: 6 + r.depth * 18 } : undefined}
+                      style={c.id === "name" && r ? { paddingLeft: (r.isSummary ? 2 : 20) + r.depth * 18 } : undefined}
                     >
                       {isEditing ? (
                         <>
@@ -687,7 +701,7 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
                           )}
                         </>
                       ) : (
-                        cellContent(r, i, c, perDay, snapshot.project.currency)
+                        cellContent(r, rowNumbers?.get(r?.id ?? "") ?? i + 1, c, perDay, snapshot.project.currency, r?.isSummary ? { collapsed: collapsed?.has(r.id) ?? false, toggle: () => onToggleCollapsed?.(r.id) } : null)
                       )}
                     </div>
                   );
@@ -701,11 +715,29 @@ export const Grid = forwardRef<GridHandle, GridProps>(function Grid(
   );
 });
 
-function cellContent(r: Row | undefined, i: number, c: Column, perDay: number, currency: string) {
+function cellContent(r: Row | undefined, number: number, c: Column, perDay: number, currency: string, outline: { collapsed: boolean; toggle: () => void } | null) {
   if (!r) {
     return c.id === "name" ? <span className="placeholder">Type a task name</span> : null;
   }
-  if (c.id === "row") return <span className="secondary">{i + 1}</span>;
+  if (c.id === "row") return <span className="secondary">{number}</span>;
+  if (c.id === "name" && outline) {
+    return (
+      <>
+        <button
+          className="outline-toggle"
+          aria-label={outline.collapsed ? `Show the tasks in ${r.name}` : `Hide the tasks in ${r.name}`}
+          aria-expanded={!outline.collapsed}
+          title={outline.collapsed ? "Show the tasks inside (⌥→)" : "Hide the tasks inside (⌥←)"}
+          tabIndex={-1}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={outline.toggle}
+        >
+          {outline.collapsed ? "▸" : "▾"}
+        </button>
+        {r.name}
+      </>
+    );
+  }
   if (c.id === "indicators") {
     // A marker and a label, not colour alone (spec 5.1.9). A constraint gets its own marker,
     // so a date the user fixed is never hidden.

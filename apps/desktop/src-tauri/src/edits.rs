@@ -295,7 +295,7 @@ pub fn plan(p: &Project, schedule: Option<&Schedule>, units: &Units, edit: Edit)
                 }
                 (Some(a), AddPlace::Above) => {
                     let keys = child_keys(p, a.parent);
-                    (a.parent, keys.iter().copied().filter(|k| **k < a.sort_key).next_back(), Some(&a.sort_key))
+                    (a.parent, keys.iter().copied().rfind(|k| **k < a.sort_key), Some(&a.sort_key))
                 }
                 (None, _) | (_, AddPlace::End) => (None, child_keys(p, None).last().copied(), None),
             };

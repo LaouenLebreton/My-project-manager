@@ -2824,3 +2824,16 @@ dialog.status-report {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.outline-toggle {
+  all: unset;
+  display: inline-block;
+  width: 16px;
+  margin-right: 2px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: default;
+}
+.outline-toggle:hover {
+  color: AccentColor;
+}

@@ -62,3 +62,25 @@ export function filterRows(rows: Row[], filter: TaskFilter, now = nowText()): Ro
   }
   return rows.filter((r) => keep.has(r.id));
 }
+
+/** The rows left once the tasks inside collapsed summaries are hidden (the outline, as in
+ * Microsoft Project). */
+export function collapseRows(rows: Row[], collapsed: ReadonlySet<string>): Row[] {
+  if (!collapsed.size) return rows;
+  const out: Row[] = [];
+  let hideBelow: number | null = null;
+  for (const r of rows) {
+    if (hideBelow !== null) {
+      if (r.depth > hideBelow) continue;
+      hideBelow = null;
+    }
+    out.push(r);
+    if (r.isSummary && collapsed.has(r.id)) hideBelow = r.depth;
+  }
+  return out;
+}
+
+/** The summaries to collapse so that `levels` outline levels show (Show > Level 1, 2…). */
+export function collapsedForLevels(rows: Row[], levels: number): Set<string> {
+  return new Set(rows.filter((r) => r.isSummary && r.depth >= levels - 1).map((r) => r.id));
+}
